@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/audio-core",
+  "crates/desktop-backend",
+  "crates/desktop-ui",
+  "crates/macos-capture",
+  "crates/session-core"
+]
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/susura/susura"
+rust-version = "1.83"
+
+[workspace.dependencies]
+base64 = "0.22"
+cpal = "0.17"
+ctrlc = "3"
+dioxus = { version = "=0.8.0-alpha.0", default-features = false, features = ["minimal"] }
+dioxus-native = { version = "=0.8.0-alpha.0" }
+libc = "0.2"
+rubato = "0.16"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+transcribe-rs = { version = "0.3.11", default-features = false, features = ["onnx"] }
