@@ -284,6 +284,21 @@ textarea,
     background: var(--handle-surface);
   }
 
+  .susura-handle-icon {
+    background: currentColor;
+    display: block;
+    height: 24px;
+    mask-image: var(--susura-handle-icon-url);
+    mask-position: center;
+    mask-repeat: no-repeat;
+    mask-size: 125% 125%;
+    width: 24px;
+    -webkit-mask-image: var(--susura-handle-icon-url);
+    -webkit-mask-position: center;
+    -webkit-mask-repeat: no-repeat;
+    -webkit-mask-size: 125% 125%;
+  }
+
   .susura-handle-button:focus-visible {
     outline: 2px solid color-mix(in oklch, var(--foreground) 36%, transparent);
     outline-offset: 3px;

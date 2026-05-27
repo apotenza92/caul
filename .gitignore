@@ -4,6 +4,7 @@ dist-electron/
 release/
 .vite/
 .DS_Store
+*.af~lock~
 test-results/
 
 target/

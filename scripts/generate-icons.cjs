@@ -8,6 +8,7 @@ const sharp = require('sharp');
 
 const rootDir = path.resolve(__dirname, '..');
 const iconsDir = path.join(rootDir, 'assets', 'icons');
+const markSource = path.join(iconsDir, 'susura-mark.svg');
 
 const palettes = {
   stable: {
@@ -44,22 +45,22 @@ const variants = [
   {
     dir: iconsDir,
     palette: palettes.stable,
-    source: path.join(iconsDir, 'susura-ear.svg')
+    source: markSource
   },
   {
     dir: path.join(iconsDir, 'beta'),
     palette: palettes.beta,
-    source: path.join(iconsDir, 'susura-ear-beta.svg')
+    source: markSource
   },
   {
     dir: path.join(iconsDir, 'dark'),
     palette: palettes.stableDark,
-    source: path.join(iconsDir, 'susura-ear.svg')
+    source: markSource
   },
   {
     dir: path.join(iconsDir, 'beta', 'dark'),
     palette: palettes.betaDark,
-    source: path.join(iconsDir, 'susura-ear-beta.svg')
+    source: markSource
   }
 ];
 
@@ -116,15 +117,46 @@ function renderBackgroundSvg(size, palette, backgroundScale) {
 </svg>`;
 }
 
+function hexToRgb(hex) {
+  const normalised = hex.replace('#', '');
+  return {
+    r: Number.parseInt(normalised.slice(0, 2), 16),
+    g: Number.parseInt(normalised.slice(2, 4), 16),
+    b: Number.parseInt(normalised.slice(4, 6), 16)
+  };
+}
+
+async function renderGlyph(svgBuffer, size, colour) {
+  const { r, g, b } = hexToRgb(colour);
+  const { data, info } = await sharp(svgBuffer)
+    .resize(size, size, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  for (let index = 0; index < data.length; index += 4) {
+    data[index] = r;
+    data[index + 1] = g;
+    data[index + 2] = b;
+  }
+
+  return sharp(data, {
+    raw: {
+      width: info.width,
+      height: info.height,
+      channels: 4
+    }
+  })
+    .png()
+    .toBuffer();
+}
+
 async function renderIcon(svgBuffer, size, outputPath, palette, backgroundScale = 0.83, glyphScale = 0.62) {
   const backgroundSvg = renderBackgroundSvg(size, palette, backgroundScale);
   const glyphSize = Math.floor(size * glyphScale);
   const glyphPaddingX = Math.floor((size - glyphSize) / 2);
   const glyphPaddingY = Math.floor((size - glyphSize) / 2) + Math.floor(size * 0.018);
-  const glyph = await sharp(svgBuffer)
-    .resize(glyphSize, glyphSize, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
-    .png()
-    .toBuffer();
+  const glyph = await renderGlyph(svgBuffer, glyphSize, '#ffffff');
 
   await sharp(Buffer.from(backgroundSvg))
     .composite([{ input: glyph, left: glyphPaddingX, top: glyphPaddingY }])

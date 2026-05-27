@@ -38,8 +38,9 @@ import {
   TooltipTrigger
 } from '@/components/ui/tooltip';
 import { Textarea } from '@/components/ui/textarea';
-import { ChevronDownIcon, CopyIcon, DownloadIcon, EarIcon, FileIcon, FileTextIcon, ImageIcon, LoaderCircleIcon, PaperclipIcon, PencilIcon, PlayIcon, SearchIcon, SendIcon, SettingsIcon, SquareIcon, XIcon } from 'lucide-react';
+import { ChevronDownIcon, CopyIcon, DownloadIcon, FileIcon, FileTextIcon, ImageIcon, LoaderCircleIcon, PaperclipIcon, PencilIcon, PlayIcon, SearchIcon, SendIcon, SettingsIcon, SquareIcon, XIcon } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import susuraMarkUrl from '../assets/icons/susura-mark.svg?url';
 import {
   getLlmBridge,
   getPermissionsBridge,
@@ -170,6 +171,9 @@ const initialPermissionRequestKey = 'susura.initial-permission-requested';
 const handleDragThresholdPx = 6;
 const handleSnapVisualDurationMs = 280;
 const privateOverlayHandleSizePx = 32;
+const handleIconStyle = {
+  '--susura-handle-icon-url': `url("${susuraMarkUrl}")`
+} as React.CSSProperties;
 
 type OverlayEdge = 'bottom' | 'left' | 'right' | 'top';
 type TooltipSide = NonNullable<React.ComponentProps<typeof TooltipContent>['side']>;
@@ -1104,7 +1108,7 @@ function PrivateOverlayHandleSurface() {
         title="Toggle Susura app"
         type="button"
       >
-        <EarIcon aria-hidden="true" className="size-5" strokeWidth={2.4} />
+        <span aria-hidden="true" className="susura-handle-icon" style={handleIconStyle} />
       </button>
     </main>
   );

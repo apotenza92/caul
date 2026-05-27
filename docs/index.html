@@ -321,6 +321,7 @@
 
     <script>
       const repo = "apotenza92/susura";
+      const assetPrefix = location.pathname.includes("/docs/") ? ".." : ".";
       const downloads = {
         stable: {
           arm: `https://github.com/${repo}/releases/latest/download/Susura-macos-arm64.zip`,
@@ -376,8 +377,8 @@
 
         document.body.classList.toggle("beta-mode", state.channel === "beta");
         icon.src = state.channel === "beta"
-          ? "assets/icons/beta/icon-rounded.png"
-          : "assets/icons/icon-rounded.png";
+          ? `${assetPrefix}/assets/icons/beta/icon-rounded.png`
+          : `${assetPrefix}/assets/icons/icon-rounded.png`;
 
         setActive(".channel-btn", `channel-${state.channel}`);
         setActive(".platform-btn", `platform-${state.platform}`);

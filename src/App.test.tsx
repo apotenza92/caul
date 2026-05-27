@@ -148,7 +148,8 @@ describe('App', () => {
     render(<App />);
 
     expect(screen.getByLabelText('Susura overlay handle')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Toggle Susura app' }).querySelector('svg')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Toggle Susura app' }).querySelector('.susura-handle-icon')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Toggle Susura app' }).querySelector('svg')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Toggle Susura app' })).not.toHaveTextContent('S');
     expect(screen.getByRole('button', { name: 'Toggle Susura app' })).toHaveAttribute('data-open', 'false');
     await user.click(screen.getByRole('button', { name: 'Toggle Susura app' }));
