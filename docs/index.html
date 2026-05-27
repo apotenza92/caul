@@ -385,6 +385,9 @@
 
         if (state.platform !== "mac") {
           macDownload.style.display = "none";
+          download.removeAttribute("href");
+          download.setAttribute("aria-disabled", "true");
+          download.setAttribute("tabindex", "-1");
           comingSoon.style.display = "block";
           comingSoonLabel.textContent = state.platform === "windows"
             ? "Susura for Windows is coming soon."
@@ -398,6 +401,8 @@
         const channelDownloads = downloads[state.channel];
         const fallbackDownloads = downloads.stable;
         download.href = channelDownloads[state.arch] || fallbackDownloads[state.arch];
+        download.removeAttribute("aria-disabled");
+        download.removeAttribute("tabindex");
       }
 
       document.getElementById("channel-stable").addEventListener("click", () => {
