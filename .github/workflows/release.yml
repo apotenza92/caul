@@ -70,5 +70,6 @@ jobs:
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
           files: |
             release/*.zip
-            release/*.yml
+            release/latest*.yml
+            release/beta*.yml
             release/*.blockmap
