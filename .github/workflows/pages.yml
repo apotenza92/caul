@@ -1,9 +1,7 @@
-name: Deploy Download Page
+name: Publish Download Page
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 on:
   push:
@@ -17,17 +15,14 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: pages
+  group: download-page
   cancel-in-progress: true
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  publish:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout Susura
         uses: actions/checkout@v5
 
       - name: Prepare public site artefact
@@ -38,14 +33,26 @@ jobs:
           cp assets/icons/icon-rounded.png _site/assets/icons/icon-rounded.png
           cp assets/icons/beta/icon-rounded.png _site/assets/icons/beta/icon-rounded.png
 
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v4
+      - name: Checkout public Pages repository
+        uses: actions/checkout@v5
         with:
-          path: _site
+          repository: apotenza92/apotenza92.github.io
+          path: pages-repo
+          ssh-key: ${{ secrets.PAGES_DEPLOY_KEY }}
 
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Publish Susura page
+        run: |
+          rm -rf pages-repo/susura
+          mkdir -p pages-repo/susura
+          cp -R _site/. pages-repo/susura/
+          touch pages-repo/.nojekyll
+          cd pages-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .nojekyll susura
+          if git diff --cached --quiet; then
+            echo "No download page changes to publish."
+            exit 0
+          fi
+          git commit -m "Publish Susura download page"
+          git push
