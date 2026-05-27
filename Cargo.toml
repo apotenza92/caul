@@ -12,7 +12,7 @@ members = [
 edition = "2021"
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/apotenza92/susura"
-rust-version = "1.85"
+rust-version = "1.88"
 
 [workspace.dependencies]
 base64 = "0.22"
