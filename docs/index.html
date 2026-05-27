@@ -217,7 +217,7 @@
         margin-bottom: 0.25rem;
       }
 
-      .private-note,
+      .availability-note,
       .beta-notice {
         border-radius: 8px;
         color: var(--text-muted);
@@ -228,7 +228,7 @@
         padding: 0.65rem 1rem;
       }
 
-      .private-note {
+      .availability-note {
         background: color-mix(in srgb, var(--accent) 9%, transparent);
         border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
       }
@@ -314,7 +314,7 @@
         <span id="coming-soon-label">This platform is not available yet.</span>
       </section>
 
-      <p class="private-note">Susura is in private preview. Downloads may require GitHub access until the source repository is public.</p>
+      <p class="availability-note">Susura is open source and early. macOS downloads are available now.</p>
       <p class="beta-notice">Beta builds can change quickly and may be less stable than the stable channel.</p>
       <p class="footer">macOS 15 or later is the first supported target.</p>
     </main>
@@ -363,7 +363,7 @@
             }
           }
         } catch {
-          // Private repository metadata may be unavailable to public visitors.
+          // Release metadata may be unavailable during GitHub API downtime or rate limits.
         }
       }
 

@@ -4,9 +4,9 @@ This folder is the durable project memory for future agents and contributors. Ke
 
 ## Public Download Page
 
-`docs/index.html` is the live Susura download page source. The GitHub repository is private for now, but the download page is intentionally public and visitable at `https://apotenza92.github.io/susura/`.
+`docs/index.html` is the live Susura download page source. The GitHub repository is public, and the download page is visitable at `https://apotenza92.github.io/susura/`.
 
-GitHub Pages is not currently enabled directly from the private `apotenza92/susura` repository because the account plan does not support Pages for that private repo. The `Publish Download Page` workflow mirrors only the static download page and icon assets into the public `apotenza92.github.io` site repo.
+The `Publish Download Page` workflow mirrors only the static download page and icon assets into the public `apotenza92.github.io` site repo, keeping the published site independent from the source tree layout.
 
 The page currently offers macOS downloads only. Windows and Linux must show `Coming soon` until those packaged apps have been built and tested.
 
