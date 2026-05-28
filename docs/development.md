@@ -26,6 +26,7 @@ Transcript pipeline logging is available for debugging Parakeet output versus re
 - `npm run build`: type-check the renderer and build the web assets.
 - `npm run dist:mac`: package the Apple Silicon macOS release artefact. Release packaging must run on Apple Silicon macOS so the bundled Rust backend and Swift helper match the published architecture.
 - `npm run dist:mac:arm`: package the Apple Silicon macOS release artefact explicitly.
+- Tagged GitHub releases build, sign and notarise in CI, then download the published ZIP and verify it with `codesign` and `spctl`.
 - `npm test`: run the React and TypeScript foundation tests.
 - `npm run check`: run the web build and frontend tests together.
 - `npm run smoke:electron`: launch Electron against Vite, exercise the preload runtime and capture bridge, then exit.

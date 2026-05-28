@@ -73,3 +73,45 @@ jobs:
             release/latest*.yml
             release/beta*.yml
             release/*.blockmap
+
+      - name: Verify published macOS release artefacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_REF_NAME" == *alpha* || "$GITHUB_REF_NAME" == *beta* || "$GITHUB_REF_NAME" == *rc* ]]; then
+            asset_names=("Susura-Beta-macos-arm64.zip")
+            app_names=("Susura Beta.app")
+          else
+            asset_names=("Susura-macos-arm64.zip" "Susura-Beta-macos-arm64.zip")
+            app_names=("Susura.app" "Susura Beta.app")
+          fi
+
+          rm -rf verified-release
+          mkdir -p verified-release
+
+          for index in "${!asset_names[@]}"; do
+            asset_name="${asset_names[$index]}"
+            app_name="${app_names[$index]}"
+            app_dir="verified-release/${asset_name%.zip}"
+
+            mkdir -p "$app_dir"
+
+            for attempt in 1 2 3 4 5; do
+              if gh release download "$GITHUB_REF_NAME" --pattern "$asset_name" --dir "$app_dir"; then
+                break
+              fi
+
+              if [ "$attempt" -eq 5 ]; then
+                echo "Unable to download published release asset: $asset_name"
+                exit 1
+              fi
+
+              sleep 6
+            done
+
+            unzip -q "$app_dir/$asset_name" -d "$app_dir"
+            codesign --verify --deep --strict --verbose=2 "$app_dir/$app_name"
+            spctl -a -vv "$app_dir/$app_name"
+          done
