@@ -8,7 +8,7 @@ This folder is the durable project memory for future agents and contributors. Ke
 
 The `Publish Download Page` workflow mirrors only the static download page and icon assets into the public `apotenza92.github.io` site repo, keeping the published site independent from the source tree layout.
 
-The page currently offers Apple Silicon macOS downloads only. Intel macOS builds are not supported. Windows and Linux must show `Coming soon` until those packaged apps have been built and tested.
+The page currently offers Apple Silicon macOS downloads only, including direct ZIP links and Homebrew cask commands for stable and beta channels. Intel macOS builds are not supported. Windows and Linux must show `Coming soon` until those packaged apps have been built and tested.
 
 ## Reading Guide
 

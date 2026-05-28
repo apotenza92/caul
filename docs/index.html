@@ -192,6 +192,52 @@
         width: 16px;
       }
 
+      .homebrew-section {
+        display: block;
+        width: min(100%, 420px);
+      }
+
+      .command-label {
+        color: var(--text-muted);
+        font-size: 0.75rem;
+        margin-bottom: 0.5rem;
+      }
+
+      .command-box {
+        align-items: center;
+        background: var(--code-bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text);
+        cursor: pointer;
+        display: flex;
+        gap: 0.75rem;
+        justify-content: space-between;
+        padding: 0.7rem 0.8rem;
+        transition: border-color 0.2s ease, transform 0.2s ease;
+      }
+
+      .command-box:hover {
+        border-color: var(--accent);
+        transform: translateY(-1px);
+      }
+
+      .command-box code {
+        color: var(--text);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 0.78rem;
+        line-height: 1.4;
+        overflow-wrap: anywhere;
+        text-align: left;
+      }
+
+      .copy-label {
+        color: var(--accent);
+        flex: 0 0 auto;
+        font-size: 0.72rem;
+        font-weight: 600;
+      }
+
       .coming-soon {
         border: 1px solid var(--border);
         border-radius: 8px;
@@ -234,6 +280,10 @@
 
       body.beta-mode .beta-notice {
         display: block;
+      }
+
+      body.beta-mode .command-label {
+        color: var(--accent);
       }
 
       .footer {
@@ -296,6 +346,13 @@
           </svg>
           <span id="download-label">Download for Apple Silicon Mac</span>
         </a>
+        <div id="homebrew-section" class="homebrew-section">
+          <p id="homebrew-label" class="command-label">Or install via Homebrew:</p>
+          <div id="homebrew-box" class="command-box" role="button" tabindex="0" aria-label="Copy Homebrew install command">
+            <code id="homebrew-code">brew install --cask apotenza92/tap/susura</code>
+            <span id="homebrew-copy" class="copy-label">Copy</span>
+          </div>
+        </div>
       </section>
 
       <section id="coming-soon" class="coming-soon">
@@ -356,6 +413,10 @@
       function updateDownload() {
         const icon = document.getElementById("app-icon");
         const download = document.getElementById("download-btn");
+        const homebrewSection = document.getElementById("homebrew-section");
+        const homebrewCode = document.getElementById("homebrew-code");
+        const homebrewLabel = document.getElementById("homebrew-label");
+        const homebrewCopy = document.getElementById("homebrew-copy");
         const macDownload = document.getElementById("mac-download");
         const comingSoon = document.getElementById("coming-soon");
         const comingSoonLabel = document.getElementById("coming-soon-label");
@@ -370,6 +431,7 @@
 
         if (state.platform !== "mac") {
           macDownload.style.display = "none";
+          homebrewSection.style.display = "none";
           download.removeAttribute("href");
           download.setAttribute("aria-disabled", "true");
           download.setAttribute("tabindex", "-1");
@@ -381,7 +443,15 @@
         }
 
         macDownload.style.display = "flex";
+        homebrewSection.style.display = "block";
         comingSoon.style.display = "none";
+        homebrewCode.textContent = state.channel === "beta"
+          ? "brew install --cask apotenza92/tap/susura@beta"
+          : "brew install --cask apotenza92/tap/susura";
+        homebrewLabel.textContent = state.channel === "beta"
+          ? "Or install via Homebrew (Beta):"
+          : "Or install via Homebrew:";
+        homebrewCopy.textContent = "Copy";
 
         const channelDownloads = downloads[state.channel];
         const fallbackDownloads = downloads.stable;
@@ -409,6 +479,22 @@
       document.getElementById("platform-linux").addEventListener("click", () => {
         state.platform = "linux";
         updateDownload();
+      });
+      document.getElementById("homebrew-box").addEventListener("click", async () => {
+        const command = document.getElementById("homebrew-code").textContent;
+        const copyLabel = document.getElementById("homebrew-copy");
+        try {
+          await navigator.clipboard.writeText(command);
+          copyLabel.textContent = "Copied";
+        } catch {
+          copyLabel.textContent = "Select";
+        }
+      });
+      document.getElementById("homebrew-box").addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          event.currentTarget.click();
+        }
       });
 
       loadReleaseInfo().then(updateDownload);

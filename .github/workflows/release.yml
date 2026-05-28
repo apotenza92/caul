@@ -115,3 +115,196 @@ jobs:
             codesign --verify --deep --strict --verbose=2 "$app_dir/$app_name"
             spctl -a -vv "$app_dir/$app_name"
           done
+
+  update-homebrew:
+    name: Update Homebrew (Stable)
+    needs: build-macos
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, 'alpha') && !contains(github.ref, 'beta') && !contains(github.ref, 'rc')
+    steps:
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download release assets and calculate hashes
+        id: hashes
+        run: |
+          set -euo pipefail
+
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          BASE_URL="https://github.com/apotenza92/susura/releases/download/v${VERSION}"
+
+          curl -fL "${BASE_URL}/Susura-macos-arm64.zip" -o stable.zip
+          STABLE_SHA256="$(shasum -a 256 stable.zip | cut -d' ' -f1)"
+          echo "STABLE_SHA256=${STABLE_SHA256}" >> "$GITHUB_OUTPUT"
+
+          curl -fL "${BASE_URL}/Susura-Beta-macos-arm64.zip" -o beta.zip
+          BETA_SHA256="$(shasum -a 256 beta.zip | cut -d' ' -f1)"
+          echo "BETA_SHA256=${BETA_SHA256}" >> "$GITHUB_OUTPUT"
+
+      - name: Update Homebrew casks
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          STABLE_SHA256="${{ steps.hashes.outputs.STABLE_SHA256 }}"
+          BETA_SHA256="${{ steps.hashes.outputs.BETA_SHA256 }}"
+
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/apotenza92/homebrew-tap.git"
+          cd homebrew-tap
+
+          cat > Casks/susura.rb << EOF
+          cask "susura" do
+            version "${VERSION}"
+
+            on_arm do
+              url "https://github.com/apotenza92/susura/releases/download/v#{version}/Susura-macos-arm64.zip"
+              sha256 "${STABLE_SHA256}"
+            end
+
+            name "Susura"
+            desc "Private desktop assistant for live calls and screen work"
+            homepage "https://github.com/apotenza92/susura"
+
+            livecheck do
+              url :url
+              strategy :github_latest
+            end
+
+            app "Susura.app"
+
+            zap trash: [
+              "~/Library/Application Support/Susura",
+              "~/Library/Caches/dev.susura.app",
+              "~/Library/Caches/dev.susura.app.ShipIt",
+              "~/Library/Preferences/dev.susura.app.plist",
+              "~/Library/Saved Application State/dev.susura.app.savedState",
+            ]
+          end
+          EOF
+
+          cat > 'Casks/susura@beta.rb' << EOF
+          cask "susura@beta" do
+            version "${VERSION}"
+
+            on_arm do
+              url "https://github.com/apotenza92/susura/releases/download/v#{version}/Susura-Beta-macos-arm64.zip"
+              sha256 "${BETA_SHA256}"
+            end
+
+            name "Susura Beta"
+            desc "Beta channel for Susura"
+            homepage "https://github.com/apotenza92/susura"
+
+            livecheck do
+              url "https://api.github.com/repos/apotenza92/susura/releases"
+              strategy :json do |json|
+                json
+                  .reject { |release| release["draft"] }
+                  .map { |release| release["tag_name"] }
+              end
+            end
+
+            app "Susura Beta.app"
+
+            zap trash: [
+              "~/Library/Application Support/Susura Beta",
+              "~/Library/Caches/dev.susura.app.beta",
+              "~/Library/Caches/dev.susura.app.beta.ShipIt",
+              "~/Library/Preferences/dev.susura.app.beta.plist",
+              "~/Library/Saved Application State/dev.susura.app.beta.savedState",
+            ]
+          end
+          EOF
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Casks/susura.rb 'Casks/susura@beta.rb'
+
+          if git diff --cached --quiet; then
+            echo "Homebrew casks are already up to date."
+            exit 0
+          fi
+
+          git commit -m "Update susura to v${VERSION} (stable + beta casks)"
+          git push
+
+  update-homebrew-beta:
+    name: Update Homebrew (Beta)
+    needs: build-macos
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') && (contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc'))
+    steps:
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download release assets and calculate hash
+        id: hashes
+        run: |
+          set -euo pipefail
+
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          curl -fL "https://github.com/apotenza92/susura/releases/download/v${VERSION}/Susura-Beta-macos-arm64.zip" -o beta.zip
+          BETA_SHA256="$(shasum -a 256 beta.zip | cut -d' ' -f1)"
+          echo "BETA_SHA256=${BETA_SHA256}" >> "$GITHUB_OUTPUT"
+
+      - name: Update Homebrew beta cask
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          BETA_SHA256="${{ steps.hashes.outputs.BETA_SHA256 }}"
+
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/apotenza92/homebrew-tap.git"
+          cd homebrew-tap
+
+          cat > 'Casks/susura@beta.rb' << EOF
+          cask "susura@beta" do
+            version "${VERSION}"
+
+            on_arm do
+              url "https://github.com/apotenza92/susura/releases/download/v#{version}/Susura-Beta-macos-arm64.zip"
+              sha256 "${BETA_SHA256}"
+            end
+
+            name "Susura Beta"
+            desc "Beta channel for Susura"
+            homepage "https://github.com/apotenza92/susura"
+
+            livecheck do
+              url "https://api.github.com/repos/apotenza92/susura/releases"
+              strategy :json do |json|
+                json
+                  .reject { |release| release["draft"] }
+                  .map { |release| release["tag_name"] }
+              end
+            end
+
+            app "Susura Beta.app"
+
+            zap trash: [
+              "~/Library/Application Support/Susura Beta",
+              "~/Library/Caches/dev.susura.app.beta",
+              "~/Library/Caches/dev.susura.app.beta.ShipIt",
+              "~/Library/Preferences/dev.susura.app.beta.plist",
+              "~/Library/Saved Application State/dev.susura.app.beta.savedState",
+            ]
+          end
+          EOF
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add 'Casks/susura@beta.rb'
+
+          if git diff --cached --quiet; then
+            echo "Homebrew beta cask is already up to date."
+            exit 0
+          fi
+
+          git commit -m "Update susura@beta to v${VERSION}"
+          git push
