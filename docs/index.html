@@ -99,16 +99,14 @@
       }
 
       .channel-toggle,
-      .platform-toggle,
-      .mac-arch-toggle {
+      .platform-toggle {
         display: flex;
         justify-content: center;
         margin-bottom: 1rem;
       }
 
       .channel-btn,
-      .platform-btn,
-      .arch-btn {
+      .platform-btn {
         background: none;
         border: 1px solid var(--border);
         color: var(--text-muted);
@@ -119,26 +117,22 @@
       }
 
       .channel-btn:first-child,
-      .platform-btn:first-child,
-      .arch-btn:first-child {
+      .platform-btn:first-child {
         border-radius: 8px 0 0 8px;
       }
 
       .channel-btn:last-child,
-      .platform-btn:last-child,
-      .arch-btn:last-child {
+      .platform-btn:last-child {
         border-radius: 0 8px 8px 0;
       }
 
       .channel-btn:not(:first-child),
-      .platform-btn:not(:first-child),
-      .arch-btn:not(:first-child) {
+      .platform-btn:not(:first-child) {
         margin-left: -1px;
       }
 
       .channel-btn:hover:not(.active),
-      .platform-btn:hover:not(.active),
-      .arch-btn:hover:not(.active) {
+      .platform-btn:hover:not(.active) {
         border-color: var(--accent);
         color: var(--accent);
         position: relative;
@@ -146,8 +140,7 @@
       }
 
       .channel-btn.active,
-      .platform-btn.active,
-      .arch-btn.active {
+      .platform-btn.active {
         background: var(--accent);
         border-color: var(--accent);
         color: white;
@@ -274,7 +267,7 @@
     <main class="container">
       <img id="app-icon" class="icon" src="assets/icons/icon-rounded.png" alt="Susura icon" />
       <h1>Download Susura</h1>
-      <p class="subtitle">A calm, private desktop assistant for live calls and screen work.</p>
+      <p class="subtitle">A private desktop assistant for live calls and screen work.</p>
       <a class="github-icon-link" href="https://github.com/apotenza92/susura" aria-label="View Susura on GitHub">
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <path d="M12 .5a12 12 0 0 0-3.8 23.39c.6.11.82-.26.82-.58v-2.22c-3.34.73-4.04-1.42-4.04-1.42-.55-1.4-1.34-1.77-1.34-1.77-1.09-.74.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.83 2.8 1.3 3.49.99.11-.78.42-1.3.76-1.6-2.67-.31-5.47-1.34-5.47-5.94 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.53.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.65.25 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.62-2.81 5.63-5.49 5.93.43.38.82 1.11.82 2.24v3.32c0 .32.22.7.83.58A12 12 0 0 0 12 .5Z"/>
@@ -295,17 +288,13 @@
       </div>
 
       <section id="mac-download" class="download-wrapper">
-        <div class="mac-arch-toggle" aria-label="macOS architecture">
-          <button id="mac-arm" class="arch-btn active" type="button">Apple Silicon</button>
-          <button id="mac-intel" class="arch-btn" type="button">Intel</button>
-        </div>
         <a id="download-btn" class="download-btn" href="https://github.com/apotenza92/susura/releases/latest/download/Susura-macos-arm64.zip">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
             <path d="M7 10l5 5 5-5"/>
             <path d="M12 15V3"/>
           </svg>
-          <span id="download-label">Download for macOS</span>
+          <span id="download-label">Download for Apple Silicon Mac</span>
         </a>
       </section>
 
@@ -314,9 +303,9 @@
         <span id="coming-soon-label">This platform is not available yet.</span>
       </section>
 
-      <p class="availability-note">Susura is open source and early. macOS downloads are available now.</p>
+      <p class="availability-note">Susura is open source and early. Apple Silicon macOS downloads are available now.</p>
       <p class="beta-notice">Beta builds can change quickly and may be less stable than the stable channel.</p>
-      <p class="footer">macOS 15 or later is the first supported target.</p>
+      <p class="footer">Apple Silicon Macs running macOS 15 or later are the first supported target.</p>
     </main>
 
     <script>
@@ -324,16 +313,13 @@
       const assetPrefix = location.pathname.includes("/docs/") ? ".." : ".";
       const downloads = {
         stable: {
-          arm: `https://github.com/${repo}/releases/latest/download/Susura-macos-arm64.zip`,
-          intel: `https://github.com/${repo}/releases/latest/download/Susura-macos-x64.zip`
+          mac: `https://github.com/${repo}/releases/latest/download/Susura-macos-arm64.zip`
         },
         beta: {
-          arm: "",
-          intel: ""
+          mac: ""
         }
       };
       const state = {
-        arch: navigator.userAgent.includes("Intel") ? "intel" : "arm",
         channel: "stable",
         platform: "mac"
       };
@@ -359,8 +345,7 @@
             const beta = releases.find((release) => release.prerelease);
             if (beta) {
               const base = `https://github.com/${repo}/releases/download/${beta.tag_name}`;
-              downloads.beta.arm = `${base}/Susura-Beta-macos-arm64.zip`;
-              downloads.beta.intel = `${base}/Susura-Beta-macos-x64.zip`;
+              downloads.beta.mac = `${base}/Susura-Beta-macos-arm64.zip`;
             }
           }
         } catch {
@@ -382,7 +367,6 @@
 
         setActive(".channel-btn", `channel-${state.channel}`);
         setActive(".platform-btn", `platform-${state.platform}`);
-        setActive(".arch-btn", state.arch === "arm" ? "mac-arm" : "mac-intel");
 
         if (state.platform !== "mac") {
           macDownload.style.display = "none";
@@ -401,7 +385,7 @@
 
         const channelDownloads = downloads[state.channel];
         const fallbackDownloads = downloads.stable;
-        download.href = channelDownloads[state.arch] || fallbackDownloads[state.arch];
+        download.href = channelDownloads.mac || fallbackDownloads.mac;
         download.removeAttribute("aria-disabled");
         download.removeAttribute("tabindex");
       }
@@ -424,14 +408,6 @@
       });
       document.getElementById("platform-linux").addEventListener("click", () => {
         state.platform = "linux";
-        updateDownload();
-      });
-      document.getElementById("mac-arm").addEventListener("click", () => {
-        state.arch = "arm";
-        updateDownload();
-      });
-      document.getElementById("mac-intel").addEventListener("click", () => {
-        state.arch = "intel";
         updateDownload();
       });
 

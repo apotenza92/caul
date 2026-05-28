@@ -26,6 +26,7 @@ Future modules should preserve the same boundaries in crate, package or director
 ## Current Technical Choices
 
 - Use Electron and React for the desktop UI so the visible controls can use shadcn/ui defaults with browser-grade text and shape rendering.
+- Support Apple Silicon Macs only for the current macOS product line. Intel macOS builds should not be produced or advertised.
 - Use two primary Electron windows for the desktop runtime: the full app as a protected, Dockless private overlay and an always-available floating handle. The handle uses explicit renderer surface routing, while the full app overlay loads the normal app route, stays capture-protected where supported, adapts its controls around the live handle edge, and avoids polling-based screen-share detection or process identity disguise.
 - Use Rust as the durable backend for capture process control, typed event normalisation, processing, session state, provider calls and cross-platform abstractions.
 - Treat Electron resource use as a measured budget, not an assumption. The idle production app should stay below the current `npm run smoke:resources` working-set budget and avoid renderer polling and animations.

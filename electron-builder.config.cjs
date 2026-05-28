@@ -88,7 +88,7 @@ module.exports = {
     target: [
       {
         target: 'zip',
-        arch: ['arm64', 'x64']
+        arch: ['arm64']
       }
     ]
   },

@@ -1,6 +1,6 @@
 # macOS Audio
 
-The immediate implementation target is macOS 15+ microphone plus system audio capture. The local development machine is macOS 26.5 on Apple Silicon with Xcode 26.5, so modern Core Audio Process Tap APIs are available for development.
+The immediate implementation target is Apple Silicon macOS 15+ microphone plus system audio capture. The local development machine is macOS 26.5 on Apple Silicon with Xcode 26.5, so modern Core Audio Process Tap APIs are available for development.
 
 ## Capture Direction
 

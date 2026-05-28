@@ -1,8 +1,8 @@
 {
   "name": "susura",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
-  "description": "A calm, private AI overlay for live calls and screen work.",
+  "description": "A private AI overlay for live calls and screen work.",
   "main": "electron/main.cjs",
   "type": "module",
   "repository": {
@@ -20,11 +20,10 @@
     "test": "vitest run",
     "check": "npm run build && npm test",
     "generate-icons": "node scripts/generate-icons.cjs",
-    "package:prepare": "npm run generate-icons && npm run build && npm run desktop-backend:build:release && npm run macos-audio:build:release",
+    "package:prepare": "node scripts/assert-apple-silicon-macos-package.mjs && npm run generate-icons && npm run build && npm run desktop-backend:build:release && npm run macos-audio:build:release",
     "dist": "npm run dist:mac",
     "dist:mac": "npm run package:prepare && electron-builder --config electron-builder.config.cjs --mac --publish=never",
     "dist:mac:arm": "npm run package:prepare && electron-builder --config electron-builder.config.cjs --mac --arm64 --publish=never",
-    "dist:mac:x64": "npm run package:prepare && electron-builder --config electron-builder.config.cjs --mac --x64 --publish=never",
     "dist:win": "echo \"Windows packaging is scaffolded but not enabled yet.\"",
     "dist:linux": "echo \"Linux packaging is scaffolded but not enabled yet.\"",
     "smoke:electron": "npm run desktop-backend:build && npm run electron:sign-dev && concurrently -k --success first \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 SUSURA_SMOKE_EXIT_MS=250 electron .\"",

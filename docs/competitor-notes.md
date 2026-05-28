@@ -35,7 +35,7 @@ Useful lessons:
 
 ## Susura Takeaways
 
-- Build a calm private overlay rather than an evasion product.
+- Build a private overlay rather than an evasion product.
 - Keep setup shorter than competitors.
 - Keep capture, provider calls and local storage inspectable.
 - Reuse maintained open-source projects and platform APIs instead of hand-rolling low-level pieces.

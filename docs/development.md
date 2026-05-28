@@ -1,6 +1,6 @@
 # Development
 
-Susura is currently using an Electron and React desktop shell with shadcn/ui defaults, Rust workspace crates and a small Swift macOS audio helper. The immediate product target is a basic setup UI, followed by reliable macOS 15+ microphone plus system audio capture.
+Susura is currently using an Electron and React desktop shell with shadcn/ui defaults, Rust workspace crates and a small Swift macOS audio helper. The immediate product target is a basic setup UI, followed by reliable Apple Silicon macOS 15+ microphone plus system audio capture.
 
 The Electron renderer currently owns setup controls, audio source selection, transcript display and stop-to-LLM submission. It starts local transcription through `crates/desktop-backend`, which captures microphone audio with `cpal`, captures system audio through `crates/macos-capture` and the Swift helper, resamples to 16 kHz mono in Rust with `rubato`, closes utterances with Rust endpointing, and transcribes completed utterances with local Parakeet. Susura is manual-only for now: the user starts listening, watches live and final transcript text, then stops listening to send the visible transcript to the configured subscription LLM bridge.
 
@@ -24,6 +24,8 @@ Transcript pipeline logging is available for debugging Parakeet output versus re
 - `cargo test -p susura-desktop-ui`: run the Dioxus Native model tests.
 - `cargo test -p susura-macos-capture`: run the Rust helper protocol parser tests.
 - `npm run build`: type-check the renderer and build the web assets.
+- `npm run dist:mac`: package the Apple Silicon macOS release artefact. Release packaging must run on Apple Silicon macOS so the bundled Rust backend and Swift helper match the published architecture.
+- `npm run dist:mac:arm`: package the Apple Silicon macOS release artefact explicitly.
 - `npm test`: run the React and TypeScript foundation tests.
 - `npm run check`: run the web build and frontend tests together.
 - `npm run smoke:electron`: launch Electron against Vite, exercise the preload runtime and capture bridge, then exit.

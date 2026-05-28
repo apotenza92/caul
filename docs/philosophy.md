@@ -16,11 +16,3 @@ Susura should feel like a quiet tool that helps in the moment, not a complex mee
 Susura should be a private, user-controlled overlay. It should avoid a surveillance identity and should not market itself around evasion, cheating or bypassing other systems.
 
 The app can be discreet and non-disruptive, but the project should describe that in terms of user control, focus and screen hygiene. Do not build process disguise, anti-detection workflows or claims that encourage misuse.
-
-## Non-Goals
-
-- A full meeting CRM.
-- A knowledge-base platform on day one.
-- A bot that joins meetings.
-- A cloud-first transcription archive.
-- A cluttered dashboard that must be configured before the app works.

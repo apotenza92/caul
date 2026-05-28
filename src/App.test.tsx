@@ -6,6 +6,16 @@ import { initialCaptureStatus, type CaptureRunState } from './foundation/capture
 import type { PermissionItem, PrivateOverlayState, PromptTemplate, PromptTemplateAttachment, PromptTemplateState, TranscriptionBridgeEvent } from './foundation/desktopBridge';
 import type { RuntimeContext } from './foundation/runtime';
 
+function currentLongDatePattern() {
+  const formattedDate = new Intl.DateTimeFormat('en-US', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric'
+  }).format(new Date());
+
+  return new RegExp(formattedDate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+}
+
 describe('App', () => {
   afterEach(() => {
     window.localStorage.clear();
@@ -1360,7 +1370,7 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
 
     expect(screen.queryByText(/^Transcript started:/)).not.toBeInTheDocument();
-    expect(screen.getByText(/May (26|27), 2026/)).toBeInTheDocument();
+    expect(screen.getByText(currentLongDatePattern())).toBeInTheDocument();
     expect(screen.getByLabelText('Transcription output')).toHaveTextContent('Keep this line in the section body.');
     expect(container.querySelector('#transcript-output .transcript-section-header')).toHaveClass('sticky');
     expect(container.querySelector('#transcript-output .transcript-section-header')).toHaveClass('border-y');
@@ -1560,7 +1570,7 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
 
     expect(await screen.findByRole('heading', { name: 'Refund policy' })).toBeInTheDocument();
-    expect(screen.getByLabelText('AI response')).toHaveTextContent(/May (26|27), 2026/);
+    expect(screen.getByLabelText('AI response')).toHaveTextContent(currentLongDatePattern());
     expect(screen.getByRole('button', { name: 'Copy this AI response' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Download this AI response' })).toBeEnabled();
     expect(screen.getByText('Annual plans').tagName.toLowerCase()).toBe('strong');
@@ -1588,7 +1598,7 @@ describe('App', () => {
 
     await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
 
-    expect(screen.getByLabelText('AI response')).toHaveTextContent(/May (26|27), 2026/);
+    expect(screen.getByLabelText('AI response')).toHaveTextContent(currentLongDatePattern());
     expect(screen.getByLabelText('Waiting for response')).toBeInTheDocument();
     expect(screen.queryByText('Waiting for response...')).not.toBeInTheDocument();
     expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
