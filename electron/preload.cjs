@@ -55,6 +55,32 @@ contextBridge.exposeInMainWorld('susura', {
     toggle: () => ipcRenderer.invoke('susura:private-overlay-toggle')
   },
   settings: {
+    ai: {
+      disconnect: () => ipcRenderer.invoke('susura:pi-disconnect'),
+      openLogin: () => ipcRenderer.invoke('susura:pi-login'),
+      openModel: () => ipcRenderer.invoke('susura:pi-model'),
+      saveModel: (model) => ipcRenderer.invoke('susura:pi-save-model', { model }),
+      status: () => ipcRenderer.invoke('susura:pi-status')
+    },
+    onboarding: {
+      complete: () => ipcRenderer.invoke('susura:onboarding-complete'),
+      open: () => ipcRenderer.invoke('susura:onboarding-open'),
+      status: () => ipcRenderer.invoke('susura:onboarding-status')
+    },
+    parakeet: {
+      cancelDownload: () => ipcRenderer.invoke('susura:parakeet-cancel-download'),
+      download: () => ipcRenderer.invoke('susura:parakeet-download'),
+      onStatus: (callback) => {
+        const listener = (_event, payload) => callback(payload);
+
+        ipcRenderer.on('susura:parakeet-status', listener);
+
+        return () => {
+          ipcRenderer.off('susura:parakeet-status', listener);
+        };
+      },
+      status: () => ipcRenderer.invoke('susura:parakeet-status')
+    },
     promptTemplates: {
       chooseAttachments: () => ipcRenderer.invoke('susura:prompt-templates-choose-attachments'),
       delete: (id) => ipcRenderer.invoke('susura:prompt-templates-delete', { id }),
@@ -63,6 +89,7 @@ contextBridge.exposeInMainWorld('susura', {
       save: (template) => ipcRenderer.invoke('susura:prompt-templates-save', { template }),
       setSelected: (id) => ipcRenderer.invoke('susura:prompt-templates-set-selected', { id })
     },
+    quit: () => ipcRenderer.invoke('susura:settings-quit'),
     reset: () => ipcRenderer.invoke('susura:settings-reset')
   },
   transcription: {

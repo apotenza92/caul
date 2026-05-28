@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::Arc;
@@ -1969,26 +1968,11 @@ fn ensure_parakeet_model() -> Result<PathBuf, Box<dyn std::error::Error>> {
         return Ok(model_dir);
     }
 
-    fs::create_dir_all(model_root())?;
-    let archive_path = model_root().join("parakeet-v3-int8.tar.gz");
-    download_file(
-        "https://blob.handy.computer/parakeet-v3-int8.tar.gz",
-        &archive_path,
-    )?;
-
-    let status = Command::new("tar")
-        .arg("-xzf")
-        .arg(&archive_path)
-        .arg("-C")
-        .arg(model_root())
-        .status()?;
-
-    if !status.success() {
-        return Err("failed to extract local Parakeet model archive".into());
-    }
-
-    validate_parakeet_dir(&model_dir)?;
-    Ok(model_dir)
+    Err(format!(
+        "local Parakeet model is not installed at {}",
+        model_dir.display()
+    )
+    .into())
 }
 
 fn validate_parakeet_dir(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -2018,26 +2002,6 @@ fn model_root() -> PathBuf {
         .join("Application Support")
         .join("Susura")
         .join("models")
-}
-
-fn download_file(url: &str, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let temporary_path = path.with_extension("download");
-    let status = Command::new("curl")
-        .arg("--fail")
-        .arg("--location")
-        .arg("--silent")
-        .arg("--show-error")
-        .arg("--output")
-        .arg(&temporary_path)
-        .arg(url)
-        .status()?;
-
-    if !status.success() {
-        return Err(format!("failed to download {url}").into());
-    }
-
-    fs::rename(temporary_path, path)?;
-    Ok(())
 }
 
 fn drain_events(receiver: &mpsc::Receiver<BackendEvent>) {

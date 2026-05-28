@@ -58,6 +58,10 @@ module.exports = {
     {
       from: 'scripts/run-pi-json.py',
       to: 'scripts/run-pi-json.py'
+    },
+    {
+      from: '.susura/pi-bundle/node_modules',
+      to: 'pi/node_modules'
     }
   ],
   asar: true,

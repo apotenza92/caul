@@ -1,6 +1,7 @@
 const { app, BrowserWindow, Menu, dialog, globalShortcut, ipcMain, nativeTheme, screen, shell, systemPreferences } = require('electron');
 const { spawn } = require('node:child_process');
 const fsSync = require('node:fs');
+const https = require('node:https');
 const path = require('node:path');
 const readline = require('node:readline');
 const { getPreferredOverlaySizeForEdge } = require('./privateOverlayGeometry.cjs');
@@ -13,6 +14,7 @@ const localParakeetSmokeMs = Number(process.env.SUSURA_LOCAL_PARAKEET_SMOKE_MS ?
 const rendererTranscriptionSmokeMs = Number(process.env.SUSURA_RENDERER_TRANSCRIPTION_SMOKE_MS ?? 0);
 const rendererLlmSmoke = process.env.SUSURA_RENDERER_LLM_SMOKE === '1';
 const rendererRealLlmSmoke = process.env.SUSURA_RENDERER_REAL_LLM_SMOKE === '1';
+const onboardingSmokeDir = process.env.SUSURA_ONBOARDING_SMOKE_DIR;
 const resourceSmokeMs = Number(process.env.SUSURA_RESOURCE_SMOKE_MS ?? 0);
 const resourceSmokeMaxWorkingSetMb = Number(process.env.SUSURA_RESOURCE_SMOKE_MAX_WORKING_SET_MB ?? 450);
 const piLlmBridgeMode = String(process.env.SUSURA_PI_LLM_BRIDGE ?? '').trim().toLowerCase();
@@ -49,6 +51,15 @@ const handleSnapAnimationDurationMs = 260;
 const windowStateFileName = 'window-state.json';
 const privateOverlayStateFileName = 'private-overlay-state.json';
 const promptTemplatesFileName = 'prompt-templates.json';
+const setupStateFileName = 'setup-state.json';
+const parakeetArchiveUrl = 'https://blob.handy.computer/parakeet-v3-int8.tar.gz';
+const parakeetModelDirName = 'parakeet-tdt-0.6b-v3-int8';
+const parakeetRequiredFiles = [
+  'encoder-model.int8.onnx',
+  'decoder_joint-model.int8.onnx',
+  'nemo128.onnx',
+  'vocab.txt'
+];
 const transcriptDebugLogEnabled = process.env.SUSURA_TRANSCRIPT_DEBUG_LOG === '1';
 let transcriptDebugLogPath = null;
 let mainWindow = null;
@@ -57,6 +68,8 @@ let privateOverlayHandleWindow = null;
 let privateOverlayHandleDrag = null;
 let privateOverlayHandleSnapAnimation = null;
 let privateOverlayWindowDrag = null;
+let onboardingWindow = null;
+let parakeetDownload = null;
 let isQuitting = false;
 
 const starterPromptTemplates = [
@@ -105,6 +118,22 @@ function getPrivateOverlayStatePath() {
 
 function getPromptTemplatesPath() {
   return path.join(app.getPath('userData'), promptTemplatesFileName);
+}
+
+function getSetupStatePath() {
+  return path.join(app.getPath('userData'), setupStateFileName);
+}
+
+function getParakeetModelRoot() {
+  return path.join(app.getPath('userData'), 'models');
+}
+
+function getParakeetModelPath() {
+  return path.join(getParakeetModelRoot(), parakeetModelDirName);
+}
+
+function getPiAgentDir() {
+  return path.join(app.getPath('userData'), 'pi-agent');
 }
 
 function createStarterPromptTemplates() {
@@ -350,6 +379,48 @@ async function choosePromptTemplateAttachments(window) {
   };
 }
 
+function readSetupState() {
+  try {
+    const state = JSON.parse(fsSync.readFileSync(getSetupStatePath(), 'utf8'));
+
+    return state && typeof state === 'object' ? state : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeSetupState(update) {
+  const state = {
+    ...readSetupState(),
+    ...update
+  };
+
+  fsSync.mkdirSync(app.getPath('userData'), { recursive: true });
+  fsSync.writeFileSync(getSetupStatePath(), `${JSON.stringify(state, null, 2)}\n`);
+
+  return state;
+}
+
+function completeOnboarding() {
+  writeSetupState({
+    onboardingCompletedAt: new Date().toISOString()
+  });
+
+  if (onboardingWindow && !onboardingWindow.isDestroyed()) {
+    onboardingWindow.close();
+  }
+
+  createPrivateOverlayHandleWindow();
+  showPrivateOverlayHandleWindow();
+
+  return getOnboardingStatus();
+}
+
+function reopenOnboarding() {
+  createOnboardingWindow().show();
+  return getOnboardingStatus();
+}
+
 function setSelectedPromptTemplate(id) {
   const existing = readPromptTemplateState();
   const selectedTemplateId = typeof id === 'string'
@@ -469,8 +540,8 @@ function persistWindowState(mainWindow) {
 function normalisePrivateOverlayState(state) {
   const primaryDisplay = screen.getPrimaryDisplay();
   const workArea = primaryDisplay.workArea;
-  const defaultHandleX = workArea.x + workArea.width - handleWindowSize.width - windowScreenMargin;
-  const defaultHandleY = workArea.y + Math.max(24, Math.round(workArea.height * 0.25));
+  const defaultHandleX = workArea.x + Math.round((workArea.width - handleWindowSize.width) / 2);
+  const defaultHandleY = workArea.y + windowScreenMargin;
   const defaultOverlayX = workArea.x + Math.round((workArea.width - overlayWindowSize.width) / 2);
   const defaultOverlayY = workArea.y + 48;
   const handle = state && typeof state === 'object' && state.handle && typeof state.handle === 'object'
@@ -1093,12 +1164,12 @@ function isPiLlmBridgeEnabled() {
     return ['1', 'enabled', 'on', 'pi', 'true', 'yes'].includes(piLlmBridgeMode);
   }
 
-  return !app.isPackaged;
+  return Boolean(readSetupState().selectedPiModel);
 }
 
 function assertPiLlmBridgeEnabled() {
   if (!isPiLlmBridgeEnabled()) {
-    throw new Error('AI is not configured yet. Susura does not use local Pi, Codex, browser or subscription logins automatically in packaged builds.');
+    throw new Error('AI is not configured yet. Open onboarding or Settings to sign in and choose a Pi model.');
   }
 }
 
@@ -1216,6 +1287,316 @@ async function requestPermission(permission) {
   }
 
   return { ok: false, message: 'Unknown permission.' };
+}
+
+function isPermissionSetupComplete() {
+  const status = getPermissionsStatus();
+
+  return status.permissions.every((permission) => (
+    permission.status === 'granted' || permission.status === 'unsupported'
+  ));
+}
+
+function validateParakeetModelDir(modelDir = getParakeetModelPath()) {
+  try {
+    return parakeetRequiredFiles.every((fileName) => fsSync.existsSync(path.join(modelDir, fileName)));
+  } catch {
+    return false;
+  }
+}
+
+function getParakeetStatus() {
+  if (parakeetDownload) {
+    return {
+      ok: true,
+      installed: false,
+      progress: parakeetDownload.progress,
+      status: 'downloading'
+    };
+  }
+
+  const installed = validateParakeetModelDir();
+
+  return {
+    ok: true,
+    installed,
+    modelDir: getParakeetModelPath(),
+    status: installed ? 'installed' : 'missing'
+  };
+}
+
+function emitParakeetStatus() {
+  const status = getParakeetStatus();
+
+  BrowserWindow.getAllWindows().forEach((window) => {
+    window.webContents.send('susura:parakeet-status', status);
+  });
+}
+
+function downloadParakeetModel(downloadUrl = parakeetArchiveUrl) {
+  if (validateParakeetModelDir()) {
+    return Promise.resolve(getParakeetStatus());
+  }
+
+  if (parakeetDownload) {
+    return Promise.resolve(getParakeetStatus());
+  }
+
+  fsSync.mkdirSync(getParakeetModelRoot(), { recursive: true });
+
+  const archivePath = path.join(getParakeetModelRoot(), 'parakeet-v3-int8.tar.gz');
+  const temporaryPath = `${archivePath}.download`;
+  const file = fsSync.createWriteStream(temporaryPath);
+  const download = {
+    file,
+    progress: {
+      downloadedBytes: 0,
+      percent: 0,
+      totalBytes: null
+    },
+    request: null
+  };
+  parakeetDownload = download;
+  emitParakeetStatus();
+
+  return new Promise((resolve, reject) => {
+    const fail = (error) => {
+      if (parakeetDownload === download) {
+        parakeetDownload = null;
+      }
+
+      file.destroy();
+      fsSync.rmSync(temporaryPath, { force: true });
+      emitParakeetStatus();
+      reject(error);
+    };
+
+    const request = https.get(downloadUrl, (response) => {
+      if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        request.destroy();
+        parakeetDownload = null;
+        file.destroy();
+        fsSync.rmSync(temporaryPath, { force: true });
+        downloadParakeetModel(new URL(response.headers.location, downloadUrl).toString()).then(resolve, reject);
+        return;
+      }
+
+      if (response.statusCode !== 200) {
+        fail(new Error(`Parakeet download failed with HTTP ${response.statusCode}.`));
+        return;
+      }
+
+      const totalBytes = Number(response.headers['content-length']);
+      download.progress.totalBytes = Number.isFinite(totalBytes) ? totalBytes : null;
+
+      response.on('data', (chunk) => {
+        download.progress.downloadedBytes += chunk.length;
+        download.progress.percent = download.progress.totalBytes
+          ? Math.min(100, Math.round((download.progress.downloadedBytes / download.progress.totalBytes) * 100))
+          : 0;
+        emitParakeetStatus();
+      });
+
+      response.pipe(file);
+      file.once('finish', () => {
+        file.close(() => {
+          fsSync.renameSync(temporaryPath, archivePath);
+          const tar = spawn('tar', ['-xzf', archivePath, '-C', getParakeetModelRoot()], {
+            stdio: ['ignore', 'ignore', 'pipe']
+          });
+          const errors = [];
+
+          tar.stderr.on('data', (chunk) => errors.push(chunk.toString()));
+          tar.once('error', fail);
+          tar.once('exit', (code) => {
+            if (code !== 0) {
+              fail(new Error(errors.join('').trim() || 'Failed to extract Parakeet model.'));
+              return;
+            }
+
+            if (!validateParakeetModelDir()) {
+              fail(new Error('Downloaded Parakeet model is missing required files.'));
+              return;
+            }
+
+            fsSync.rmSync(archivePath, { force: true });
+
+            if (parakeetDownload === download) {
+              parakeetDownload = null;
+            }
+
+            emitParakeetStatus();
+            resolve(getParakeetStatus());
+          });
+        });
+      });
+    });
+
+    download.request = request;
+    request.once('error', fail);
+  });
+}
+
+function cancelParakeetDownload() {
+  if (!parakeetDownload) {
+    return getParakeetStatus();
+  }
+
+  parakeetDownload.request?.destroy(new Error('Parakeet download cancelled.'));
+  parakeetDownload.file?.destroy();
+  parakeetDownload = null;
+  fsSync.rmSync(path.join(getParakeetModelRoot(), 'parakeet-v3-int8.tar.gz.download'), { force: true });
+  emitParakeetStatus();
+
+  return getParakeetStatus();
+}
+
+function getPiEnvironment() {
+  return {
+    ...process.env,
+    PI_CODING_AGENT_DIR: getPiAgentDir(),
+    PI_CODING_AGENT_SESSION_DIR: path.join(getPiAgentDir(), 'sessions'),
+    ELECTRON_RUN_AS_NODE: '1',
+    PI_SKIP_VERSION_CHECK: '1',
+    PI_TELEMETRY: '0'
+  };
+}
+
+function getPiCliPath() {
+  if (app.isPackaged) {
+    const bundledPath = path.join(
+      process.resourcesPath,
+      'pi',
+      'node_modules',
+      '@earendil-works',
+      'pi-coding-agent',
+      'dist',
+      'cli.js'
+    );
+
+    return fsSync.existsSync(bundledPath) ? bundledPath : null;
+  }
+
+  try {
+    return require.resolve('@earendil-works/pi-coding-agent/dist/cli.js');
+  } catch {
+    return null;
+  }
+}
+
+function getPiSpawnCommand(args = []) {
+  const cliPath = getPiCliPath();
+
+  if (cliPath) {
+    return {
+      command: process.execPath,
+      args: [cliPath, ...args]
+    };
+  }
+
+  return {
+    command: 'pi',
+    args
+  };
+}
+
+function getPiStatus() {
+  const state = readSetupState();
+  const cliPath = getPiCliPath();
+  const selectedModel = typeof state.selectedPiModel === 'string' ? state.selectedPiModel : '';
+
+  return {
+    ok: true,
+    agentDir: getPiAgentDir(),
+    bundled: Boolean(cliPath),
+    connected: Boolean(selectedModel),
+    selectedModel: selectedModel || null,
+    status: selectedModel ? 'ready' : 'disconnected'
+  };
+}
+
+function openPiSetup(mode = 'login') {
+  const cliPath = getPiCliPath();
+
+  if (!cliPath) {
+    return { ok: false, message: 'Bundled Pi is unavailable.' };
+  }
+
+  fsSync.mkdirSync(getPiAgentDir(), { recursive: true });
+
+  if (process.platform === 'darwin') {
+    const command = [
+      `export PI_CODING_AGENT_DIR=${shellQuote(getPiAgentDir())}`,
+      `export PI_CODING_AGENT_SESSION_DIR=${shellQuote(path.join(getPiAgentDir(), 'sessions'))}`,
+      'export PI_SKIP_VERSION_CHECK=1',
+      'export PI_TELEMETRY=0',
+      `export ELECTRON_RUN_AS_NODE=1`,
+      `${shellQuote(process.execPath)} ${shellQuote(cliPath)}`,
+      mode === 'model' ? '/model' : '/login'
+    ].join('; ');
+
+    const script = `tell application "Terminal" to do script ${JSON.stringify(command)}`;
+    spawn('osascript', ['-e', script], { stdio: 'ignore' });
+
+    return { ok: true };
+  }
+
+  return { ok: false, message: 'Pi setup is currently available on macOS.' };
+}
+
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", "'\\''")}'`;
+}
+
+function savePiModel(model) {
+  const selectedPiModel = typeof model === 'string' ? model.trim() : '';
+
+  if (!selectedPiModel) {
+    return getPiStatus();
+  }
+
+  writeSetupState({ selectedPiModel });
+  emitLlmStatus();
+
+  return getPiStatus();
+}
+
+function disconnectPi() {
+  persistentPiRpcBridge?.dispose();
+  persistentPiRpcBridge = null;
+  backupPersistentPiRpcBridge?.dispose();
+  backupPersistentPiRpcBridge = null;
+  fsSync.rmSync(getPiAgentDir(), { force: true, recursive: true });
+  writeSetupState({ selectedPiModel: null });
+  llmWarmStatus = 'disabled';
+  emitLlmStatus();
+
+  return getPiStatus();
+}
+
+function getOnboardingStatus() {
+  const permissionsComplete = isPermissionSetupComplete();
+  const parakeet = getParakeetStatus();
+  const pi = getPiStatus();
+  const complete = permissionsComplete && parakeet.installed && pi.connected;
+
+  return {
+    ok: true,
+    complete,
+    completedAt: readSetupState().onboardingCompletedAt ?? null,
+    parakeet,
+    permissions: getPermissionsStatus(),
+    pi,
+    required: !complete
+  };
+}
+
+function shouldShowOnboarding() {
+  if (onboardingSmokeDir) {
+    return true;
+  }
+
+  return getOnboardingStatus().required;
 }
 
 function getAudioHelperCommand(args) {
@@ -1408,6 +1789,7 @@ function startLocalTranscriptionWarmDaemon() {
     cwd: getProjectRoot(),
     env: {
       ...process.env,
+      SUSURA_MODEL_ROOT: getParakeetModelRoot(),
       SUSURA_PRELOAD_PARAKEET: '1'
     },
     stdio: ['pipe', 'pipe', 'pipe']
@@ -1462,6 +1844,10 @@ function startLocalTranscriptionWarmDaemon() {
 }
 
 function prepareLocalTranscriptionCapture(options) {
+  if (!validateParakeetModelDir()) {
+    return { ok: false, message: 'Download the local Parakeet model in onboarding or Settings before listening.' };
+  }
+
   startLocalTranscriptionWarmDaemon();
 
   const selectedSources = normaliseTranscriptionSources(options?.sources);
@@ -1480,6 +1866,7 @@ function prepareLocalTranscriptionCapture(options) {
 
 function shouldWarmLocalTranscriptionOnStartup() {
   return process.env.SUSURA_DISABLE_PARAKEET_WARMUP !== '1'
+    && validateParakeetModelDir()
     && process.platform === 'darwin'
     && smokeExitMs === 0
     && resourceSmokeMs === 0
@@ -1488,6 +1875,10 @@ function shouldWarmLocalTranscriptionOnStartup() {
 }
 
 function startLocalTranscriptionCapture(options) {
+  if (!validateParakeetModelDir()) {
+    throw new Error('Download the local Parakeet model in onboarding or Settings before listening.');
+  }
+
   startLocalTranscriptionWarmDaemon();
   localTranscriptionStopFlush.cancel('start');
 
@@ -1713,7 +2104,9 @@ class PersistentPiRpcBridge {
 
     this.ready = true;
     this.exited = false;
-    this.child = spawn('pi', args, {
+    const pi = getPiSpawnCommand(args);
+    this.child = spawn(pi.command, pi.args, {
+      env: getPiEnvironment(),
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe'
@@ -1946,11 +2339,14 @@ function runPiTextRequest(transcript, options = {}, onDelta = () => {}) {
   const runStartedAt = Date.now();
   const requestedModel = typeof options.model === 'string' ? options.model : '';
   const requestedThinking = typeof options.reasoning === 'string' ? options.reasoning : '';
-  const model = allowedLlmModels.has(requestedModel)
-    ? requestedModel
-    : process.env.SUSURA_LLM_MODEL
-    ?? process.env.SUSURA_BENCH_LLM_MODEL
-    ?? 'openai-codex/gpt-5.4-mini';
+  const configuredModel = typeof readSetupState().selectedPiModel === 'string'
+    ? readSetupState().selectedPiModel
+    : '';
+  const model = requestedModel
+    || configuredModel
+    || process.env.SUSURA_LLM_MODEL
+    || process.env.SUSURA_BENCH_LLM_MODEL
+    || 'openai-codex/gpt-5.4-mini';
   const thinking = allowedLlmThinking.has(requestedThinking)
     ? requestedThinking
     : process.env.SUSURA_LLM_THINKING
@@ -2094,14 +2490,15 @@ function warmPersistentPiRpcBridge() {
     return;
   }
 
-  const model = process.env.SUSURA_LLM_MODEL
-    ?? process.env.SUSURA_BENCH_LLM_MODEL
-    ?? 'openai-codex/gpt-5.4-mini';
+  const model = readSetupState().selectedPiModel
+    || process.env.SUSURA_LLM_MODEL
+    || process.env.SUSURA_BENCH_LLM_MODEL
+    || 'openai-codex/gpt-5.4-mini';
   const thinking = process.env.SUSURA_LLM_THINKING
     ?? process.env.SUSURA_BENCH_LLM_THINKING
     ?? 'off';
 
-  if (!allowedLlmModels.has(model) || !allowedLlmThinking.has(thinking)) {
+  if (!allowedLlmThinking.has(thinking)) {
     llmWarmStatus = 'ready';
     emitLlmStatus();
     return;
@@ -2186,8 +2583,7 @@ function runOneShotPiTextRequest(transcript, { attachments = [], model, thinking
     }
 
     const attachmentArgs = attachments.map((attachment) => `@${attachment.path}`);
-    const child = spawn('python3', [
-      getBundledScriptPath('run-pi-json.py'),
+    const pi = getPiSpawnCommand([
       '--mode', 'json',
       '--print',
       '--no-session',
@@ -2201,7 +2597,9 @@ function runOneShotPiTextRequest(transcript, { attachments = [], model, thinking
       '--thinking', thinking,
       ...attachmentArgs,
       transcript
-    ], {
+    ]);
+    const child = spawn(pi.command, pi.args, {
+      env: getPiEnvironment(),
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe'
@@ -2692,6 +3090,96 @@ function createPrivateOverlayWindow() {
   });
 
   return privateOverlayWindow;
+}
+
+function createOnboardingWindow() {
+  if (onboardingWindow && !onboardingWindow.isDestroyed()) {
+    return onboardingWindow;
+  }
+
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const workArea = primaryDisplay.workArea;
+  const width = 880;
+  const height = 660;
+
+  onboardingWindow = new BrowserWindow({
+    x: workArea.x + Math.round((workArea.width - width) / 2),
+    y: workArea.y + Math.round((workArea.height - height) / 2),
+    width,
+    height,
+    minWidth: 760,
+    minHeight: 560,
+    useContentSize: true,
+    show: false,
+    frame: true,
+    title: 'Set up Susura',
+    resizable: true,
+    maximizable: false,
+    fullscreenable: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      devTools: isDev,
+      nodeIntegration: false,
+      spellcheck: false,
+      sandbox: false
+    }
+  });
+
+  loadRendererSurface(onboardingWindow, 'onboarding');
+
+  onboardingWindow.on('closed', () => {
+    onboardingWindow = null;
+
+    if (!isQuitting && !shouldShowOnboarding()) {
+      createPrivateOverlayHandleWindow();
+    }
+  });
+
+  onboardingWindow.once('ready-to-show', () => {
+    onboardingWindow.show();
+    onboardingWindow.focus();
+    runOnboardingSmokeIfRequested(onboardingWindow);
+  });
+
+  return onboardingWindow;
+}
+
+async function runOnboardingSmokeIfRequested(window) {
+  if (!onboardingSmokeDir || window.isDestroyed()) {
+    return;
+  }
+
+  fsSync.mkdirSync(onboardingSmokeDir, { recursive: true });
+
+  const steps = [
+    ['permissions', 'permissions.png'],
+    ['parakeet', 'parakeet.png'],
+    ['ai', 'ai.png'],
+    ['done', 'done.png']
+  ];
+
+  setTimeout(async () => {
+    try {
+      for (const [step, fileName] of steps) {
+        if (window.isDestroyed()) {
+          return;
+        }
+
+        await window.webContents.executeJavaScript(`window.dispatchEvent(new CustomEvent('susura:onboarding-smoke-step', { detail: ${JSON.stringify(step)} }))`);
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        const image = await window.webContents.capturePage();
+        fsSync.writeFileSync(path.join(onboardingSmokeDir, fileName), image.toPNG());
+      }
+
+      console.log(`susura-onboarding-smoke ${JSON.stringify({ ok: true, dir: onboardingSmokeDir })}`);
+      app.quit();
+    } catch (error) {
+      console.error(`susura-onboarding-smoke ${JSON.stringify({ ok: false, error: error.message })}`);
+      app.exitCode = 1;
+      app.quit();
+    }
+  }, 800);
 }
 
 function createPrivateOverlayHandleWindow() {
@@ -3871,7 +4359,11 @@ app.whenReady().then(() => {
     }));
   }
 
-  createPrivateOverlayHandleWindow();
+  if (shouldShowOnboarding()) {
+    createOnboardingWindow();
+  } else {
+    createPrivateOverlayHandleWindow();
+  }
 
   if (shouldOpenFullAppOverlayOnLaunch()) {
     createWindow();
@@ -3883,7 +4375,11 @@ app.whenReady().then(() => {
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createPrivateOverlayHandleWindow();
+      if (shouldShowOnboarding()) {
+        createOnboardingWindow();
+      } else {
+        createPrivateOverlayHandleWindow();
+      }
     }
   });
 });
@@ -3897,6 +4393,7 @@ app.on('before-quit', () => {
   }
   stopSystemAudioCapture();
   stopLocalParakeetDaemon({ force: true });
+  cancelParakeetDownload();
   persistentPiRpcBridge?.dispose();
   persistentPiRpcBridge = null;
   backupPersistentPiRpcBridge?.dispose();
@@ -3984,6 +4481,36 @@ ipcMain.handle('susura:settings-reset', (event) => {
 
   return { ok: true };
 });
+
+ipcMain.handle('susura:settings-quit', () => {
+  app.quit();
+  return { ok: true };
+});
+
+ipcMain.handle('susura:onboarding-status', () => getOnboardingStatus());
+
+ipcMain.handle('susura:onboarding-complete', () => completeOnboarding());
+
+ipcMain.handle('susura:onboarding-open', () => reopenOnboarding());
+
+ipcMain.handle('susura:parakeet-status', () => getParakeetStatus());
+
+ipcMain.handle('susura:parakeet-download', () => downloadParakeetModel());
+
+ipcMain.handle('susura:parakeet-cancel-download', () => cancelParakeetDownload());
+
+ipcMain.handle('susura:pi-status', () => getPiStatus());
+
+ipcMain.handle('susura:pi-login', () => openPiSetup('login'));
+
+ipcMain.handle('susura:pi-model', () => openPiSetup('model'));
+
+ipcMain.handle('susura:pi-save-model', (_event, request) => {
+  const model = typeof request === 'object' && request !== null ? request.model : '';
+  return savePiModel(model);
+});
+
+ipcMain.handle('susura:pi-disconnect', () => disconnectPi());
 
 ipcMain.handle('susura:prompt-templates-list', () => readPromptTemplateState());
 

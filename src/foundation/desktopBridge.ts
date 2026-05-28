@@ -56,6 +56,37 @@ export type LlmStatus = {
   status: 'warming' | 'ready' | 'error' | 'disabled';
 };
 
+export type ParakeetStatus = {
+  installed: boolean;
+  modelDir?: string;
+  ok: boolean;
+  progress?: {
+    downloadedBytes: number;
+    percent: number;
+    totalBytes: number | null;
+  };
+  status: 'missing' | 'downloading' | 'installed';
+};
+
+export type PiStatus = {
+  agentDir: string;
+  bundled: boolean;
+  connected: boolean;
+  ok: boolean;
+  selectedModel: string | null;
+  status: 'disconnected' | 'ready';
+};
+
+export type OnboardingStatus = {
+  complete: boolean;
+  completedAt: string | null;
+  ok: boolean;
+  parakeet: ParakeetStatus;
+  permissions: PermissionsStatus;
+  pi: PiStatus;
+  required: boolean;
+};
+
 export type PermissionStatusValue =
   | 'denied'
   | 'granted'
@@ -162,6 +193,24 @@ export type PrivateOverlayBridge = {
 };
 
 export type SettingsBridge = {
+  ai?: {
+    disconnect: () => Promise<PiStatus>;
+    openLogin: () => Promise<{ ok: boolean; message?: string }>;
+    openModel: () => Promise<{ ok: boolean; message?: string }>;
+    saveModel: (model: string) => Promise<PiStatus>;
+    status: () => Promise<PiStatus>;
+  };
+  onboarding?: {
+    complete: () => Promise<OnboardingStatus>;
+    open: () => Promise<OnboardingStatus>;
+    status: () => Promise<OnboardingStatus>;
+  };
+  parakeet?: {
+    cancelDownload: () => Promise<ParakeetStatus>;
+    download: () => Promise<ParakeetStatus>;
+    onStatus: (callback: (status: ParakeetStatus) => void) => () => void;
+    status: () => Promise<ParakeetStatus>;
+  };
   promptTemplates?: {
     delete: (id: string) => Promise<PromptTemplateState>;
     chooseAttachments: () => Promise<{ ok: boolean; attachments: PromptTemplateAttachment[] }>;
@@ -170,6 +219,7 @@ export type SettingsBridge = {
     save: (template: PromptTemplate) => Promise<PromptTemplateState>;
     setSelected: (id: string | null) => Promise<PromptTemplateState>;
   };
+  quit?: () => Promise<{ ok: boolean }>;
   reset: () => Promise<{ ok: boolean }>;
 };
 

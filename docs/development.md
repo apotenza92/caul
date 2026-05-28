@@ -2,11 +2,13 @@
 
 Susura is currently using an Electron and React desktop shell with shadcn/ui defaults, Rust workspace crates and a small Swift macOS audio helper. The immediate product target is a basic setup UI, followed by reliable Apple Silicon macOS 15+ microphone plus system audio capture.
 
-The Electron renderer currently owns setup controls, audio source selection, transcript display and optional stop-to-LLM submission. It starts local transcription through `crates/desktop-backend`, which captures microphone audio with `cpal`, captures system audio through `crates/macos-capture` and the Swift helper, resamples to 16 kHz mono in Rust with `rubato`, closes utterances with Rust endpointing, and transcribes completed utterances with local Parakeet. Susura is manual-only for now: the user starts listening, watches live and final transcript text, then stops listening. Packaged builds must not auto-use a local Pi, Codex, browser or subscription login. The development-only Pi LLM bridge can be enabled explicitly with `SUSURA_PI_LLM_BRIDGE=1`.
+The Electron renderer currently owns onboarding, settings, audio source selection, transcript display and optional stop-to-LLM submission. It starts local transcription through `crates/desktop-backend`, which captures microphone audio with `cpal`, captures system audio through `crates/macos-capture` and the Swift helper, resamples to 16 kHz mono in Rust with `rubato`, closes utterances with Rust endpointing, and transcribes completed utterances with local Parakeet. Susura is manual-only for now: the user starts listening, watches live and final transcript text, then stops listening. Packaged builds must not auto-use a local Pi, Codex, browser or subscription login. Users must complete the onboarding or Settings setup flow, and Pi must run with Susura-owned configuration under app `userData`, not global `~/.pi/agent` state.
 
 The Dioxus Native crate remains in the tree as an experiment and comparison target, but it is not the primary desktop surface. The app route no longer uses browser media APIs for local microphone transcription. Electron starts the Rust backend through the main process, and the Rust backend streams JSON-line events back to Electron.
 
-Electron starts a warm Rust local transcription daemon while the app is idle. The daemon loads Parakeet ahead of the first listening action and hot-prepares the selected audio sources. Hot prepare means microphone and system-audio streams may be opened before the user clicks Start listening, but Rust drops all frames until listening is active and emits no transcript or LLM request while idle. This is an explicit latency tradeoff for a live-call assistant. Auto mode and Smart Turn were removed because the automatic turn detection path was not reliable enough for the current product.
+Electron starts a warm Rust local transcription daemon while the app is idle only after the Parakeet model has been explicitly installed into the app models directory. The daemon loads Parakeet ahead of the first listening action and hot-prepares the selected audio sources. Hot prepare means microphone and system-audio streams may be opened before the user clicks Start listening, but Rust drops all frames until listening is active and emits no transcript or LLM request while idle. This is an explicit latency tradeoff for a live-call assistant. Auto mode and Smart Turn were removed because the automatic turn detection path was not reliable enough for the current product.
+
+First-run setup is owned by a dedicated onboarding window. It checks microphone and Screen and System Audio Recording readiness, manages explicit Parakeet download, and opens Pi login/model setup with the isolated Susura Pi configuration. Completion is stored in app `userData`, but app start always re-checks real readiness so deleted models or disconnected Pi setup reopen onboarding.
 
 Speculative LLM dispatch is available for benchmark and development behind `VITE_SUSURA_SPECULATIVE_LLM=1`. When enabled, confirmed stable transcript text may start a hidden LLM request while listening. The stream is revealed on Stop listening only if the visible transcript still matches the speculative request.
 
@@ -15,6 +17,7 @@ Transcript pipeline logging is available for debugging Parakeet output versus re
 ## Commands
 
 - `npm install`: install JavaScript and Electron dependencies.
+- `npm run logo:update`: extract the latest `assets/susura.af` preview into the icon pipeline and regenerate app, marketing and platform icons.
 - `npm run dev`: build the Rust backend and Swift helper, start Vite, and launch the primary Electron app.
 - `cargo build -p susura-desktop-backend`: build the Rust backend binary spawned by Electron.
 - `cargo run -p susura-desktop-backend -- --stream-system-audio`: run system audio capture through the Rust backend.
@@ -31,6 +34,7 @@ Transcript pipeline logging is available for debugging Parakeet output versus re
 - `npm run check`: run the web build and frontend tests together.
 - `npm run smoke:electron`: launch Electron against Vite, exercise the preload runtime and capture bridge, then exit.
 - `npm run smoke:electron:built`: launch the built Electron app and verify the production renderer is not blank.
+- `npm run smoke:onboarding`: launch Electron with fresh temporary app data, force incomplete setup, verify the onboarding window opens, and capture step screenshots in `artifacts/onboarding/`.
 - `npm run smoke:resources`: launch the built idle Electron app, record Electron process memory metrics and fail if the working set exceeds the current 450 MiB budget.
 - `npm run smoke:system-audio`: launch Electron against Vite and measure whether the helper produces non-zero system audio levels.
 - `npm run smoke:browser-system-audio`: play a Chrome tone, launch Electron against Vite and measure whether the app route detects browser system audio.

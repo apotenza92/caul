@@ -30,4 +30,4 @@ The page currently offers Apple Silicon macOS downloads only. Intel macOS builds
 
 ## Current Focus
 
-The first implementation milestone is an Electron setup shell using shadcn/ui defaults, backed by Rust process boundaries for reliable Apple Silicon macOS 15+ microphone and system audio capture. Full overlay UX, provider orchestration and cross-platform capture should follow only after that path is stable.
+The current implementation milestone is an Electron onboarding and overlay shell backed by Rust process boundaries for reliable Apple Silicon macOS 15+ microphone and system audio capture. The app should keep first-run permissions, Parakeet model setup and Pi provider setup explicit before listening or AI requests are enabled. Cross-platform capture should follow only after the macOS path is stable.

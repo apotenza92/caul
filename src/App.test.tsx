@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { initialCaptureStatus, type CaptureRunState } from './foundation/capture';
-import type { PermissionItem, PrivateOverlayState, PromptTemplate, PromptTemplateAttachment, PromptTemplateState, TranscriptionBridgeEvent } from './foundation/desktopBridge';
+import type { OnboardingStatus, ParakeetStatus, PermissionItem, PiStatus, PrivateOverlayState, PromptTemplate, PromptTemplateAttachment, PromptTemplateState, TranscriptionBridgeEvent } from './foundation/desktopBridge';
 import type { RuntimeContext } from './foundation/runtime';
 
 function currentLongDatePattern() {
@@ -81,6 +81,54 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Close settings backdrop' }));
 
     expect(screen.queryByRole('dialog', { name: 'Settings' })).not.toBeInTheDocument();
+  });
+
+  it('renders guided onboarding from the permissions step', async () => {
+    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    installTestBridge();
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Set up Susura' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Permissions' })).toBeInTheDocument();
+    expect(screen.getByText('Microphone')).toBeInTheDocument();
+    expect(screen.getByText('Screen & System Audio Recording')).toBeInTheDocument();
+  });
+
+  it('shows Parakeet download progress in onboarding', async () => {
+    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    installTestBridge({
+      parakeetStatus: testParakeetStatus({
+        installed: false,
+        progress: {
+          downloadedBytes: 42,
+          percent: 42,
+          totalBytes: 100
+        },
+        status: 'downloading'
+      })
+    });
+
+    render(<App />);
+
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Transcription' }));
+
+    expect(screen.getByText('42% downloaded')).toBeInTheDocument();
+  });
+
+  it('saves the selected Pi model from onboarding', async () => {
+    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    const user = userEvent.setup();
+    const bridge = installTestBridge();
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'AI account' }));
+    await user.clear(screen.getByLabelText('Model'));
+    await user.type(screen.getByLabelText('Model'), 'anthropic/claude-sonnet');
+    await user.click(screen.getByRole('button', { name: 'Save model' }));
+
+    expect(bridge.savedPiModels).toEqual(['anthropic/claude-sonnet']);
   });
 
   it('uses platform-specific modal close controls', async () => {
@@ -2104,7 +2152,10 @@ function installTestBridge(overrides: {
   llmReady?: boolean;
   llmStatus?: { ok: boolean; ready: boolean; status: 'warming' | 'ready' | 'error' | 'disabled' };
   onLlmStatus?: (callback: (status: { ok: boolean; ready: boolean; status: 'warming' | 'ready' | 'error' | 'disabled' }) => void) => () => void;
+  onboardingStatus?: OnboardingStatus;
+  parakeetStatus?: ParakeetStatus;
   permissions?: PermissionItem[];
+  piStatus?: PiStatus;
   privateOverlayState?: PrivateOverlayState;
   promptTemplateState?: PromptTemplateState;
   requestLlm?: (options: {
@@ -2136,6 +2187,9 @@ function installTestBridge(overrides: {
   const requestedPermissions: string[] = [];
   let promptTemplateState = overrides.promptTemplateState ?? testPromptTemplateState();
   let settingsResets = 0;
+  const savedPiModels: string[] = [];
+  let parakeetStatus = overrides.parakeetStatus ?? testParakeetStatus();
+  let piStatus = overrides.piStatus ?? testPiStatus();
   let privateOverlayHandleDragStarts = 0;
   let privateOverlayHandleDragMoves = 0;
   let privateOverlayHandleDragEnds = 0;
@@ -2314,6 +2368,49 @@ function installTestBridge(overrides: {
       }
     },
     settings: {
+      ai: {
+        disconnect: async () => {
+          piStatus = testPiStatus({ connected: false, selectedModel: null, status: 'disconnected' });
+          return piStatus;
+        },
+        openLogin: async () => ({ ok: true }),
+        openModel: async () => ({ ok: true }),
+        saveModel: async (model) => {
+          savedPiModels.push(model);
+          piStatus = testPiStatus({ connected: true, selectedModel: model, status: 'ready' });
+          return piStatus;
+        },
+        status: async () => piStatus
+      },
+      onboarding: {
+        complete: async () => overrides.onboardingStatus ?? testOnboardingStatus({
+          parakeet: parakeetStatus,
+          permissions: await window.susura!.permissions!.status(),
+          pi: piStatus
+        }),
+        open: async () => overrides.onboardingStatus ?? testOnboardingStatus({
+          parakeet: parakeetStatus,
+          permissions: await window.susura!.permissions!.status(),
+          pi: piStatus
+        }),
+        status: async () => overrides.onboardingStatus ?? testOnboardingStatus({
+          parakeet: parakeetStatus,
+          permissions: await window.susura!.permissions!.status(),
+          pi: piStatus
+        })
+      },
+      parakeet: {
+        cancelDownload: async () => {
+          parakeetStatus = testParakeetStatus({ installed: false, status: 'missing' });
+          return parakeetStatus;
+        },
+        download: async () => {
+          parakeetStatus = testParakeetStatus({ installed: true, status: 'installed' });
+          return parakeetStatus;
+        },
+        onStatus: () => () => undefined,
+        status: async () => parakeetStatus
+      },
       promptTemplates: {
         chooseAttachments: overrides.choosePromptTemplateAttachments ?? (async () => ({
           ok: true,
@@ -2403,7 +2500,8 @@ function installTestBridge(overrides: {
         });
 
         return { ok: true };
-      }
+      },
+      quit: async () => ({ ok: true })
     },
     systemAudio: {
       start: async () => ({ ok: true }),
@@ -2455,6 +2553,7 @@ function installTestBridge(overrides: {
     openedPermissions,
     prepares,
     requestedPermissions,
+    savedPiModels,
     starts,
     get privateOverlayHandleDragEnds() {
       return privateOverlayHandleDragEnds;
@@ -2554,6 +2653,65 @@ function testPromptTemplateAttachment(overrides: Partial<PromptTemplateAttachmen
     path: overrides.path ?? '/tmp/attachment.png',
     sizeBytes: overrides.sizeBytes ?? 1024,
     support: overrides.support ?? 'supported'
+  };
+}
+
+function testParakeetStatus(overrides: Partial<ParakeetStatus> = {}): ParakeetStatus {
+  return {
+    installed: overrides.installed ?? true,
+    modelDir: overrides.modelDir ?? '/tmp/susura/models/parakeet-tdt-0.6b-v3-int8',
+    ok: overrides.ok ?? true,
+    progress: overrides.progress,
+    status: overrides.status ?? 'installed'
+  };
+}
+
+function testPiStatus(overrides: Partial<PiStatus> = {}): PiStatus {
+  return {
+    agentDir: overrides.agentDir ?? '/tmp/susura/pi-agent',
+    bundled: overrides.bundled ?? true,
+    connected: overrides.connected ?? false,
+    ok: overrides.ok ?? true,
+    selectedModel: overrides.selectedModel ?? null,
+    status: overrides.status ?? 'disconnected'
+  };
+}
+
+function testOnboardingStatus(overrides: Partial<OnboardingStatus> = {}): OnboardingStatus {
+  const permissions = overrides.permissions ?? {
+    ok: true,
+    permissions: [
+      {
+        description: 'Required when listening to speaker audio output.',
+        id: 'screen-recording',
+        label: 'Screen & System Audio Recording',
+        status: 'granted'
+      },
+      {
+        description: 'Required when listening to your microphone.',
+        id: 'microphone',
+        label: 'Microphone',
+        status: 'granted'
+      }
+    ],
+    platform: 'darwin'
+  };
+  const parakeet = overrides.parakeet ?? testParakeetStatus();
+  const pi = overrides.pi ?? testPiStatus();
+  const complete = overrides.complete ?? (
+    permissions.permissions.every((permission) => permission.status === 'granted')
+    && parakeet.installed
+    && pi.connected
+  );
+
+  return {
+    complete,
+    completedAt: overrides.completedAt ?? null,
+    ok: overrides.ok ?? true,
+    parakeet,
+    permissions,
+    pi,
+    required: overrides.required ?? !complete
   };
 }
 

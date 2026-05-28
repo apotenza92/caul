@@ -8,7 +8,9 @@ const sharp = require('sharp');
 
 const rootDir = path.resolve(__dirname, '..');
 const iconsDir = path.join(rootDir, 'assets', 'icons');
-const markSource = path.join(iconsDir, 'susura-mark.svg');
+const markSource = fs.existsSync(path.join(iconsDir, 'susura-mark.png'))
+  ? path.join(iconsDir, 'susura-mark.png')
+  : path.join(iconsDir, 'susura-mark.svg');
 
 const palettes = {
   stable: {

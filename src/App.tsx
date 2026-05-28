@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent, type RefObject } from 'react';
+import { useEffect, useRef, useState, type PointerEvent, type ReactNode, type RefObject } from 'react';
 import { Button } from '@/components/ui/button';
 import { Checkbox, CheckboxDisplay } from '@/components/ui/checkbox';
 import {
@@ -38,9 +38,9 @@ import {
   TooltipTrigger
 } from '@/components/ui/tooltip';
 import { Textarea } from '@/components/ui/textarea';
-import { ChevronDownIcon, CopyIcon, DownloadIcon, FileIcon, FileTextIcon, ImageIcon, LoaderCircleIcon, PaperclipIcon, PencilIcon, PlayIcon, SearchIcon, SendIcon, SettingsIcon, SquareIcon, XIcon } from 'lucide-react';
+import { CheckCircle2Icon, ChevronDownIcon, CopyIcon, DownloadIcon, FileIcon, FileTextIcon, ImageIcon, LoaderCircleIcon, LogOutIcon, PaperclipIcon, PencilIcon, PlayIcon, SearchIcon, SendIcon, SettingsIcon, SquareIcon, XCircleIcon, XIcon } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
-import susuraMarkUrl from '../assets/icons/susura-mark.svg?url';
+import susuraMarkUrl from '../assets/icons/susura-mark.png?url';
 import {
   getLlmBridge,
   getPermissionsBridge,
@@ -49,8 +49,11 @@ import {
   getTranscriptionBridge,
   type LlmModel,
   type LlmReasoning,
+  type OnboardingStatus,
+  type ParakeetStatus,
   type PermissionItem,
   type PermissionsStatus,
+  type PiStatus,
   type PrivateOverlayState,
   type PromptTemplate,
   type PromptTemplateAttachment,
@@ -303,6 +306,10 @@ export function App() {
     return <PrivateOverlayHandleSurface />;
   }
 
+  if (surface === 'onboarding') {
+    return <OnboardingSurface />;
+  }
+
   const transcription = useLiveTranscription();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [listenToMicrophone, setListenToMicrophone] = useState(defaultListenToMicrophone);
@@ -312,6 +319,7 @@ export function App() {
   const [llmReasoning, setLlmReasoning] = useState<LlmReasoning>(defaultLlmReasoning);
   const [isLlmReady, setIsLlmReady] = useState(false);
   const [permissionsStatus, setPermissionsStatus] = useState<PermissionsStatus | null>(null);
+  const [parakeetStatus, setParakeetStatus] = useState<ParakeetStatus | null>(null);
   const [promptTemplates, setPromptTemplates] = useState<PromptTemplate[]>(starterPromptTemplates);
   const [selectedPromptTemplateId, setSelectedPromptTemplateId] = useState<string | null>(null);
   const [isPromptTemplateDialogOpen, setIsPromptTemplateDialogOpen] = useState(false);
@@ -328,7 +336,7 @@ export function App() {
     listenToSystemAudio,
     permissionsStatus
   });
-  const canStartListening = hasAudioSource && isLlmReady && missingSelectedPermissions.length === 0;
+  const canStartListening = hasAudioSource && isLlmReady && (parakeetStatus?.installed ?? true) && missingSelectedPermissions.length === 0;
   const isTranscriptPlaceholder = transcription.output === transcriptPlaceholder;
   const isAiResponsePlaceholder = transcription.llmOutput === aiResponsePlaceholder
     || transcription.llmOutput === legacyAiResponsePlaceholder
@@ -418,6 +426,14 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    void refreshParakeetStatus();
+
+    return getSettingsBridge()?.parakeet?.onStatus?.((status) => {
+      setParakeetStatus(status);
+    });
+  }, []);
+
+  useEffect(() => {
     void loadPromptTemplates();
   }, []);
 
@@ -466,6 +482,14 @@ export function App() {
     }
 
     setPermissionsStatus(await bridge.status());
+  }
+
+  async function refreshParakeetStatus() {
+    const state = await getSettingsBridge()?.parakeet?.status();
+
+    if (state) {
+      setParakeetStatus(state);
+    }
   }
 
   async function requestPermission(permission: PermissionItem['id']) {
@@ -669,6 +693,8 @@ export function App() {
                 llmReasoning={llmReasoning}
                 isMac={isMac}
                 onClose={() => setIsSettingsOpen(false)}
+                onOpenOnboarding={() => void getSettingsBridge()?.onboarding?.open()}
+                onQuit={() => void getSettingsBridge()?.quit?.()}
                 onRequestPermission={requestPermission}
                 permissionsStatus={permissionsStatus}
                 resetSettings={resetSettings}
@@ -697,12 +723,281 @@ function isLlmReadyOrSettled(status: { ready: boolean; status: string }) {
   return status.ready || status.status === 'error' || status.status === 'disabled';
 }
 
-type SusuraSurface = 'app' | 'handle';
+type SusuraSurface = 'app' | 'handle' | 'onboarding';
 
 function getSusuraSurface(): SusuraSurface {
   const surface = new URLSearchParams(window.location.search).get('susura-surface');
 
-  return surface === 'handle' ? surface : 'app';
+  return surface === 'handle' || surface === 'onboarding' ? surface : 'app';
+}
+
+type OnboardingStep = 'permissions' | 'parakeet' | 'ai' | 'done';
+
+function OnboardingSurface() {
+  const [status, setStatus] = useState<OnboardingStatus | null>(null);
+  const [activeStep, setActiveStep] = useState<OnboardingStep>('permissions');
+  const [modelInput, setModelInput] = useState('openai-codex/gpt-5.4-mini');
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    void refresh();
+
+    const unsubscribe = getSettingsBridge()?.parakeet?.onStatus?.((nextStatus) => {
+      setStatus((current) => current ? {
+        ...current,
+        parakeet: nextStatus
+      } : current);
+    });
+
+    const smokeStep = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+
+      if (detail === 'permissions' || detail === 'parakeet' || detail === 'ai' || detail === 'done') {
+        setActiveStep(detail);
+      }
+    };
+
+    window.addEventListener('susura:onboarding-smoke-step', smokeStep);
+
+    return () => {
+      unsubscribe?.();
+      window.removeEventListener('susura:onboarding-smoke-step', smokeStep);
+    };
+  }, []);
+
+  async function refresh() {
+    const nextStatus = await getSettingsBridge()?.onboarding?.status();
+
+    if (nextStatus) {
+      setStatus(nextStatus);
+      setModelInput(nextStatus.pi.selectedModel ?? modelInput);
+    }
+  }
+
+  async function requestPermissions() {
+    const bridge = getPermissionsBridge();
+
+    setMessage('');
+    await bridge?.request?.('microphone');
+    await bridge?.request?.('screen-recording');
+    await refresh();
+  }
+
+  async function downloadParakeet() {
+    setMessage('');
+
+    try {
+      await getSettingsBridge()?.parakeet?.download();
+      await refresh();
+    } catch (error) {
+      setMessage(getDisplayErrorMessage(error));
+    }
+  }
+
+  async function saveModel() {
+    const nextStatus = await getSettingsBridge()?.ai?.saveModel(modelInput);
+
+    if (nextStatus) {
+      setStatus((current) => current ? { ...current, pi: nextStatus } : current);
+    }
+  }
+
+  async function finish() {
+    await getSettingsBridge()?.onboarding?.complete();
+  }
+
+  const permissionsReady = status ? permissionsAreReady(status.permissions) : false;
+  const parakeetReady = Boolean(status?.parakeet.installed);
+  const piReady = Boolean(status?.pi.connected);
+  const steps: Array<{ id: OnboardingStep; label: string; ready: boolean }> = [
+    { id: 'permissions', label: 'Permissions', ready: permissionsReady },
+    { id: 'parakeet', label: 'Transcription', ready: parakeetReady },
+    { id: 'ai', label: 'AI account', ready: piReady },
+    { id: 'done', label: 'Ready', ready: permissionsReady && parakeetReady && piReady }
+  ];
+
+  return (
+    <main className="grid h-screen grid-cols-[230px_minmax(0,1fr)] overflow-hidden bg-background text-foreground">
+      <aside className="border-r border-border bg-muted/20 p-5">
+        <img alt="" className="mb-6 size-14 rounded-xl" src={susuraMarkUrl} />
+        <h1 className="mb-2 text-xl font-semibold">Set up Susura</h1>
+        <p className="mb-6 text-sm text-muted-foreground">A few local checks before the overlay starts.</p>
+        <nav className="grid gap-2" aria-label="Onboarding steps">
+          {steps.map((step) => (
+            <button
+              key={step.id}
+              className={`flex items-center justify-between rounded-md border px-3 py-2 text-left text-sm ${activeStep === step.id ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-background text-foreground'}`}
+              onClick={() => setActiveStep(step.id)}
+              type="button"
+            >
+              <span>{step.label}</span>
+              {step.ready ? <CheckCircle2Icon className="size-4 text-emerald-600" /> : <XCircleIcon className="size-4 text-muted-foreground" />}
+            </button>
+          ))}
+        </nav>
+      </aside>
+      <section className="min-h-0 overflow-y-auto p-8">
+        {activeStep === 'permissions' ? (
+          <OnboardingPanel
+            title="Permissions"
+            description="Susura needs access to microphone audio and system audio before it can listen."
+          >
+            <div className="grid gap-3">
+              {status?.permissions.permissions.map((permission) => (
+                <StatusRow
+                  key={permission.id}
+                  label={permission.label}
+                  value={permission.status}
+                  ready={permission.status === 'granted' || permission.status === 'unsupported'}
+                />
+              ))}
+            </div>
+            <div className="mt-6 flex gap-2">
+              <Button onClick={() => void requestPermissions()} type="button">Request Permissions</Button>
+              <Button onClick={() => void refresh()} type="button" variant="outline">Check again</Button>
+              <Button disabled={!permissionsReady} onClick={() => setActiveStep('parakeet')} type="button" variant="outline">Continue</Button>
+            </div>
+          </OnboardingPanel>
+        ) : null}
+
+        {activeStep === 'parakeet' ? (
+          <OnboardingPanel
+            title="Local transcription"
+            description="Download the local Parakeet model explicitly before Susura transcribes audio."
+          >
+            <StatusRow
+              label="Parakeet model"
+              ready={parakeetReady}
+              value={formatParakeetStatus(status?.parakeet)}
+            />
+            {status?.parakeet.status === 'downloading' ? (
+              <div className="mt-4">
+                <div className="h-2 overflow-hidden rounded-full bg-muted">
+                  <div className="h-full bg-primary" style={{ width: `${status.parakeet.progress?.percent ?? 8}%` }} />
+                </div>
+                <p className="mt-2 text-sm text-muted-foreground">{status.parakeet.progress?.percent ?? 0}% downloaded</p>
+              </div>
+            ) : null}
+            {message ? <p className="mt-4 text-sm text-destructive">{message}</p> : null}
+            <div className="mt-6 flex gap-2">
+              <Button disabled={parakeetReady || status?.parakeet.status === 'downloading'} onClick={() => void downloadParakeet()} type="button">Download model</Button>
+              <Button disabled={status?.parakeet.status !== 'downloading'} onClick={() => void getSettingsBridge()?.parakeet?.cancelDownload()} type="button" variant="outline">Cancel</Button>
+              <Button disabled={!parakeetReady} onClick={() => setActiveStep('ai')} type="button" variant="outline">Continue</Button>
+            </div>
+          </OnboardingPanel>
+        ) : null}
+
+        {activeStep === 'ai' ? (
+          <OnboardingPanel
+            title="AI account"
+            description="Use Pi's provider and model setup so Susura can work with anything Pi supports."
+          >
+            <StatusRow
+              label="Pi"
+              ready={Boolean(status?.pi.bundled)}
+              value={status?.pi.bundled ? 'Bundled' : 'Unavailable'}
+            />
+            <StatusRow
+              label="Selected model"
+              ready={piReady}
+              value={status?.pi.selectedModel ?? 'Not selected'}
+            />
+            <div className="mt-5 grid max-w-lg gap-2">
+              <FieldLabel htmlFor="pi-model">Model</FieldLabel>
+              <Input
+                id="pi-model"
+                onChange={(event) => setModelInput(event.target.value)}
+                value={modelInput}
+              />
+            </div>
+            <div className="mt-6 flex flex-wrap gap-2">
+              <Button onClick={() => void getSettingsBridge()?.ai?.openLogin()} type="button">Sign in with Pi</Button>
+              <Button onClick={() => void getSettingsBridge()?.ai?.openModel()} type="button" variant="outline">Choose model in Pi</Button>
+              <Button onClick={() => void saveModel()} type="button" variant="outline">Save model</Button>
+              <Button disabled={!piReady} onClick={() => setActiveStep('done')} type="button" variant="outline">Continue</Button>
+            </div>
+          </OnboardingPanel>
+        ) : null}
+
+        {activeStep === 'done' ? (
+          <OnboardingPanel
+            title="Ready"
+            description="Susura is ready to open as a small floating handle."
+          >
+            <div className="grid gap-3">
+              <StatusRow label="Permissions" ready={permissionsReady} value={permissionsReady ? 'Ready' : 'Needs setup'} />
+              <StatusRow label="Local transcription" ready={parakeetReady} value={parakeetReady ? 'Ready' : 'Needs setup'} />
+              <StatusRow label="AI account" ready={piReady} value={piReady ? 'Ready' : 'Needs setup'} />
+            </div>
+            <div className="mt-6 flex gap-2">
+              <Button disabled={!permissionsReady || !parakeetReady || !piReady} onClick={() => void finish()} type="button">Start using Susura</Button>
+              <Button onClick={() => void refresh()} type="button" variant="outline">Check again</Button>
+            </div>
+          </OnboardingPanel>
+        ) : null}
+      </section>
+    </main>
+  );
+}
+
+function OnboardingPanel({
+  children,
+  description,
+  title
+}: {
+  children: ReactNode;
+  description: string;
+  title: string;
+}) {
+  return (
+    <div className="mx-auto max-w-2xl">
+      <h2 className="mb-2 text-2xl font-semibold">{title}</h2>
+      <p className="mb-8 text-sm text-muted-foreground">{description}</p>
+      {children}
+    </div>
+  );
+}
+
+function StatusRow({
+  label,
+  ready,
+  value
+}: {
+  label: string;
+  ready: boolean;
+  value: string;
+}) {
+  return (
+    <div className="flex items-center justify-between rounded-md border border-border bg-card px-4 py-3 text-sm">
+      <div>
+        <div className="font-medium">{label}</div>
+        <div className="text-muted-foreground">{value}</div>
+      </div>
+      {ready ? <CheckCircle2Icon className="size-5 text-emerald-600" /> : <XCircleIcon className="size-5 text-muted-foreground" />}
+    </div>
+  );
+}
+
+function permissionsAreReady(status: PermissionsStatus) {
+  return status.permissions.every((permission) => (
+    permission.status === 'granted' || permission.status === 'unsupported'
+  ));
+}
+
+function formatParakeetStatus(status: ParakeetStatus | undefined) {
+  if (!status) {
+    return 'Checking';
+  }
+
+  if (status.status === 'downloading') {
+    return 'Downloading';
+  }
+
+  return status.installed ? 'Installed' : 'Not installed';
+}
+
+function getDisplayErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : 'Something went wrong.';
 }
 
 function usePrivateOverlayStatus() {
@@ -2593,6 +2888,8 @@ function SettingsPage({
   llmModel,
   llmReasoning,
   onClose,
+  onOpenOnboarding,
+  onQuit,
   onRequestPermission,
   permissionsStatus,
   resetSettings,
@@ -2606,6 +2903,8 @@ function SettingsPage({
   llmModel: LlmModel;
   llmReasoning: LlmReasoning;
   onClose: () => void;
+  onOpenOnboarding: () => void;
+  onQuit: () => void;
   onRequestPermission: (permission: PermissionItem['id']) => void;
   permissionsStatus: PermissionsStatus | null;
   resetSettings: () => void;
@@ -2726,22 +3025,92 @@ function SettingsPage({
           </FieldSet>
 
           <FieldSet>
-            <FieldLegend>Reset Susura</FieldLegend>
+            <FieldLegend>Setup</FieldLegend>
             <FieldGroup>
-              <div className="flex max-w-2xl flex-col items-start gap-2">
-                <p className={layout.settingsDescription}>
-                  Restore the default window size, location, model, listening sources and the original three prompt templates. This deletes saved prompt templates.
-                </p>
+              <div className="flex max-w-2xl flex-wrap gap-2">
                 <TooltipButton
                   disabled={isListening || isBusy}
-                  onClick={() => setIsResetDialogOpen(true)}
+                  onClick={onOpenOnboarding}
                   size="default"
-                  tooltip="Reset Settings"
+                  tooltip="Open guided setup"
                   type="button"
                   variant="outline"
                 >
-                  Reset Settings
+                  Open Onboarding
                 </TooltipButton>
+                <TooltipButton
+                  disabled={isListening || isBusy}
+                  onClick={() => void getSettingsBridge()?.parakeet?.download()}
+                  size="default"
+                  tooltip="Download local transcription model"
+                  type="button"
+                  variant="outline"
+                >
+                  Download Parakeet
+                </TooltipButton>
+                <TooltipButton
+                  disabled={isListening || isBusy}
+                  onClick={() => void getSettingsBridge()?.ai?.openLogin()}
+                  size="default"
+                  tooltip="Open Pi sign in"
+                  type="button"
+                  variant="outline"
+                >
+                  Pi Sign In
+                </TooltipButton>
+                <TooltipButton
+                  disabled={isListening || isBusy}
+                  onClick={() => void getSettingsBridge()?.ai?.openModel()}
+                  size="default"
+                  tooltip="Open Pi model selector"
+                  type="button"
+                  variant="outline"
+                >
+                  Pi Model
+                </TooltipButton>
+              </div>
+            </FieldGroup>
+          </FieldSet>
+
+          <FieldSet>
+            <FieldLegend>Susura</FieldLegend>
+            <FieldGroup>
+              <div className="flex max-w-2xl flex-col items-start gap-2">
+                <p className={layout.settingsDescription}>
+                  Reopen the guided setup, reset local UI preferences, or quit the app. This deletes saved prompt templates.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <TooltipButton
+                    disabled={isListening || isBusy}
+                    onClick={onOpenOnboarding}
+                    size="default"
+                    tooltip="Open guided setup"
+                    type="button"
+                    variant="outline"
+                  >
+                    Open Onboarding
+                  </TooltipButton>
+                  <TooltipButton
+                    disabled={isListening || isBusy}
+                    onClick={() => setIsResetDialogOpen(true)}
+                    size="default"
+                    tooltip="Reset Settings"
+                    type="button"
+                    variant="outline"
+                  >
+                    Reset Settings
+                  </TooltipButton>
+                  <TooltipButton
+                    onClick={onQuit}
+                    size="default"
+                    tooltip="Quit Susura"
+                    type="button"
+                    variant="destructive"
+                  >
+                    <LogOutIcon />
+                    Quit Susura
+                  </TooltipButton>
+                </div>
               </div>
             </FieldGroup>
           </FieldSet>
