@@ -39,9 +39,9 @@ Future modules should preserve the same boundaries in crate, package or director
 - Do not use Electron `desktopCapturer` or browser `getDisplayMedia` as a fallback for system audio. The app route should use the Swift Core Audio Tap helper only.
 - Use typed contracts between the capture helper, Rust core and desktop UI.
 - Route Electron transcription commands through the Rust desktop backend, which starts and stops selected microphone and system sources, emits plain final transcript chunks, and keeps raw audio out of the renderer.
-- Support one local listening mode. Susura transcribes selected sources until the user stops listening, then sends the visible transcript to the configured subscription LLM bridge when text exists.
+- Support one local listening mode. Susura transcribes selected sources until the user stops listening. AI submission is optional and must require an explicit provider setup in packaged builds, rather than silently using local Pi, Codex, browser or subscription logins.
 - Keep LLM dispatch out of capture code. Manual stop-to-LLM requests are owned by the Electron bridge, not by the Rust audio and ASR pipeline. Auto mode and Smart Turn were removed because the automatic turn detection path was not reliable enough for the current product.
-- Store prompt template attachments as explicit local file references chosen by the user. Attachments are passed through to the model provider by the one-shot Pi file-argument path because the current persistent RPC path only accepts text prompts. Susura should not parse or convert document attachments itself unless the provider path proves insufficient.
+- Store prompt template attachments as explicit local file references chosen by the user. Development-only Pi bridge attachments are passed through by the one-shot Pi file-argument path because the current persistent RPC path only accepts text prompts. Susura should not parse or convert document attachments itself unless the provider path proves insufficient.
 - Prefer helper-process IPC first. `napi-rs` should remain a migration reference unless process IPC proves inadequate.
 
 ## Boundary Rules

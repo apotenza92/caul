@@ -394,7 +394,7 @@ export function App() {
     void bridge.status()
       .then((status) => {
         if (isMounted) {
-          setIsLlmReady(status.ready || status.status === 'error');
+          setIsLlmReady(isLlmReadyOrSettled(status));
         }
       })
       .catch(() => {
@@ -404,7 +404,7 @@ export function App() {
       });
 
     const unsubscribe = bridge.onStatus((status) => {
-      setIsLlmReady(status.ready || status.status === 'error');
+      setIsLlmReady(isLlmReadyOrSettled(status));
     });
 
     return () => {
@@ -691,6 +691,10 @@ export function App() {
       </TooltipProvider>
     </main>
   );
+}
+
+function isLlmReadyOrSettled(status: { ready: boolean; status: string }) {
+  return status.ready || status.status === 'error' || status.status === 'disabled';
 }
 
 type SusuraSurface = 'app' | 'handle';

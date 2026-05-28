@@ -1935,7 +1935,7 @@ describe('App', () => {
   });
 
   it('keeps start disabled until LLM prewarming completes', async () => {
-    let emitLlmStatus: ((status: { ok: boolean; ready: boolean; status: 'warming' | 'ready' | 'error' }) => void) | null = null;
+    let emitLlmStatus: ((status: { ok: boolean; ready: boolean; status: 'warming' | 'ready' | 'error' | 'disabled' }) => void) | null = null;
 
     installTestBridge({
       llmReady: false,
@@ -1959,6 +1959,20 @@ describe('App', () => {
         status: 'ready'
       });
     });
+
+    expect(await screen.findByRole('button', { name: 'Start Listening' })).not.toBeDisabled();
+  });
+
+  it('allows listening when packaged AI bridge is disabled', async () => {
+    installTestBridge({
+      llmStatus: {
+        ok: true,
+        ready: false,
+        status: 'disabled'
+      }
+    });
+
+    render(<App />);
 
     expect(await screen.findByRole('button', { name: 'Start Listening' })).not.toBeDisabled();
   });
@@ -2088,7 +2102,8 @@ function escapeRegExp(value: string) {
 function installTestBridge(overrides: {
   choosePromptTemplateAttachments?: () => Promise<{ ok: boolean; attachments: PromptTemplateAttachment[] }>;
   llmReady?: boolean;
-  onLlmStatus?: (callback: (status: { ok: boolean; ready: boolean; status: 'warming' | 'ready' | 'error' }) => void) => () => void;
+  llmStatus?: { ok: boolean; ready: boolean; status: 'warming' | 'ready' | 'error' | 'disabled' };
+  onLlmStatus?: (callback: (status: { ok: boolean; ready: boolean; status: 'warming' | 'ready' | 'error' | 'disabled' }) => void) => () => void;
   permissions?: PermissionItem[];
   privateOverlayState?: PrivateOverlayState;
   promptTemplateState?: PromptTemplateState;
@@ -2157,7 +2172,7 @@ function installTestBridge(overrides: {
     getRuntimeContext: async () => overrides.runtimeContext ?? testRuntimeContext(),
     llm: {
       onStatus: overrides.onLlmStatus ?? (() => () => undefined),
-      status: async () => ({
+      status: async () => overrides.llmStatus ?? ({
         ok: true,
         ready: overrides.llmReady ?? true,
         status: overrides.llmReady === false ? 'warming' : 'ready'

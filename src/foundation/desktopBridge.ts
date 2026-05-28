@@ -53,7 +53,7 @@ export type LlmRequestOptions = {
 export type LlmStatus = {
   ok: boolean;
   ready: boolean;
-  status: 'warming' | 'ready' | 'error';
+  status: 'warming' | 'ready' | 'error' | 'disabled';
 };
 
 export type PermissionStatusValue =

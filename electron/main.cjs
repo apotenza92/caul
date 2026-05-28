@@ -15,6 +15,7 @@ const rendererLlmSmoke = process.env.SUSURA_RENDERER_LLM_SMOKE === '1';
 const rendererRealLlmSmoke = process.env.SUSURA_RENDERER_REAL_LLM_SMOKE === '1';
 const resourceSmokeMs = Number(process.env.SUSURA_RESOURCE_SMOKE_MS ?? 0);
 const resourceSmokeMaxWorkingSetMb = Number(process.env.SUSURA_RESOURCE_SMOKE_MAX_WORKING_SET_MB ?? 450);
+const piLlmBridgeMode = String(process.env.SUSURA_PI_LLM_BRIDGE ?? '').trim().toLowerCase();
 const windowSize = {
   width: 800,
   height: 600
@@ -1081,7 +1082,25 @@ let localParakeetDaemonProcess = null;
 let localParakeetDaemonStdout = '';
 let persistentPiRpcBridge = null;
 let backupPersistentPiRpcBridge = null;
-let llmWarmStatus = 'warming';
+let llmWarmStatus = isPiLlmBridgeEnabled() ? 'warming' : 'disabled';
+
+function isPiLlmBridgeEnabled() {
+  if (rendererRealLlmSmoke) {
+    return true;
+  }
+
+  if (piLlmBridgeMode) {
+    return ['1', 'enabled', 'on', 'pi', 'true', 'yes'].includes(piLlmBridgeMode);
+  }
+
+  return !app.isPackaged;
+}
+
+function assertPiLlmBridgeEnabled() {
+  if (!isPiLlmBridgeEnabled()) {
+    throw new Error('AI is not configured yet. Susura does not use local Pi, Codex, browser or subscription logins automatically in packaged builds.');
+  }
+}
 
 function writeTranscriptDebugLog(stage, payload = {}) {
   if (!transcriptDebugLogEnabled) {
@@ -1856,6 +1875,8 @@ class PersistentPiRpcBridge {
 }
 
 async function requestLlmResponse(transcript, options = {}) {
+  assertPiLlmBridgeEnabled();
+
   const requestStartedAt = Date.now();
   const trace = options.trace && typeof options.trace === 'object'
     ? options.trace
@@ -2061,6 +2082,12 @@ function runBackupPersistentPiRpcRequest(transcript, { model, thinking }, onDelt
 }
 
 function warmPersistentPiRpcBridge() {
+  if (!isPiLlmBridgeEnabled()) {
+    llmWarmStatus = 'disabled';
+    emitLlmStatus();
+    return;
+  }
+
   if (process.env.SUSURA_LLM_DISABLE_PERSISTENT_PI === '1') {
     llmWarmStatus = 'ready';
     emitLlmStatus();
