@@ -9,8 +9,13 @@ on:
       - main
     paths:
       - "docs/**"
+      - "assets/icons/icon-32.png"
+      - "assets/icons/icon-256.png"
       - "assets/icons/icon-rounded.png"
+      - "assets/icons/dark/icon-32.png"
+      - "assets/icons/dark/icon-rounded.png"
       - "assets/icons/beta/icon-rounded.png"
+      - "assets/icons/beta/dark/icon-rounded.png"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -27,11 +32,16 @@ jobs:
 
       - name: Prepare public site artefact
         run: |
-          mkdir -p _site/assets/icons/beta
+          mkdir -p _site/assets/icons/dark _site/assets/icons/beta/dark
           cp docs/index.html _site/index.html
           cp docs/.nojekyll _site/.nojekyll
+          cp assets/icons/icon-32.png _site/assets/icons/icon-32.png
+          cp assets/icons/icon-256.png _site/assets/icons/icon-256.png
           cp assets/icons/icon-rounded.png _site/assets/icons/icon-rounded.png
+          cp assets/icons/dark/icon-32.png _site/assets/icons/dark/icon-32.png
+          cp assets/icons/dark/icon-rounded.png _site/assets/icons/dark/icon-rounded.png
           cp assets/icons/beta/icon-rounded.png _site/assets/icons/beta/icon-rounded.png
+          cp assets/icons/beta/dark/icon-rounded.png _site/assets/icons/beta/dark/icon-rounded.png
 
       - name: Checkout public Pages repository
         uses: actions/checkout@v5
