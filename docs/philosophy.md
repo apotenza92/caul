@@ -1,6 +1,6 @@
 # Product Philosophy
 
-Susura should feel like a quiet tool that helps in the moment, not a complex meeting CRM. The product is for people who want a small private assistant for using AI live during phone calls, with fast local transcription models prioritised where practical and their existing ChatGPT subscription used for the AI model for now.
+Susura should feel like a quiet tool that helps in the moment, not a complex meeting CRM. The product is for people who want a small private assistant for using AI during live calls, with fast local transcription models prioritised where practical and their existing ChatGPT subscription used for the AI model for now.
 
 ## Product Principles
 

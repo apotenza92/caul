@@ -7,7 +7,7 @@
 </a>
 <br><br>
 
-Susura is a simple, private way to use AI live during a phone call. It prioritises fast local transcription models where practical, and for now uses your existing ChatGPT subscription for the AI model.
+Susura is a simple, private way to use AI during live calls. It prioritises fast local transcription models where practical, and for now uses your existing ChatGPT subscription for the AI model.
 
 ## Working Name
 
