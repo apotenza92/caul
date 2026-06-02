@@ -107,14 +107,20 @@
       }
 
       .channel-toggle,
-      .platform-toggle {
+      .platform-toggle,
+      .arch-toggle,
+      .format-toggle {
         display: flex;
         justify-content: center;
         margin-bottom: 1rem;
+        position: relative;
+        z-index: 1;
       }
 
       .channel-btn,
-      .platform-btn {
+      .platform-btn,
+      .arch-btn,
+      .format-btn {
         align-items: center;
         background: none;
         border: 1px solid var(--border);
@@ -133,22 +139,30 @@
       }
 
       .channel-btn:first-child,
-      .platform-btn:first-child {
+      .platform-btn:first-child,
+      .arch-btn:first-child,
+      .format-btn:first-child {
         border-radius: 8px 0 0 8px;
       }
 
       .channel-btn:last-child,
-      .platform-btn:last-child {
+      .platform-btn:last-child,
+      .arch-btn:last-child,
+      .format-btn:last-child {
         border-radius: 0 8px 8px 0;
       }
 
       .channel-btn:not(:first-child),
-      .platform-btn:not(:first-child) {
+      .platform-btn:not(:first-child),
+      .arch-btn:not(:first-child),
+      .format-btn:not(:first-child) {
         margin-left: -1px;
       }
 
       .channel-btn:hover:not(.active),
-      .platform-btn:hover:not(.active) {
+      .platform-btn:hover:not(.active),
+      .arch-btn:hover:not(.active),
+      .format-btn:hover:not(.active) {
         border-color: var(--accent);
         color: var(--accent);
         position: relative;
@@ -156,7 +170,9 @@
       }
 
       .channel-btn.active,
-      .platform-btn.active {
+      .platform-btn.active,
+      .arch-btn.active,
+      .format-btn.active {
         background: var(--accent);
         border-color: var(--accent);
         color: white;
@@ -180,7 +196,39 @@
         align-items: center;
         display: flex;
         flex-direction: column;
-        gap: 1.25rem;
+        gap: 1rem;
+        position: relative;
+        z-index: 1;
+      }
+
+      .selection-flow {
+        position: relative;
+      }
+
+      .connector-svg {
+        height: 100%;
+        left: 0;
+        pointer-events: none;
+        position: absolute;
+        top: 0;
+        width: 100%;
+        z-index: 0;
+      }
+
+      .connector-path {
+        animation: flowDash 1s linear infinite;
+        fill: none;
+        stroke: var(--accent);
+        stroke-dasharray: 6 4;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 2;
+      }
+
+      @keyframes flowDash {
+        to {
+          stroke-dashoffset: -10;
+        }
       }
 
       .download-btn {
@@ -241,6 +289,14 @@
         gap: 0.65rem;
         justify-content: center;
         max-width: 520px;
+      }
+
+      .linux-format-note {
+        color: var(--text-muted);
+        display: none;
+        font-size: 0.78rem;
+        line-height: 1.45;
+        max-width: 420px;
       }
 
       .extra-download-links a {
@@ -350,12 +406,16 @@
           padding: 1.25rem;
         }
 
-        .platform-toggle {
+        .platform-toggle,
+        .arch-toggle,
+        .format-toggle {
           flex-wrap: wrap;
           gap: 0.5rem;
         }
 
-        .platform-btn {
+        .platform-btn,
+        .arch-btn,
+        .format-btn {
           border-radius: 8px !important;
           margin-left: 0 !important;
         }
@@ -374,36 +434,49 @@
         <span>Open source</span>
       </a>
 
-      <div class="channel-toggle" aria-label="Release channel">
-        <button id="channel-stable" class="channel-btn active" type="button">Stable</button>
-        <button id="channel-beta" class="channel-btn" type="button">Beta</button>
-      </div>
+      <div class="selection-flow" id="selection-flow">
+        <svg class="connector-svg" id="connector-svg" aria-hidden="true"></svg>
 
-      <div id="version-display" class="version-display"></div>
+        <div class="channel-toggle" aria-label="Release channel">
+          <button id="channel-stable" class="channel-btn active" type="button">Stable</button>
+          <button id="channel-beta" class="channel-btn" type="button">Beta</button>
+        </div>
 
-      <div class="platform-toggle" aria-label="Platform">
-        <button id="platform-mac" class="platform-btn active" type="button">
-          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M17.6 12.6c0-2.2 1.8-3.3 1.9-3.4-1-1.5-2.6-1.7-3.2-1.8-1.4-.1-2.6.8-3.3.8s-1.8-.8-2.9-.8c-1.5 0-2.9.9-3.7 2.2-1.6 2.8-.4 6.9 1.1 9.1.8 1.1 1.7 2.4 2.9 2.3 1.1 0 1.6-.7 3-.7s1.8.7 3 .7c1.2 0 2-1.1 2.8-2.3.9-1.3 1.2-2.5 1.2-2.6 0 0-2.8-1.1-2.8-3.5Z"/>
-            <path d="M15.4 5.9c.6-.8 1.1-1.8 1-2.9-1 .1-2 .6-2.7 1.3-.6.7-1.1 1.8-1 2.8 1 .1 2-.5 2.7-1.2Z"/>
-          </svg>
-          macOS
-        </button>
-        <button id="platform-windows" class="platform-btn" type="button">
-          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M3 4.9 10.6 4v7.2H3V4.9Zm8.6-1L21 2.5v8.7h-9.4V3.9ZM3 12.2h7.6v7.3L3 18.5v-6.3Zm8.6 0H21v9.3l-9.4-1.3v-8Z"/>
-          </svg>
-          Windows
-        </button>
-        <button id="platform-linux" class="platform-btn" type="button">
-          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M12 2c-2.1 0-3.8 1.8-3.8 4.2 0 1.2.3 2.3.8 3.3-.9 1.2-1.6 2.8-1.8 4.8l-2.3 3.5c-.5.7-.3 1.6.4 2.1.7.5 1.7.3 2.1-.4l1.4-2.1h6.4l1.4 2.1c.5.7 1.4.9 2.1.4.7-.5.9-1.4.4-2.1l-2.3-3.5c-.2-2-.9-3.6-1.8-4.8.5-1 .8-2.1.8-3.3C15.8 3.8 14.1 2 12 2Zm-1.1 4.4c0-.5.3-.9.7-.9s.7.4.7.9-.3.9-.7.9-.7-.4-.7-.9Zm2.6 0c0-.5.3-.9.7-.9s.7.4.7.9-.3.9-.7.9-.7-.4-.7-.9ZM9.4 15.8c.2-1.4.6-2.6 1.2-3.5.4.3.9.4 1.4.4s1-.1 1.4-.4c.6.9 1 2.1 1.2 3.5H9.4Z"/>
-          </svg>
-          Linux
-        </button>
-      </div>
+        <div id="version-display" class="version-display"></div>
 
-      <section id="download-section" class="download-wrapper">
+        <div class="platform-toggle" aria-label="Platform">
+          <button id="platform-mac" class="platform-btn active" type="button">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M17.6 12.6c0-2.2 1.8-3.3 1.9-3.4-1-1.5-2.6-1.7-3.2-1.8-1.4-.1-2.6.8-3.3.8s-1.8-.8-2.9-.8c-1.5 0-2.9.9-3.7 2.2-1.6 2.8-.4 6.9 1.1 9.1.8 1.1 1.7 2.4 2.9 2.3 1.1 0 1.6-.7 3-.7s1.8.7 3 .7c1.2 0 2-1.1 2.8-2.3.9-1.3 1.2-2.5 1.2-2.6 0 0-2.8-1.1-2.8-3.5Z"/>
+              <path d="M15.4 5.9c.6-.8 1.1-1.8 1-2.9-1 .1-2 .6-2.7 1.3-.6.7-1.1 1.8-1 2.8 1 .1 2-.5 2.7-1.2Z"/>
+            </svg>
+            macOS
+          </button>
+          <button id="platform-windows" class="platform-btn" type="button">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M3 4.9 10.6 4v7.2H3V4.9Zm8.6-1L21 2.5v8.7h-9.4V3.9ZM3 12.2h7.6v7.3L3 18.5v-6.3Zm8.6 0H21v9.3l-9.4-1.3v-8Z"/>
+            </svg>
+            Windows
+          </button>
+          <button id="platform-linux" class="platform-btn" type="button">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M12 2c-2.1 0-3.8 1.8-3.8 4.2 0 1.2.3 2.3.8 3.3-.9 1.2-1.6 2.8-1.8 4.8l-2.3 3.5c-.5.7-.3 1.6.4 2.1.7.5 1.7.3 2.1-.4l1.4-2.1h6.4l1.4 2.1c.5.7 1.4.9 2.1.4.7-.5.9-1.4.4-2.1l-2.3-3.5c-.2-2-.9-3.6-1.8-4.8.5-1 .8-2.1.8-3.3C15.8 3.8 14.1 2 12 2Zm-1.1 4.4c0-.5.3-.9.7-.9s.7.4.7.9-.3.9-.7.9-.7-.4-.7-.9Zm2.6 0c0-.5.3-.9.7-.9s.7.4.7.9-.3.9-.7.9-.7-.4-.7-.9ZM9.4 15.8c.2-1.4.6-2.6 1.2-3.5.4.3.9.4 1.4.4s1-.1 1.4-.4c.6.9 1 2.1 1.2 3.5H9.4Z"/>
+            </svg>
+            Linux
+          </button>
+        </div>
+
+        <div id="arch-toggle" class="arch-toggle" aria-label="Architecture">
+          <button id="arch-arm64" class="arch-btn active" type="button">ARM64</button>
+          <button id="arch-x64" class="arch-btn" type="button">x64</button>
+        </div>
+
+        <div id="format-toggle" class="format-toggle" aria-label="Linux package format">
+          <button id="format-appimage" class="format-btn active" type="button">AppImage</button>
+          <button id="format-deb" class="format-btn" type="button">Ubuntu / Debian (.deb)</button>
+        </div>
+
+        <section id="download-section" class="download-wrapper">
         <div class="download-links">
           <a id="download-btn" class="download-btn" href="https://github.com/apotenza92/susura/releases/latest/download/Susura-macos-arm64.zip">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -423,6 +496,7 @@
           </a>
         </div>
         <div id="extra-download-links" class="extra-download-links"></div>
+        <p id="linux-format-note" class="linux-format-note"></p>
         <p id="platform-note" class="platform-note"></p>
         <div id="homebrew-section" class="homebrew-section">
           <p id="homebrew-label" class="command-label">Or install via Homebrew:</p>
@@ -431,7 +505,8 @@
             <span id="homebrew-copy" class="copy-label">Copy</span>
           </div>
         </div>
-      </section>
+        </section>
+      </div>
 
       <section id="coming-soon" class="coming-soon">
         <strong>Coming soon</strong>
@@ -474,7 +549,9 @@
       };
       const state = {
         channel: "stable",
-        platform: "mac"
+        platform: "mac",
+        arch: "arm64",
+        linuxFormat: "appimage"
       };
       const darkMode = window.matchMedia("(prefers-color-scheme: dark)");
 
@@ -494,6 +571,90 @@
         document.querySelectorAll(selector).forEach((item) => {
           item.classList.toggle("active", item.id === activeId);
         });
+      }
+
+      function createCurvedPath(x1, y1, x2, y2) {
+        const gap = 8;
+        const startY = y1 + gap;
+        const endY = y2 - gap;
+        const ctrl1Y = startY + (endY - startY) * 0.49;
+        const ctrl2Y = startY + (endY - startY) * 0.51;
+        return `M ${x1} ${startY} C ${x1} ${ctrl1Y} ${x2} ${ctrl2Y} ${x2} ${endY}`;
+      }
+
+      function appendConnector(svg, x1, y1, x2, y2) {
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", createCurvedPath(x1, y1, x2, y2));
+        path.setAttribute("class", "connector-path");
+        svg.appendChild(path);
+      }
+
+      function centrePoint(element, flowRect) {
+        const rect = element.getBoundingClientRect();
+        return {
+          top: rect.top - flowRect.top,
+          bottom: rect.bottom - flowRect.top,
+          x: rect.left + rect.width / 2 - flowRect.left
+        };
+      }
+
+      function updateConnectors() {
+        const svg = document.getElementById("connector-svg");
+        const flow = document.getElementById("selection-flow");
+        if (!svg || !flow) {
+          return;
+        }
+
+        svg.innerHTML = "";
+        const flowRect = flow.getBoundingClientRect();
+        const activeChannel = document.querySelector(".channel-btn.active");
+        const activePlatform = document.querySelector(".platform-btn.active");
+        const activeArch = document.querySelector(".arch-btn.active");
+        const activeFormat = document.querySelector(".format-btn.active");
+        const download = document.getElementById("download-btn");
+        const homebrewBox = document.getElementById("homebrew-box");
+        const homebrewSection = document.getElementById("homebrew-section");
+
+        if (!activeChannel || !activePlatform) {
+          return;
+        }
+
+        const channelPoint = centrePoint(activeChannel, flowRect);
+        const platformPoint = centrePoint(activePlatform, flowRect);
+        appendConnector(svg, channelPoint.x, channelPoint.bottom, platformPoint.x, platformPoint.top);
+
+        if (activeArch && activeArch.offsetParent !== null) {
+          const archPoint = centrePoint(activeArch, flowRect);
+          appendConnector(svg, platformPoint.x, platformPoint.bottom, archPoint.x, archPoint.top);
+
+          if (state.platform === "linux" && activeFormat && activeFormat.offsetParent !== null) {
+            const formatPoint = centrePoint(activeFormat, flowRect);
+            appendConnector(svg, archPoint.x, archPoint.bottom, formatPoint.x, formatPoint.top);
+            if (download && download.offsetParent !== null) {
+              const downloadPoint = centrePoint(download, flowRect);
+              appendConnector(svg, formatPoint.x, formatPoint.bottom, downloadPoint.x, downloadPoint.top);
+            }
+            return;
+          }
+
+          if (download && download.offsetParent !== null) {
+            const downloadPoint = centrePoint(download, flowRect);
+            appendConnector(svg, archPoint.x, archPoint.bottom, downloadPoint.x, downloadPoint.top);
+
+            if (homebrewBox && homebrewSection && homebrewSection.offsetParent !== null) {
+              const homebrewPoint = centrePoint(homebrewBox, flowRect);
+              appendConnector(svg, downloadPoint.x, downloadPoint.bottom, homebrewPoint.x, homebrewPoint.top);
+            }
+          }
+        } else if (download && download.offsetParent !== null) {
+          const downloadPoint = centrePoint(download, flowRect);
+          appendConnector(svg, platformPoint.x, platformPoint.bottom, downloadPoint.x, downloadPoint.top);
+
+          if (homebrewBox && homebrewSection && homebrewSection.offsetParent !== null) {
+            const homebrewPoint = centrePoint(homebrewBox, flowRect);
+            appendConnector(svg, downloadPoint.x, downloadPoint.bottom, homebrewPoint.x, homebrewPoint.top);
+          }
+        }
       }
 
       async function loadReleaseInfo() {
@@ -532,6 +693,8 @@
       function updateDownload() {
         const icon = document.getElementById("app-icon");
         const download = document.getElementById("download-btn");
+        const archToggle = document.getElementById("arch-toggle");
+        const formatToggle = document.getElementById("format-toggle");
         const homebrewSection = document.getElementById("homebrew-section");
         const homebrewCode = document.getElementById("homebrew-code");
         const homebrewLabel = document.getElementById("homebrew-label");
@@ -541,6 +704,7 @@
         const secondaryDownload = document.getElementById("secondary-download-btn");
         const secondaryDownloadLabel = document.getElementById("secondary-download-label");
         const extraDownloadLinks = document.getElementById("extra-download-links");
+        const linuxFormatNote = document.getElementById("linux-format-note");
         const platformNote = document.getElementById("platform-note");
         const comingSoon = document.getElementById("coming-soon");
         const comingSoonLabel = document.getElementById("coming-soon-label");
@@ -552,16 +716,21 @@
 
         setActive(".channel-btn", `channel-${state.channel}`);
         setActive(".platform-btn", `platform-${state.platform}`);
+        setActive(".arch-btn", `arch-${state.arch}`);
+        setActive(".format-btn", `format-${state.linuxFormat}`);
 
         homebrewCopy.textContent = "Copy";
         secondaryDownload.style.display = "none";
         extraDownloadLinks.style.display = "none";
         extraDownloadLinks.innerHTML = "";
+        linuxFormatNote.style.display = "none";
         platformNote.style.display = "none";
+        archToggle.style.display = state.platform === "mac" ? "none" : "flex";
+        formatToggle.style.display = state.platform === "linux" ? "flex" : "none";
 
         if (state.platform === "windows") {
           const windowsDownloads = channelDownloads.windows || {};
-          const windowsDownload = windowsDownloads.arm64 || "";
+          const windowsDownload = windowsDownloads[state.arch] || "";
 
           if (!windowsDownload) {
             downloadSection.style.display = "none";
@@ -574,49 +743,49 @@
           homebrewSection.style.display = "none";
           comingSoon.style.display = "none";
           download.href = windowsDownload;
-          downloadLabel.textContent = "Download for Windows 11 ARM64";
+          downloadLabel.textContent = state.arch === "arm64"
+            ? "Download for Windows 11 ARM64"
+            : "Download for Windows x64";
           download.removeAttribute("aria-disabled");
           download.removeAttribute("tabindex");
-          renderExtraLinks(extraDownloadLinks, [
-            ["Windows x64 installer", windowsDownloads.x64]
-          ]);
-          platformNote.textContent = "Windows builds are available for Windows 11 ARM64 and Windows x64. ARM64 has passed the local Windows 11 ARM release smoke; x64 is CI-built from the same platform backend.";
+          platformNote.textContent = "Windows builds are available for Windows 11 ARM64 and Windows x64.";
           platformNote.style.display = "block";
+          queueConnectorUpdate();
           return;
         }
 
         if (state.platform === "linux") {
           const linuxDownloads = channelDownloads.linux || {};
-          const appImage = linuxDownloads.appImageArm64 || "";
-          const deb = linuxDownloads.debArm64 || "";
+          const suffix = state.arch === "arm64" ? "Arm64" : "X64";
+          const architectureLabel = state.arch === "arm64" ? "ARM64" : "x64";
+          const appImage = linuxDownloads[`appImage${suffix}`] || "";
+          const deb = linuxDownloads[`deb${suffix}`] || "";
+          const selectedDownload = state.linuxFormat === "deb" ? deb : appImage;
 
-          if (!appImage && !deb) {
+          if (!selectedDownload) {
             downloadSection.style.display = "none";
             comingSoon.style.display = "block";
             comingSoonLabel.textContent = "Susura for Linux beta is coming soon.";
+            queueConnectorUpdate();
             return;
           }
 
           downloadSection.style.display = "flex";
           homebrewSection.style.display = "none";
           comingSoon.style.display = "none";
-          download.href = appImage || deb;
-          downloadLabel.textContent = appImage ? "Download AppImage for Linux ARM64" : "Download .deb for Ubuntu ARM64";
+          download.href = selectedDownload;
+          downloadLabel.textContent = state.linuxFormat === "deb"
+            ? `Download .deb for Ubuntu ${architectureLabel}`
+            : `Download AppImage for Linux ${architectureLabel}`;
           download.removeAttribute("aria-disabled");
           download.removeAttribute("tabindex");
-
-          if (appImage && deb) {
-            secondaryDownload.href = deb;
-            secondaryDownloadLabel.textContent = "Download ARM64 .deb";
-            secondaryDownload.style.display = "inline-flex";
-          }
-
-          renderExtraLinks(extraDownloadLinks, [
-            ["Linux x64 AppImage", linuxDownloads.appImageX64],
-            ["Ubuntu x64 .deb", linuxDownloads.debX64]
-          ]);
-          platformNote.textContent = "Linux builds are available for Ubuntu/Linux ARM64 and x64. ARM64 has passed the local Ubuntu 24.04 ARM64 release smoke; x64 is CI-built from the same platform backend.";
+          linuxFormatNote.textContent = state.linuxFormat === "deb"
+            ? "Use .deb for Ubuntu and Debian-based distributions."
+            : "Use AppImage for the most portable Linux install.";
+          linuxFormatNote.style.display = "block";
+          platformNote.textContent = "Linux builds are available for ARM64 and x64.";
           platformNote.style.display = "block";
+          queueConnectorUpdate();
           return;
         }
 
@@ -633,19 +802,11 @@
         downloadLabel.textContent = "Download for Apple Silicon Mac";
         download.removeAttribute("aria-disabled");
         download.removeAttribute("tabindex");
+        queueConnectorUpdate();
       }
 
-      function renderExtraLinks(container, links) {
-        const availableLinks = links.filter(([, href]) => href);
-
-        if (availableLinks.length === 0) {
-          return;
-        }
-
-        container.innerHTML = availableLinks
-          .map(([label, href]) => `<a href="${href}">${label}</a>`)
-          .join("");
-        container.style.display = "flex";
+      function queueConnectorUpdate() {
+        window.requestAnimationFrame(updateConnectors);
       }
 
       document.getElementById("channel-stable").addEventListener("click", () => {
@@ -668,6 +829,22 @@
         state.platform = "linux";
         updateDownload();
       });
+      document.getElementById("arch-arm64").addEventListener("click", () => {
+        state.arch = "arm64";
+        updateDownload();
+      });
+      document.getElementById("arch-x64").addEventListener("click", () => {
+        state.arch = "x64";
+        updateDownload();
+      });
+      document.getElementById("format-appimage").addEventListener("click", () => {
+        state.linuxFormat = "appimage";
+        updateDownload();
+      });
+      document.getElementById("format-deb").addEventListener("click", () => {
+        state.linuxFormat = "deb";
+        updateDownload();
+      });
       document.getElementById("homebrew-box").addEventListener("click", async () => {
         const command = document.getElementById("homebrew-code").textContent;
         const copyLabel = document.getElementById("homebrew-copy");
@@ -688,6 +865,7 @@
       loadReleaseInfo().then(updateDownload);
       updateDownload();
       darkMode.addEventListener("change", updateDownload);
+      window.addEventListener("resize", queueConnectorUpdate);
     </script>
   </body>
 </html>
