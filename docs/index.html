@@ -26,7 +26,7 @@
         --space-xs: 0.55rem;
         --space-sm: 0.85rem;
         --space-md: 1.6rem;
-        --space-lg: 2.5rem;
+        --space-lg: 2.25rem;
         --text: #17211f;
         --text-muted: #62716e;
         --text-subtle: #82908d;
@@ -62,6 +62,10 @@
       }
 
       .container {
+        align-items: center;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-md);
         max-width: 600px;
         padding: 2.25rem 2rem;
         text-align: center;
@@ -71,21 +75,20 @@
       .icon {
         border-radius: 20px;
         height: 96px;
-        margin-bottom: var(--space-md);
         width: 96px;
       }
 
       h1 {
         font-size: 1.75rem;
         font-weight: 600;
-        margin-bottom: var(--space-sm);
+        margin: 0;
       }
 
       .subtitle {
         color: var(--text-muted);
         font-size: 0.92rem;
         line-height: 1.5;
-        margin: 0 auto var(--space-md);
+        margin: 0 auto;
         max-width: 420px;
       }
 
@@ -96,7 +99,6 @@
         font-size: 0.85rem;
         font-weight: 500;
         gap: var(--space-xs);
-        margin-bottom: var(--space-lg);
         text-decoration: none;
         transition: color 0.2s ease;
       }
@@ -116,22 +118,9 @@
       .format-toggle {
         display: flex;
         justify-content: center;
-        margin-bottom: var(--space-lg);
+        margin: 0;
         position: relative;
         z-index: 1;
-      }
-
-      .channel-toggle {
-        margin-bottom: var(--space-lg);
-      }
-
-      .platform-toggle {
-        margin-bottom: var(--space-lg);
-      }
-
-      .arch-toggle,
-      .format-toggle {
-        margin-bottom: var(--space-lg);
       }
 
       .channel-btn,
@@ -202,7 +191,7 @@
         display: none;
         font-size: 0.8rem;
         font-weight: 600;
-        margin-bottom: var(--space-sm);
+        margin: 0;
         position: relative;
         z-index: 1;
       }
@@ -215,13 +204,18 @@
         align-items: center;
         display: flex;
         flex-direction: column;
-        gap: var(--space-md);
+        gap: var(--space-lg);
         position: relative;
         z-index: 1;
       }
 
       .selection-flow {
+        align-items: center;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-lg);
         position: relative;
+        width: 100%;
       }
 
       .connector-svg {
@@ -404,7 +398,7 @@
         color: var(--text-muted);
         font-size: 0.75rem;
         line-height: 1.45;
-        margin: var(--space-lg) auto 0;
+        margin: 0 auto;
         max-width: 420px;
         padding: 0.65rem 1rem;
       }
@@ -437,7 +431,6 @@
         .format-toggle {
           flex-wrap: wrap;
           gap: var(--space-sm);
-          margin-bottom: 2.1rem;
         }
 
         .platform-btn,
