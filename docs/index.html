@@ -569,6 +569,22 @@
           }
         }
       };
+      const assetSizes = {
+        "susura-arm64.AppImage": 196425023,
+        "susura-arm64.deb": 129561944,
+        "susura-beta-arm64.AppImage": 196428377,
+        "susura-beta-arm64.deb": 129583424,
+        "Susura-Beta-macos-arm64.zip": 191359697,
+        "Susura-Beta-windows-arm64-setup.exe": 143720983,
+        "Susura-Beta-windows-x64-setup.exe": 152480606,
+        "susura-beta-x64.AppImage": 195554514,
+        "susura-beta-x64.deb": 129668900,
+        "Susura-macos-arm64.zip": 191178473,
+        "Susura-windows-arm64-setup.exe": 143720180,
+        "Susura-windows-x64-setup.exe": 152482194,
+        "susura-x64.AppImage": 195550088,
+        "susura-x64.deb": 129671352
+      };
       const state = {
         channel: "stable",
         platform: "mac",
@@ -593,6 +609,27 @@
         document.querySelectorAll(selector).forEach((item) => {
           item.classList.toggle("active", item.id === activeId);
         });
+      }
+
+      function assetNameFromUrl(url) {
+        try {
+          return decodeURIComponent(new URL(url).pathname.split("/").pop() || "");
+        } catch {
+          return "";
+        }
+      }
+
+      function formatAssetSize(bytes) {
+        if (!Number.isFinite(bytes) || bytes <= 0) {
+          return "";
+        }
+
+        return `${Math.round(bytes / 1_000_000)} MB`;
+      }
+
+      function labelWithSize(label, url) {
+        const size = formatAssetSize(assetSizes[assetNameFromUrl(url)]);
+        return size ? `${label} · ${size}` : label;
       }
 
       function createCurvedPath(x1, y1, x2, y2) {
@@ -686,6 +723,7 @@
             const stable = await stableResponse.json();
             document.getElementById("version-display").textContent = stable.tag_name;
             document.getElementById("version-display").classList.add("visible");
+            updateAssetSizes(stable);
           }
 
           const betaResponse = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=20`);
@@ -693,6 +731,7 @@
             const releases = await betaResponse.json();
             const beta = releases.find((release) => release.prerelease);
             if (beta) {
+              updateAssetSizes(beta);
               const base = `https://github.com/${repo}/releases/download/${beta.tag_name}`;
               downloads.beta.mac = `${base}/Susura-Beta-macos-arm64.zip`;
               downloads.beta.windows = {
@@ -710,6 +749,18 @@
         } catch {
           // Release metadata may be unavailable during GitHub API downtime or rate limits.
         }
+      }
+
+      function updateAssetSizes(release) {
+        if (!release || !Array.isArray(release.assets)) {
+          return;
+        }
+
+        release.assets.forEach((asset) => {
+          if (asset.name && Number.isFinite(asset.size)) {
+            assetSizes[asset.name] = asset.size;
+          }
+        });
       }
 
       function updateDownload() {
@@ -765,9 +816,10 @@
           homebrewSection.style.display = "none";
           comingSoon.style.display = "none";
           download.href = windowsDownload;
-          downloadLabel.textContent = state.arch === "arm64"
+          const label = state.arch === "arm64"
             ? "Download for Windows 11 ARM64"
             : "Download for Windows x64";
+          downloadLabel.textContent = labelWithSize(label, windowsDownload);
           download.removeAttribute("aria-disabled");
           download.removeAttribute("tabindex");
           platformNote.textContent = "Windows builds are available for Windows 11 ARM64 and Windows x64.";
@@ -796,9 +848,10 @@
           homebrewSection.style.display = "none";
           comingSoon.style.display = "none";
           download.href = selectedDownload;
-          downloadLabel.textContent = state.linuxFormat === "deb"
+          const label = state.linuxFormat === "deb"
             ? `Download .deb for Ubuntu ${architectureLabel}`
             : `Download AppImage for Linux ${architectureLabel}`;
+          downloadLabel.textContent = labelWithSize(label, selectedDownload);
           download.removeAttribute("aria-disabled");
           download.removeAttribute("tabindex");
           linuxFormatNote.textContent = state.linuxFormat === "deb"
@@ -821,7 +874,7 @@
           ? "Or install via Homebrew (Beta):"
           : "Or install via Homebrew:";
         download.href = channelDownloads.mac || fallbackDownloads.mac;
-        downloadLabel.textContent = "Download for Apple Silicon Mac";
+        downloadLabel.textContent = labelWithSize("Download for Apple Silicon Mac", download.href);
         download.removeAttribute("aria-disabled");
         download.removeAttribute("tabindex");
         queueConnectorUpdate();
