@@ -15,7 +15,11 @@ const isBeta = process.env.FORCE_BETA_BUILD === 'true'
   || packageJson.version.includes('-alpha')
   || packageJson.version.includes('-beta')
   || packageJson.version.includes('-rc');
-const appDir = path.join(releaseDir, `linux-${arch}-unpacked`);
+const electronBuilderArch = arch === 'x64' ? 'x86_64' : arch;
+const appDirName = arch === 'x64' ? 'linux-unpacked' : `linux-${arch}-unpacked`;
+const appImageSourcePath = path.join(releaseDir, `susura${isBeta ? '-beta' : ''}-${electronBuilderArch}.AppImage`);
+const appImageOutputPath = path.join(releaseDir, `susura${isBeta ? '-beta' : ''}-${arch}.AppImage`);
+const appDir = path.join(releaseDir, appDirName);
 const packageDir = path.join(releaseDir, `deb-${arch}`);
 const outputPath = path.join(releaseDir, `susura${isBeta ? '-beta' : ''}-${arch}.deb`);
 const appDisplayName = isBeta ? 'Susura Beta' : 'Susura';
@@ -40,6 +44,12 @@ if (!existsSync(appDir)) {
   console.error(`Linux unpacked app is missing: ${appDir}`);
   console.error('Run electron-builder for the Linux AppImage target before building the Debian package.');
   process.exit(1);
+}
+
+if (appImageSourcePath !== appImageOutputPath && existsSync(appImageSourcePath)) {
+  rmSync(appImageOutputPath, { force: true });
+  cpSync(appImageSourcePath, appImageOutputPath);
+  rmSync(appImageSourcePath, { force: true });
 }
 
 rmSync(packageDir, { recursive: true, force: true });
