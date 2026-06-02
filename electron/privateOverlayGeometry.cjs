@@ -6,18 +6,15 @@ function orientOverlaySizeForEdge(size, edge) {
     return size;
   }
 
-  const isSideEdge = edge === 'left' || edge === 'right';
-  const shouldFlipSize = isSideEdge
-    ? width > height
-    : height > width;
+  const shouldFlipSize = (edge === 'top' || edge === 'bottom') && height > width;
 
   return shouldFlipSize
     ? { height: width, width: height }
     : { height, width };
 }
 
-function getPreferredOverlaySizeForEdge(size, edge, { minimumNonCompactWidth = 0 } = {}) {
-  const oriented = orientOverlaySizeForEdge(size, edge);
+function getPreferredOverlaySizeForEdge(size, edge, { minimumNonCompactWidth = 0, orient = true } = {}) {
+  const oriented = orient ? orientOverlaySizeForEdge(size, edge) : size;
 
   return {
     height: oriented.height,

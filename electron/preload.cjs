@@ -46,9 +46,16 @@ contextBridge.exposeInMainWorld('susura', {
     dragWindowEnd: (point) => ipcRenderer.invoke('susura:private-overlay-window-drag-end', point),
     dragWindowMove: (point) => ipcRenderer.invoke('susura:private-overlay-window-drag-move', point),
     dragWindowStart: (point) => ipcRenderer.invoke('susura:private-overlay-window-drag-start', point),
+    resizeWindowEnd: (point) => ipcRenderer.invoke('susura:private-overlay-window-resize-end', point),
+    resizeWindowMove: (point) => {
+      ipcRenderer.send('susura:private-overlay-window-resize-move-live', point);
+      return Promise.resolve();
+    },
+    resizeWindowStart: (point) => ipcRenderer.invoke('susura:private-overlay-window-resize-start', point),
     panicHide: () => ipcRenderer.invoke('susura:private-overlay-panic-hide'),
     resetHandlePosition: () => ipcRenderer.invoke('susura:private-overlay-reset-handle'),
     setClickThrough: (enabled) => ipcRenderer.invoke('susura:private-overlay-set-click-through', { enabled }),
+    setHandleSize: (size) => ipcRenderer.invoke('susura:private-overlay-set-handle-size', { size }),
     showHandleMenu: () => ipcRenderer.invoke('susura:private-overlay-handle-menu'),
     showMain: () => ipcRenderer.invoke('susura:private-overlay-show-main'),
     status: () => ipcRenderer.invoke('susura:private-overlay-status'),
@@ -57,6 +64,7 @@ contextBridge.exposeInMainWorld('susura', {
   settings: {
     ai: {
       disconnect: () => ipcRenderer.invoke('susura:pi-disconnect'),
+      openChatGptLogin: () => ipcRenderer.invoke('susura:pi-chatgpt-login'),
       openLogin: () => ipcRenderer.invoke('susura:pi-login'),
       openModel: () => ipcRenderer.invoke('susura:pi-model'),
       saveModel: (model) => ipcRenderer.invoke('susura:pi-save-model', { model }),
@@ -64,12 +72,13 @@ contextBridge.exposeInMainWorld('susura', {
     },
     onboarding: {
       complete: () => ipcRenderer.invoke('susura:onboarding-complete'),
+      fitContent: (size) => ipcRenderer.invoke('susura:onboarding-fit-content', size),
       open: () => ipcRenderer.invoke('susura:onboarding-open'),
       status: () => ipcRenderer.invoke('susura:onboarding-status')
     },
     parakeet: {
       cancelDownload: () => ipcRenderer.invoke('susura:parakeet-cancel-download'),
-      download: () => ipcRenderer.invoke('susura:parakeet-download'),
+      download: (modelId) => ipcRenderer.invoke('susura:parakeet-download', { modelId }),
       onStatus: (callback) => {
         const listener = (_event, payload) => callback(payload);
 
@@ -79,6 +88,7 @@ contextBridge.exposeInMainWorld('susura', {
           ipcRenderer.off('susura:parakeet-status', listener);
         };
       },
+      setModel: (modelId) => ipcRenderer.invoke('susura:parakeet-set-model', { modelId }),
       status: () => ipcRenderer.invoke('susura:parakeet-status')
     },
     promptTemplates: {

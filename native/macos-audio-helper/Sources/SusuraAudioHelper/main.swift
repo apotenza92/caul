@@ -1160,6 +1160,28 @@ func capabilities(writer: EventWriter) {
   ))
 }
 
+func screenCapturePermissionStatus(writer: EventWriter) {
+  let granted = CGPreflightScreenCaptureAccess()
+
+  writer.emitImmediate(HelperEvent(
+    type: "screen_capture_permission",
+    message: granted ? "granted" : "not-granted",
+    ok: granted,
+    text: granted ? "granted" : "not-granted"
+  ))
+}
+
+func requestScreenCapturePermission(writer: EventWriter) {
+  let granted = CGRequestScreenCaptureAccess()
+
+  writer.emitImmediate(HelperEvent(
+    type: "screen_capture_permission",
+    message: granted ? "granted" : "not-granted",
+    ok: granted,
+    text: granted ? "granted" : "not-granted"
+  ))
+}
+
 @available(macOS 14.2, *)
 func tapSmoke(writer: EventWriter) throws {
   let capture = SystemAudioCapture(writer: writer, ioProcMode: argumentValue(after: "--io-proc") ?? "block")
@@ -1408,6 +1430,18 @@ let arguments = Set(CommandLine.arguments.dropFirst())
 
 if arguments.contains("--capabilities") {
   capabilities(writer: writer)
+  Thread.sleep(forTimeInterval: 0.1)
+  exit(0)
+}
+
+if arguments.contains("--screen-capture-permission-status") {
+  screenCapturePermissionStatus(writer: writer)
+  Thread.sleep(forTimeInterval: 0.1)
+  exit(0)
+}
+
+if arguments.contains("--request-screen-capture-permission") {
+  requestScreenCapturePermission(writer: writer)
   Thread.sleep(forTimeInterval: 0.1)
   exit(0)
 }

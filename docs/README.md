@@ -8,16 +8,16 @@ This folder is the durable project memory for future agents and contributors. Ke
 
 The `Publish Download Page` workflow mirrors only the static download page and icon assets into the public `apotenza92.github.io` site repo, keeping the published site independent from the source tree layout.
 
-The page currently offers Apple Silicon macOS downloads only, including direct ZIP links and Homebrew cask commands for stable and beta channels. Intel macOS builds are not supported. Windows and Linux must show `Coming soon` until those packaged apps have been built and tested.
+The page currently offers stable and beta downloads for Apple Silicon macOS, Windows ARM64/x64 and Ubuntu/Linux ARM64/x64. macOS also includes Homebrew cask commands for stable and beta channels. Intel macOS builds are not supported. Windows/Linux ARM64 has local Parallels VM release-smoke coverage; Windows/Linux x64 is CI-built from the same platform backend and should not be described as locally smoke-tested until dedicated x64 coverage exists.
 
 ## Reading Guide
 
 - `philosophy.md`: Product identity, usability principles and privacy stance.
 - `architecture.md`: Monorepo shape, module boundaries and current technical choices.
 - `macos-audio.md`: macOS 15+ microphone and system audio capture plan.
+- `cross-platform-release-plan.md`: Windows and Linux build, package and E2E release plan.
 - `competitor-notes.md`: Public findings from Cluely, Natively and Pluely.
 - `resources.md`: Preferred platform docs, reference projects and libraries.
-- `development.md`: Local commands and Parallels macOS VM testing notes.
 - `llm-first-chunk-optimisation.md`: Benchmark loop for reducing stop-to-first-visible-LLM-text latency.
 
 ## Documentation Rules
@@ -30,4 +30,10 @@ The page currently offers Apple Silicon macOS downloads only, including direct Z
 
 ## Current Focus
 
-The current implementation milestone is an Electron onboarding and overlay shell backed by Rust process boundaries for reliable Apple Silicon macOS 15+ microphone and system audio capture. The app should keep first-run permissions, Parakeet model setup and Pi provider setup explicit before listening or AI requests are enabled. Cross-platform capture should follow only after the macOS path is stable.
+The current implementation milestone is a clean multi-platform Electron package backed by Rust process boundaries for reliable Apple Silicon macOS, Windows and Ubuntu/Linux capture. The app should keep first-run permissions, Parakeet model setup and Pi provider setup explicit before listening or AI requests are enabled. macOS remains the reference implementation, while Windows and Linux ARM64 have local VM release gates for packaged capture, transcription, onboarding and pre-setup privacy. Windows/Linux x64 artefacts are CI-built from the same backend and published with that caveat. Broader Linux distribution support remains deferred until it has dedicated test coverage.
+
+## Development App Policy
+
+Use `npm run dev` for normal implementation work. It runs a source Electron/Vite loop and should stay screenshot-friendly, Dock-visible and non-private so UI issues can be inspected and marked up quickly.
+
+Use `npm run dist:mac:dev` plus `npm run launch:mac:dev` only for packaged-identity checks such as macOS permissions, onboarding freshness, signing, bundle identity, icon/release layout, packaged resources and packaged `userData` behaviour.

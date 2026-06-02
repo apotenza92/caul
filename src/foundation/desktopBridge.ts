@@ -56,9 +56,13 @@ export type LlmStatus = {
   status: 'warming' | 'ready' | 'error' | 'disabled';
 };
 
+export type LocalTranscriptionModelId = 'parakeet' | 'moonshine-tiny';
+
 export type ParakeetStatus = {
   installed: boolean;
   modelDir?: string;
+  modelId?: LocalTranscriptionModelId;
+  modelName?: string;
   ok: boolean;
   progress?: {
     downloadedBytes: number;
@@ -77,6 +81,33 @@ export type PiStatus = {
   status: 'disconnected' | 'ready';
 };
 
+export type TranscriptionRecommendation = {
+  autoDownloadModel?: boolean;
+  autoDownloadParakeet: boolean;
+  ok: boolean;
+  recommended: 'cloud' | 'local-parakeet' | 'local-moonshine-tiny';
+  recommendedModel?: {
+    id: LocalTranscriptionModelId;
+    name: string;
+    reason: string;
+  };
+  resources: {
+    accelerator: string;
+    arch: string;
+    cpuCores: number;
+    freeMemoryGb: number;
+    platform: string;
+    totalMemoryGb: number;
+  };
+  score: {
+    machineProbeIterationsPerMs: number;
+    parakeet: number;
+    moonshineTiny?: number;
+  };
+  status: 'ready';
+  summary: string;
+};
+
 export type OnboardingStatus = {
   complete: boolean;
   completedAt: string | null;
@@ -85,6 +116,8 @@ export type OnboardingStatus = {
   permissions: PermissionsStatus;
   pi: PiStatus;
   required: boolean;
+  selectedLocalTranscriptionModel: LocalTranscriptionModelId | null;
+  transcription: TranscriptionRecommendation;
 };
 
 export type PermissionStatusValue =
@@ -123,10 +156,13 @@ export type PromptTemplateState = {
   templates: PromptTemplate[];
 };
 
+export type PrivateOverlayHandleSize = 'small' | 'medium' | 'large';
+
 export type PrivateOverlayState = {
   clickThrough: boolean;
   handle: {
     opacity: number;
+    size: PrivateOverlayHandleSize;
     visible: boolean;
     x: number;
     y: number;
@@ -185,7 +221,11 @@ export type PrivateOverlayBridge = {
   onState: (callback: (state: PrivateOverlayState) => void) => () => void;
   panicHide: () => Promise<PrivateOverlayState>;
   resetHandlePosition: () => Promise<PrivateOverlayState>;
+  resizeWindowEnd: (point: { direction: string; screenX: number; screenY: number }) => Promise<PrivateOverlayState>;
+  resizeWindowMove: (point: { direction: string; screenX: number; screenY: number }) => Promise<void>;
+  resizeWindowStart: (point: { direction: string; screenX: number; screenY: number }) => Promise<PrivateOverlayState>;
   setClickThrough: (enabled: boolean) => Promise<PrivateOverlayState>;
+  setHandleSize: (size: PrivateOverlayHandleSize) => Promise<PrivateOverlayState>;
   showHandleMenu: () => Promise<PrivateOverlayState>;
   showMain: () => Promise<PrivateOverlayState>;
   status: () => Promise<PrivateOverlayState>;
@@ -195,6 +235,7 @@ export type PrivateOverlayBridge = {
 export type SettingsBridge = {
   ai?: {
     disconnect: () => Promise<PiStatus>;
+    openChatGptLogin: () => Promise<{ ok: boolean; message?: string }>;
     openLogin: () => Promise<{ ok: boolean; message?: string }>;
     openModel: () => Promise<{ ok: boolean; message?: string }>;
     saveModel: (model: string) => Promise<PiStatus>;
@@ -202,13 +243,15 @@ export type SettingsBridge = {
   };
   onboarding?: {
     complete: () => Promise<OnboardingStatus>;
+    fitContent?: (size: { height: number; width?: number }) => Promise<{ ok: boolean }>;
     open: () => Promise<OnboardingStatus>;
     status: () => Promise<OnboardingStatus>;
   };
   parakeet?: {
     cancelDownload: () => Promise<ParakeetStatus>;
-    download: () => Promise<ParakeetStatus>;
+    download: (modelId?: LocalTranscriptionModelId) => Promise<ParakeetStatus>;
     onStatus: (callback: (status: ParakeetStatus) => void) => () => void;
+    setModel: (modelId: LocalTranscriptionModelId) => Promise<ParakeetStatus>;
     status: () => Promise<ParakeetStatus>;
   };
   promptTemplates?: {

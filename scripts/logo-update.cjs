@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const sharp = require('sharp');
 
 const rootDir = path.resolve(__dirname, '..');
 const affinityPath = path.join(rootDir, 'assets', 'susura.af');
@@ -37,13 +38,53 @@ if (pngEndIndex < 0) {
   fail('Found a PNG signature in assets/susura.af, but could not find its end marker.');
 }
 
-fs.mkdirSync(iconsDir, { recursive: true });
-fs.writeFileSync(markPngPath, affinityData.subarray(pngStart, pngEndIndex + pngEnd.length));
-console.log(`Extracted ${path.relative(rootDir, markPngPath)}`);
+async function main() {
+  fs.mkdirSync(iconsDir, { recursive: true });
 
-const result = spawnSync(process.execPath, [path.join(__dirname, 'generate-icons.cjs')], {
-  cwd: rootDir,
-  stdio: 'inherit'
+  const trimmedMark = await sharp(affinityData.subarray(pngStart, pngEndIndex + pngEnd.length))
+    .ensureAlpha()
+    .trim({
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+      threshold: 10
+    })
+    .png()
+    .toBuffer();
+
+  const paddedMark = await sharp(trimmedMark)
+    .resize(360, 360, {
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+      fit: 'contain'
+    })
+    .png()
+    .toBuffer();
+  const paddedMarkMetadata = await sharp(paddedMark).metadata();
+
+  await sharp({
+    create: {
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+      channels: 4,
+      height: 512,
+      width: 512
+    }
+  })
+    .composite([{
+      input: paddedMark,
+      left: Math.round((512 - (paddedMarkMetadata.width ?? 360)) / 2),
+      top: Math.round((512 - (paddedMarkMetadata.height ?? 360)) / 2)
+    }])
+    .png()
+    .toFile(markPngPath);
+  console.log(`Extracted ${path.relative(rootDir, markPngPath)}`);
+
+  const result = spawnSync(process.execPath, [path.join(__dirname, 'generate-icons.cjs')], {
+    cwd: rootDir,
+    stdio: 'inherit'
+  });
+
+  process.exit(result.status ?? 1);
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
 });
-
-process.exit(result.status ?? 1);

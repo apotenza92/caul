@@ -4,7 +4,7 @@ import { Tooltip as TooltipPrimitive } from "radix-ui"
 import { cn } from "@/lib/utils"
 
 function TooltipProvider({
-  delayDuration = 300,
+  delayDuration = 0,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Provider>) {
   return (
@@ -29,15 +29,26 @@ function TooltipTrigger({
 }
 
 function TooltipContent({
+  align = "center",
   className,
+  collisionPadding = 12,
   sideOffset = 4,
   children,
   style,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Content>) {
+  if (
+    typeof document !== "undefined"
+    && document.documentElement.dataset.susuraSuppressTooltips === "true"
+  ) {
+    return null
+  }
+
   return (
     <TooltipPrimitive.Portal>
       <TooltipPrimitive.Content
+        align={align}
+        collisionPadding={collisionPadding}
         data-slot="tooltip-content"
         sideOffset={sideOffset}
         style={{
@@ -45,7 +56,7 @@ function TooltipContent({
           ...style
         }}
         className={cn(
-          "z-[2147483647] overflow-hidden rounded-md bg-primary px-2 py-1.5 text-xs leading-4 text-primary-foreground shadow-md animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+          "z-[2147483647] overflow-hidden rounded-md bg-primary px-2 py-1.5 text-center text-xs leading-4 text-primary-foreground shadow-md",
           className
         )}
         {...props}

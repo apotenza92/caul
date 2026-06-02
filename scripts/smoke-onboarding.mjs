@@ -11,6 +11,7 @@ const child = spawn(path.join(root, 'node_modules', '.bin', 'electron'), ['.'], 
   cwd: root,
   env: {
     ...process.env,
+    SUSURA_DISABLE_MODEL_AUTO_DOWNLOAD: '1',
     SUSURA_ONBOARDING_SMOKE_DIR: screenshotDir,
     SUSURA_USER_DATA_DIR: userDataDir
   },

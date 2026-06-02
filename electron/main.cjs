@@ -1,9 +1,11 @@
-const { app, BrowserWindow, Menu, dialog, globalShortcut, ipcMain, nativeTheme, screen, shell, systemPreferences } = require('electron');
+const { app, BrowserWindow, Menu, dialog, globalShortcut, ipcMain, nativeTheme, screen, session, shell, systemPreferences } = require('electron');
 const { spawn } = require('node:child_process');
 const fsSync = require('node:fs');
 const https = require('node:https');
+const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline');
+const { pathToFileURL } = require('node:url');
 const { getPreferredOverlaySizeForEdge } = require('./privateOverlayGeometry.cjs');
 const { createStopFlushController } = require('./transcriptionStopFlush.cjs');
 
@@ -12,38 +14,68 @@ const smokeExitMs = Number(process.env.SUSURA_SMOKE_EXIT_MS ?? 0);
 const systemAudioSmokeMs = Number(process.env.SUSURA_SYSTEM_AUDIO_SMOKE_MS ?? 0);
 const localParakeetSmokeMs = Number(process.env.SUSURA_LOCAL_PARAKEET_SMOKE_MS ?? 0);
 const rendererTranscriptionSmokeMs = Number(process.env.SUSURA_RENDERER_TRANSCRIPTION_SMOKE_MS ?? 0);
+const rendererTranscriptionSmokeNoLlm = process.env.SUSURA_RENDERER_TRANSCRIPTION_SMOKE_NO_LLM === '1';
 const rendererLlmSmoke = process.env.SUSURA_RENDERER_LLM_SMOKE === '1';
 const rendererRealLlmSmoke = process.env.SUSURA_RENDERER_REAL_LLM_SMOKE === '1';
 const onboardingSmokeDir = process.env.SUSURA_ONBOARDING_SMOKE_DIR;
 const resourceSmokeMs = Number(process.env.SUSURA_RESOURCE_SMOKE_MS ?? 0);
 const resourceSmokeMaxWorkingSetMb = Number(process.env.SUSURA_RESOURCE_SMOKE_MAX_WORKING_SET_MB ?? 450);
+const packagedLaunchSmokeMs = Number(process.env.SUSURA_PACKAGED_LAUNCH_SMOKE_MS ?? 0);
+const packagedLaunchSmokeRequiresOnboarding = process.env.SUSURA_PACKAGED_LAUNCH_SMOKE_REQUIRE_ONBOARDING === '1';
+const packagedLaunchSmokeWaitMs = Number(process.env.SUSURA_PACKAGED_LAUNCH_SMOKE_WAIT_MS ?? (packagedLaunchSmokeRequiresOnboarding ? 5000 : 1000));
+const packagedPrivacySmoke = process.env.SUSURA_PACKAGED_PRIVACY_SMOKE === '1';
+const packagedOnboardingCompletionSmoke = process.env.SUSURA_PACKAGED_ONBOARDING_COMPLETION_SMOKE === '1';
+const smokeOutputFile = process.env.SUSURA_SMOKE_OUTPUT_FILE;
 const piLlmBridgeMode = String(process.env.SUSURA_PI_LLM_BRIDGE ?? '').trim().toLowerCase();
-const windowSize = {
-  width: 800,
-  height: 600
-};
-const overlayWindowSize = {
-  width: 920,
-  height: 640
+const defaultAppWindowSize = {
+  width: 960,
+  height: 688
 };
 const maximumOverlayWindowSize = {
   width: 1200,
   height: 900
 };
-const handleWindowSize = {
-  width: 32,
-  height: 32
+const handleWindowSizePresets = {
+  small: 32,
+  medium: 48,
+  large: 64
+};
+
+function emitSmokeLine(line) {
+  console.log(line);
+
+  if (!smokeOutputFile) {
+    return;
+  }
+
+  try {
+    fsSync.mkdirSync(path.dirname(smokeOutputFile), { recursive: true });
+    fsSync.appendFileSync(smokeOutputFile, `${line}${os.EOL}`);
+  } catch (error) {
+    console.error(`susura-smoke-output failed ${error.message}`);
+  }
+}
+const defaultHandleSizePreset = 'medium';
+const onboardingContentSize = {
+  width: 496,
+  initialHeight: 560,
+  minHeight: 360
 };
 const minimumWindowSize = {
   width: 600,
   height: 400
 };
-const minimumNonCompactOverlayWidth = 920;
+const minimumOverlayWindowSize = {
+  width: 416,
+  height: 400
+};
+const nonCompactOverlayTransitionWidth = 960;
 const resetWindowSize = {
-  width: minimumNonCompactOverlayWidth,
-  height: windowSize.height
+  width: defaultAppWindowSize.width,
+  height: defaultAppWindowSize.height
 };
 const overlayWindowGap = 4;
+const overlayWindowResizeOutset = 8;
 const windowScreenMargin = 8;
 const handleMidpointMagnetPx = 72;
 const handleSnapPreviewAnimationDurationMs = 140;
@@ -52,15 +84,19 @@ const windowStateFileName = 'window-state.json';
 const privateOverlayStateFileName = 'private-overlay-state.json';
 const promptTemplatesFileName = 'prompt-templates.json';
 const setupStateFileName = 'setup-state.json';
+const transcriptionRecommendationTtlMs = 7 * 24 * 60 * 60 * 1000;
 const parakeetArchiveUrl = 'https://blob.handy.computer/parakeet-v3-int8.tar.gz';
 const parakeetModelDirName = 'parakeet-tdt-0.6b-v3-int8';
+const moonshineTinyArchiveUrl = 'https://blob.handy.computer/moonshine-tiny-streaming-en.tar.gz';
+const moonshineTinyModelDirName = 'moonshine-tiny-streaming-en';
+const defaultPiChatGptProvider = 'openai-codex';
+const defaultPiChatGptModel = 'openai-codex/gpt-5.5';
 const parakeetRequiredFiles = [
   'encoder-model.int8.onnx',
   'decoder_joint-model.int8.onnx',
   'nemo128.onnx',
   'vocab.txt'
 ];
-const transcriptDebugLogEnabled = process.env.SUSURA_TRANSCRIPT_DEBUG_LOG === '1';
 let transcriptDebugLogPath = null;
 let mainWindow = null;
 let privateOverlayWindow = null;
@@ -68,9 +104,18 @@ let privateOverlayHandleWindow = null;
 let privateOverlayHandleDrag = null;
 let privateOverlayHandleSnapAnimation = null;
 let privateOverlayWindowDrag = null;
+let privateOverlayWindowResize = null;
 let onboardingWindow = null;
 let parakeetDownload = null;
+let localModelDownload = null;
+let piChatGptLoginPromise = null;
+let piAuthStorageImportPromise = null;
 let isQuitting = false;
+let packagedLaunchSmokeStarted = false;
+const packagedPrivacySmokeState = {
+  mainHttpRequests: [],
+  rendererHttpRequests: []
+};
 
 const starterPromptTemplates = [
   {
@@ -90,12 +135,151 @@ const starterPromptTemplates = [
   }
 ];
 
+if (packagedPrivacySmoke) {
+  installPackagedPrivacyMainNetworkHooks();
+}
+
+function installPackagedPrivacyMainNetworkHooks() {
+  const originalRequest = https.request.bind(https);
+  const originalGet = https.get.bind(https);
+
+  https.request = (...args) => {
+    recordPackagedPrivacyMainRequest(args[0]);
+    return originalRequest(...args);
+  };
+
+  https.get = (...args) => {
+    recordPackagedPrivacyMainRequest(args[0]);
+    return originalGet(...args);
+  };
+}
+
+function recordPackagedPrivacyMainRequest(target) {
+  packagedPrivacySmokeState.mainHttpRequests.push(normalisePrivacyRequestTarget(target));
+}
+
+function normalisePrivacyRequestTarget(target) {
+  if (typeof target === 'string') {
+    return target;
+  }
+
+  if (target instanceof URL) {
+    return target.toString();
+  }
+
+  if (target && typeof target === 'object') {
+    const protocol = target.protocol ?? 'https:';
+    const host = target.hostname ?? target.host ?? 'unknown-host';
+    const pathName = target.path ?? target.pathname ?? '';
+
+    return `${protocol}//${host}${pathName}`;
+  }
+
+  return 'unknown';
+}
+
+function installPackagedPrivacyRendererNetworkHooks() {
+  if (!packagedPrivacySmoke) {
+    return;
+  }
+
+  session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
+    if (/^https?:/i.test(details.url)) {
+      packagedPrivacySmokeState.rendererHttpRequests.push(details.url);
+    }
+
+    callback({});
+  });
+}
+
+function getPackagedPrivacySmokeSummary() {
+  const rawAudioFiles = listUserDataFilesMatching((filePath) => (
+    /\.(?:aif|aiff|flac|m4a|mp3|pcm|raw|wav)$/i.test(filePath)
+  ));
+  const transcriptDebugFiles = listUserDataFilesMatching((filePath) => (
+    /(?:^|[\\/])transcript-debug\.jsonl$/i.test(filePath)
+  ));
+  const ok = packagedPrivacySmokeState.mainHttpRequests.length === 0
+    && packagedPrivacySmokeState.rendererHttpRequests.length === 0
+    && rawAudioFiles.length === 0
+    && transcriptDebugFiles.length === 0;
+
+  return {
+    ok,
+    mainHttpRequests: packagedPrivacySmokeState.mainHttpRequests,
+    rawAudioFiles,
+    rendererHttpRequests: packagedPrivacySmokeState.rendererHttpRequests,
+    transcriptDebugFiles
+  };
+}
+
+function listUserDataFilesMatching(predicate) {
+  const root = app.getPath('userData');
+  const matches = [];
+
+  function visit(directory) {
+    let entries = [];
+
+    try {
+      entries = fsSync.readdirSync(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      const filePath = path.join(directory, entry.name);
+
+      if (entry.isDirectory()) {
+        visit(filePath);
+      } else if (entry.isFile() && predicate(filePath)) {
+        matches.push(path.relative(root, filePath));
+      }
+    }
+  }
+
+  visit(root);
+
+  return matches.sort();
+}
+
 function getProjectRoot() {
   return app.isPackaged ? process.resourcesPath : path.join(__dirname, '..');
 }
 
+function getAppDisplayName() {
+  const name = String(app.getName() || '').toLowerCase();
+
+  if (name.includes('dev')) {
+    return 'Susura Dev';
+  }
+
+  if (name.includes('beta')) {
+    return 'Susura Beta';
+  }
+
+  return 'Susura';
+}
+
+function getAppChannel() {
+  const name = String(app.getName() || '').toLowerCase();
+
+  if (name.includes('dev')) {
+    return 'dev';
+  }
+
+  if (name.includes('beta')) {
+    return 'beta';
+  }
+
+  return 'stable';
+}
+
 function getBundledExecutablePath(name) {
-  return path.join(process.resourcesPath, 'bin', name);
+  const executableName = process.platform === 'win32' && !name.endsWith('.exe')
+    ? `${name}.exe`
+    : name;
+
+  return path.join(process.resourcesPath, 'bin', executableName);
 }
 
 function getBundledScriptPath(name) {
@@ -132,8 +316,20 @@ function getParakeetModelPath() {
   return path.join(getParakeetModelRoot(), parakeetModelDirName);
 }
 
+function getMoonshineTinyModelPath() {
+  return path.join(getParakeetModelRoot(), moonshineTinyModelDirName);
+}
+
+function getLocalModelPath(modelId = getPreferredLocalModelId()) {
+  return modelId === 'moonshine-tiny' ? getMoonshineTinyModelPath() : getParakeetModelPath();
+}
+
 function getPiAgentDir() {
   return path.join(app.getPath('userData'), 'pi-agent');
+}
+
+function getPiAuthPath() {
+  return path.join(getPiAgentDir(), 'auth.json');
 }
 
 function createStarterPromptTemplates() {
@@ -401,7 +597,43 @@ function writeSetupState(update) {
   return state;
 }
 
-function completeOnboarding() {
+function seedPackagedOnboardingCompletionSmokeState() {
+  if (!packagedOnboardingCompletionSmoke) {
+    return;
+  }
+
+  writeSetupState({
+    selectedLocalTranscriptionModel: 'moonshine-tiny',
+    selectedPiModel: defaultPiChatGptModel
+  });
+
+  const modelDir = getMoonshineTinyModelPath();
+  fsSync.mkdirSync(modelDir, { recursive: true });
+
+  for (const fileName of [
+    'frontend.ort',
+    'encoder.ort',
+    'adapter.ort',
+    'cross_kv.ort',
+    'decoder_kv.ort',
+    'streaming_config.json',
+    'tokenizer.bin'
+  ]) {
+    const filePath = path.join(modelDir, fileName);
+
+    if (!fsSync.existsSync(filePath)) {
+      fsSync.writeFileSync(filePath, fileName === 'streaming_config.json' ? '{}\n' : '');
+    }
+  }
+}
+
+async function completeOnboarding() {
+  const status = await getOnboardingStatus();
+
+  if (!status.complete) {
+    return status;
+  }
+
   writeSetupState({
     onboardingCompletedAt: new Date().toISOString()
   });
@@ -416,7 +648,7 @@ function completeOnboarding() {
   return getOnboardingStatus();
 }
 
-function reopenOnboarding() {
+async function reopenOnboarding() {
   createOnboardingWindow().show();
   return getOnboardingStatus();
 }
@@ -513,6 +745,22 @@ function resetWindowState(mainWindow) {
     return;
   }
 
+  if (mainWindow === privateOverlayWindow) {
+    mainWindow.setBounds(getAnchoredOverlayBounds(resetWindowSize, { orientForEdge: false }));
+    const state = readPrivateOverlayState();
+
+    writePrivateOverlayState({
+      ...state,
+      overlay: {
+        ...state.overlay,
+        ...mainWindow.getBounds(),
+        visible: mainWindow.isVisible()
+      }
+    });
+    broadcastPrivateOverlayState();
+    return;
+  }
+
   mainWindow.setContentSize(resetWindowSize.width, resetWindowSize.height);
   mainWindow.center();
   writeWindowState(mainWindow);
@@ -540,40 +788,186 @@ function persistWindowState(mainWindow) {
 function normalisePrivateOverlayState(state) {
   const primaryDisplay = screen.getPrimaryDisplay();
   const workArea = primaryDisplay.workArea;
-  const defaultHandleX = workArea.x + Math.round((workArea.width - handleWindowSize.width) / 2);
-  const defaultHandleY = workArea.y + windowScreenMargin;
-  const defaultOverlayX = workArea.x + Math.round((workArea.width - overlayWindowSize.width) / 2);
-  const defaultOverlayY = workArea.y + 48;
-  const handle = state && typeof state === 'object' && state.handle && typeof state.handle === 'object'
+  const rawHandle = state && typeof state === 'object' && state.handle && typeof state.handle === 'object'
     ? state.handle
     : {};
+  const handleSize = normaliseHandleSizePreset(rawHandle.size);
+  const handleWindowSize = getHandleWindowSize(handleSize);
+  const defaultHandleX = workArea.x + Math.round((workArea.width - handleWindowSize.width) / 2);
+  const defaultHandleY = workArea.y + windowScreenMargin;
+  const defaultOverlayX = workArea.x + Math.round((workArea.width - defaultAppWindowSize.width) / 2);
+  const defaultOverlayY = workArea.y + 48;
+  const handle = rawHandle;
   const overlay = state && typeof state === 'object' && state.overlay && typeof state.overlay === 'object'
     ? state.overlay
     : {};
-  const handleBounds = normaliseHandleBounds({
+  const handleBounds = normaliseStoredHandleBounds({
     height: handleWindowSize.height,
+    rawBounds: handle,
+    size: handleSize,
     width: handleWindowSize.width,
     x: normaliseCoordinate(handle.x, defaultHandleX),
     y: normaliseCoordinate(handle.y, defaultHandleY)
   });
+  const overlayBounds = normaliseStoredOverlayBounds({
+    height: clampNumber(Number(overlay.height), minimumOverlayWindowSize.height, maximumOverlayWindowSize.height, defaultAppWindowSize.height),
+    rawBounds: overlay,
+    width: clampNumber(Number(overlay.width), minimumOverlayWindowSize.width, maximumOverlayWindowSize.width, defaultAppWindowSize.width),
+    x: normaliseCoordinate(overlay.x, defaultOverlayX),
+    y: normaliseCoordinate(overlay.y, defaultOverlayY)
+  });
+  const handleDisplay = screen.getDisplayMatching(handleBounds);
+  const overlayDisplay = screen.getDisplayMatching(overlayBounds);
 
   return {
     clickThrough: Boolean(state?.clickThrough),
     handle: {
+      ...getDisplayPersistence(handleBounds, handleDisplay),
       opacity: clampNumber(Number(handle.opacity), 0.35, 1, 0.82),
+      size: handleSize,
       visible: true,
       x: handleBounds.x,
       y: handleBounds.y
     },
     overlay: {
-      height: clampNumber(Number(overlay.height), minimumWindowSize.height, maximumOverlayWindowSize.height, overlayWindowSize.height),
+      ...getDisplayPersistence(overlayBounds, overlayDisplay),
+      height: overlayBounds.height,
       visible: Boolean(overlay.visible),
-      width: clampNumber(Number(overlay.width), minimumWindowSize.width, maximumOverlayWindowSize.width, overlayWindowSize.width),
-      x: normaliseCoordinate(overlay.x, defaultOverlayX),
-      y: normaliseCoordinate(overlay.y, defaultOverlayY)
+      width: overlayBounds.width,
+      x: overlayBounds.x,
+      y: overlayBounds.y
     },
     privateMode: true
   };
+}
+
+function normaliseStoredHandleBounds(bounds) {
+  const restoredBounds = getRestoredBoundsForStoredDisplay(bounds.rawBounds, bounds);
+
+  return normaliseHandleBounds({
+    ...restoredBounds,
+    height: bounds.height,
+    width: bounds.width
+  });
+}
+
+function normaliseStoredOverlayBounds(bounds) {
+  const restoredBounds = getRestoredBoundsForStoredDisplay(bounds.rawBounds, bounds);
+
+  return clampOverlayBoundsToDisplay(restoredBounds);
+}
+
+function getRestoredBoundsForStoredDisplay(rawBounds, fallbackBounds) {
+  const fallback = {
+    height: Math.round(Number(fallbackBounds.height)),
+    width: Math.round(Number(fallbackBounds.width)),
+    x: Math.round(Number(fallbackBounds.x)),
+    y: Math.round(Number(fallbackBounds.y))
+  };
+  const storedDisplay = getDisplayById(rawBounds?.displayId);
+  const relative = normaliseRelativeBounds(rawBounds?.relative);
+
+  if (
+    storedDisplay
+    && relative
+    && !isStoredWorkAreaCurrent(rawBounds?.workArea, storedDisplay.workArea)
+  ) {
+    return getBoundsFromDisplayRelativeBounds(relative, storedDisplay);
+  }
+
+  if (isBoundsVisibleOnAnyDisplay(fallback)) {
+    return fallback;
+  }
+
+  if (storedDisplay && relative) {
+    return getBoundsFromDisplayRelativeBounds(relative, storedDisplay);
+  }
+
+  if (relative) {
+    return getBoundsFromDisplayRelativeBounds(relative, screen.getPrimaryDisplay());
+  }
+
+  return fallback;
+}
+
+function getDisplayById(displayId) {
+  const numericDisplayId = Number(displayId);
+
+  if (!Number.isFinite(numericDisplayId)) {
+    return null;
+  }
+
+  return screen.getAllDisplays().find((display) => display.id === numericDisplayId) ?? null;
+}
+
+function normaliseRelativeBounds(relative) {
+  if (!relative || typeof relative !== 'object') {
+    return null;
+  }
+
+  const x = Number(relative.x);
+  const y = Number(relative.y);
+  const width = Number(relative.width);
+  const height = Number(relative.height);
+
+  if (![x, y, width, height].every(Number.isFinite)) {
+    return null;
+  }
+
+  return { height, width, x, y };
+}
+
+function isStoredWorkAreaCurrent(storedWorkArea, currentWorkArea) {
+  if (!storedWorkArea || typeof storedWorkArea !== 'object') {
+    return false;
+  }
+
+  return ['x', 'y', 'width', 'height'].every((key) => (
+    Math.round(Number(storedWorkArea[key])) === Math.round(Number(currentWorkArea[key]))
+  ));
+}
+
+function getBoundsFromDisplayRelativeBounds(relative, display) {
+  const workArea = display.workArea;
+
+  return {
+    height: Math.round(relative.height * workArea.height),
+    width: Math.round(relative.width * workArea.width),
+    x: workArea.x + Math.round(relative.x * workArea.width),
+    y: workArea.y + Math.round(relative.y * workArea.height)
+  };
+}
+
+function isBoundsVisibleOnAnyDisplay(bounds) {
+  return screen.getAllDisplays().some((display) => rectanglesIntersect(bounds, display.workArea));
+}
+
+function getDisplayPersistence(bounds, display = screen.getDisplayMatching(bounds)) {
+  const workArea = display.workArea;
+
+  return {
+    displayId: display.id,
+    relative: {
+      height: getDisplayRelativeNumber(bounds.height, workArea.height),
+      width: getDisplayRelativeNumber(bounds.width, workArea.width),
+      x: getDisplayRelativeNumber(bounds.x - workArea.x, workArea.width),
+      y: getDisplayRelativeNumber(bounds.y - workArea.y, workArea.height)
+    },
+    workArea: {
+      height: workArea.height,
+      width: workArea.width,
+      x: workArea.x,
+      y: workArea.y
+    }
+  };
+}
+
+function getDisplayRelativeNumber(value, size) {
+  if (!Number.isFinite(Number(value)) || !Number.isFinite(Number(size)) || Number(size) <= 0) {
+    return 0;
+  }
+
+  return Number((Number(value) / Number(size)).toFixed(6));
 }
 
 function normaliseCoordinate(value, fallback) {
@@ -588,7 +982,38 @@ function clampNumber(value, min, max, fallback) {
   return Math.min(max, Math.max(min, value));
 }
 
+function normaliseHandleSizePreset(size) {
+  return Object.prototype.hasOwnProperty.call(handleWindowSizePresets, size)
+    ? size
+    : defaultHandleSizePreset;
+}
+
+function getHandleSizePresetForBounds(bounds) {
+  const width = Number(bounds?.width);
+
+  if (!Number.isFinite(width)) {
+    return normaliseHandleSizePreset(bounds?.size);
+  }
+
+  return Object.entries(handleWindowSizePresets)
+    .reduce((best, [size, pixels]) => {
+      const distance = Math.abs(width - pixels);
+
+      return distance < best.distance ? { distance, size } : best;
+    }, { distance: Infinity, size: defaultHandleSizePreset }).size;
+}
+
+function getHandleWindowSize(size = defaultHandleSizePreset) {
+  const pixels = handleWindowSizePresets[normaliseHandleSizePreset(size)];
+
+  return {
+    height: pixels,
+    width: pixels
+  };
+}
+
 function normaliseHandleBounds(bounds) {
+  const handleWindowSize = getHandleWindowSize(getHandleSizePresetForBounds(bounds));
   const handleBounds = {
     height: handleWindowSize.height,
     width: handleWindowSize.width,
@@ -602,6 +1027,7 @@ function normaliseHandleBounds(bounds) {
 
 function clampHandleBoundsToDisplay(bounds, display = screen.getDisplayMatching(bounds)) {
   const workArea = display.workArea;
+  const handleWindowSize = getHandleWindowSize(getHandleSizePresetForBounds(bounds));
 
   return {
     height: handleWindowSize.height,
@@ -851,12 +1277,25 @@ function getNearestHandleEdge(bounds, display = screen.getDisplayMatching(bounds
   return distances.reduce((best, item) => (item.value < best.value ? item : best), distances[0]).edge;
 }
 
+function isHandleBoundsAtDisplayCorner(bounds, display = screen.getDisplayMatching(bounds)) {
+  const workArea = display.workArea;
+  const minX = workArea.x + windowScreenMargin;
+  const maxX = workArea.x + workArea.width - bounds.width - windowScreenMargin;
+  const minY = workArea.y + windowScreenMargin;
+  const maxY = workArea.y + workArea.height - bounds.height - windowScreenMargin;
+  const isAtHorizontalCorner = Math.abs(bounds.x - minX) <= 1 || Math.abs(bounds.x - maxX) <= 1;
+  const isAtVerticalCorner = Math.abs(bounds.y - minY) <= 1 || Math.abs(bounds.y - maxY) <= 1;
+
+  return isAtHorizontalCorner && isAtVerticalCorner;
+}
+
 function getPrivateOverlayHandleBounds() {
   if (privateOverlayHandleWindow && !privateOverlayHandleWindow.isDestroyed()) {
     return privateOverlayHandleWindow.getBounds();
   }
 
   const state = readPrivateOverlayState();
+  const handleWindowSize = getHandleWindowSize(state.handle.size);
 
   return {
     height: handleWindowSize.height,
@@ -866,7 +1305,7 @@ function getPrivateOverlayHandleBounds() {
   };
 }
 
-function getAnchoredOverlayBounds(size = {}) {
+function getAnchoredOverlayBounds(size = {}, { orientForEdge = true, restoreNonCompactWidth = true } = {}) {
   const state = readPrivateOverlayState();
   const handleBounds = getPrivateOverlayHandleBounds();
   const display = screen.getDisplayMatching(handleBounds);
@@ -878,8 +1317,8 @@ function getAnchoredOverlayBounds(size = {}) {
   const rightSpace = workArea.x + workArea.width - (handleBounds.x + handleBounds.width) - overlayWindowGap - windowScreenMargin;
   const topSpace = handleBounds.y - workArea.y - overlayWindowGap - windowScreenMargin;
   const bottomSpace = workArea.y + workArea.height - (handleBounds.y + handleBounds.height) - overlayWindowGap - windowScreenMargin;
-  const widthMax = Math.max(minimumWindowSize.width, Math.min(maximumOverlayWindowSize.width, horizontalSpace));
-  const heightMax = Math.max(minimumWindowSize.height, Math.min(maximumOverlayWindowSize.height, verticalSpace));
+  const widthMax = Math.max(minimumOverlayWindowSize.width, Math.min(maximumOverlayWindowSize.width, horizontalSpace));
+  const heightMax = Math.max(minimumOverlayWindowSize.height, Math.min(maximumOverlayWindowSize.height, verticalSpace));
   const requestedWidth = Number(size.width);
   const requestedHeight = Number(size.height);
   const preferredOverlaySize = getPreferredOverlaySizeForEdge({
@@ -888,19 +1327,24 @@ function getAnchoredOverlayBounds(size = {}) {
       : state.overlay.height,
     width: Number.isFinite(requestedWidth)
       ? requestedWidth
-      : Math.max(Number(state.overlay.width), minimumNonCompactOverlayWidth)
-  }, edge, { minimumNonCompactWidth: minimumNonCompactOverlayWidth });
+      : restoreNonCompactWidth
+        ? Math.max(Number(state.overlay.width), nonCompactOverlayTransitionWidth)
+        : state.overlay.width
+  }, edge, {
+    minimumNonCompactWidth: restoreNonCompactWidth ? nonCompactOverlayTransitionWidth : 0,
+    orient: orientForEdge
+  });
   const preferredOverlayWidth = preferredOverlaySize.width;
   const preferredOverlayHeight = preferredOverlaySize.height;
-  let width = clampNumber(preferredOverlayWidth, minimumWindowSize.width, widthMax, overlayWindowSize.width);
-  let height = clampNumber(preferredOverlayHeight, minimumWindowSize.height, heightMax, overlayWindowSize.height);
+  let width = clampNumber(preferredOverlayWidth, minimumOverlayWindowSize.width, widthMax, defaultAppWindowSize.width);
+  let height = clampNumber(preferredOverlayHeight, minimumOverlayWindowSize.height, heightMax, defaultAppWindowSize.height);
   let x = workArea.x + windowScreenMargin;
   let y = workArea.y + windowScreenMargin;
 
   if (edge === 'top' || edge === 'bottom') {
-    const availableHeight = Math.max(edge === 'top' ? bottomSpace : topSpace, minimumWindowSize.height);
+    const availableHeight = Math.max(edge === 'top' ? bottomSpace : topSpace, minimumOverlayWindowSize.height);
 
-    height = clampNumber(preferredOverlayHeight, minimumWindowSize.height, Math.min(heightMax, availableHeight), overlayWindowSize.height);
+    height = clampNumber(preferredOverlayHeight, minimumOverlayWindowSize.height, Math.min(heightMax, availableHeight), defaultAppWindowSize.height);
     x = clampNumber(
       handleBounds.x + Math.round((handleBounds.width - width) / 2),
       workArea.x + windowScreenMargin,
@@ -911,9 +1355,9 @@ function getAnchoredOverlayBounds(size = {}) {
       ? Math.min(workArea.y + workArea.height - height - windowScreenMargin, handleBounds.y + handleBounds.height + overlayWindowGap)
       : Math.max(workArea.y + windowScreenMargin, handleBounds.y - overlayWindowGap - height);
   } else {
-    const availableWidth = Math.max(edge === 'right' ? leftSpace : rightSpace, minimumWindowSize.width);
+    const availableWidth = Math.max(edge === 'right' ? leftSpace : rightSpace, minimumOverlayWindowSize.width);
 
-    width = clampNumber(preferredOverlayWidth, minimumWindowSize.width, Math.min(widthMax, availableWidth), overlayWindowSize.width);
+    width = clampNumber(preferredOverlayWidth, minimumOverlayWindowSize.width, Math.min(widthMax, availableWidth), defaultAppWindowSize.width);
     x = edge === 'right'
       ? Math.max(workArea.x + windowScreenMargin, handleBounds.x - overlayWindowGap - width)
       : Math.min(workArea.x + workArea.width - width - windowScreenMargin, handleBounds.x + handleBounds.width + overlayWindowGap);
@@ -937,15 +1381,15 @@ function clampOverlayBoundsToDisplay(bounds, display = screen.getDisplayMatching
   const workArea = display.workArea;
   const width = clampNumber(
     Math.round(Number(bounds.width)),
-    minimumWindowSize.width,
+    minimumOverlayWindowSize.width,
     Math.min(maximumOverlayWindowSize.width, workArea.width - (windowScreenMargin * 2)),
-    overlayWindowSize.width
+    defaultAppWindowSize.width
   );
   const height = clampNumber(
     Math.round(Number(bounds.height)),
-    minimumWindowSize.height,
+    minimumOverlayWindowSize.height,
     Math.min(maximumOverlayWindowSize.height, workArea.height - (windowScreenMargin * 2)),
-    overlayWindowSize.height
+    defaultAppWindowSize.height
   );
 
   return {
@@ -966,6 +1410,42 @@ function clampOverlayBoundsToDisplay(bounds, display = screen.getDisplayMatching
   };
 }
 
+function getOverlayWindowBoundsForVisualBounds(bounds) {
+  return {
+    height: Math.max(1, Math.round(Number(bounds.height)) + (overlayWindowResizeOutset * 2)),
+    width: Math.max(1, Math.round(Number(bounds.width)) + (overlayWindowResizeOutset * 2)),
+    x: Math.round(Number(bounds.x)) - overlayWindowResizeOutset,
+    y: Math.round(Number(bounds.y)) - overlayWindowResizeOutset
+  };
+}
+
+function getVisualBoundsForOverlayWindowBounds(bounds) {
+  return {
+    height: Math.max(minimumOverlayWindowSize.height, Math.round(Number(bounds.height)) - (overlayWindowResizeOutset * 2)),
+    width: Math.max(minimumOverlayWindowSize.width, Math.round(Number(bounds.width)) - (overlayWindowResizeOutset * 2)),
+    x: Math.round(Number(bounds.x)) + overlayWindowResizeOutset,
+    y: Math.round(Number(bounds.y)) + overlayWindowResizeOutset
+  };
+}
+
+function getPrivateOverlayWindowVisualBounds() {
+  if (privateOverlayWindow && !privateOverlayWindow.isDestroyed()) {
+    return getVisualBoundsForOverlayWindowBounds(privateOverlayWindow.getBounds());
+  }
+
+  return readPrivateOverlayState().overlay;
+}
+
+function setPrivateOverlayWindowVisualBounds(bounds, animate = false) {
+  if (!privateOverlayWindow || privateOverlayWindow.isDestroyed()) {
+    return null;
+  }
+
+  const visualBounds = clampOverlayBoundsToDisplay(bounds);
+  privateOverlayWindow.setBounds(getOverlayWindowBoundsForVisualBounds(visualBounds), animate);
+  return visualBounds;
+}
+
 function getNearestOverlayEdge(bounds, display = screen.getDisplayMatching(bounds)) {
   const workArea = display.workArea;
   const distances = [
@@ -984,6 +1464,7 @@ function getHandleBoundsForOverlayBounds(overlayBounds, { snap = false } = {}) {
   const edge = getNearestOverlayEdge(overlayBounds, display);
   const overlayCentreX = overlayBounds.x + Math.round(overlayBounds.width / 2);
   const overlayCentreY = overlayBounds.y + Math.round(overlayBounds.height / 2);
+  const handleWindowSize = getHandleWindowSize(readPrivateOverlayState().handle.size);
   let handleBounds;
 
   if (edge === 'left') {
@@ -1048,9 +1529,12 @@ function positionVisibleOverlayFromHandle(size = {}, { persist = true } = {}) {
     return null;
   }
 
-  const bounds = getAnchoredOverlayBounds(size);
+  const bounds = getAnchoredOverlayBounds(size, {
+    orientForEdge: false,
+    restoreNonCompactWidth: false
+  });
 
-  privateOverlayWindow.setBounds(bounds);
+  setPrivateOverlayWindowVisualBounds(bounds);
 
   if (persist) {
     updatePrivateOverlayState((state) => ({
@@ -1104,7 +1588,7 @@ function getPrivateOverlayStatus() {
   const handleWindowVisible = Boolean(hasHandleWindow && privateOverlayHandleWindow.isVisible());
   const overlayWindowVisible = Boolean(hasOverlayWindow && privateOverlayWindow.isVisible());
   const handleBounds = hasHandleWindow ? privateOverlayHandleWindow.getBounds() : state.handle;
-  const overlayBounds = hasOverlayWindow ? privateOverlayWindow.getBounds() : state.overlay;
+  const overlayBounds = hasOverlayWindow ? getPrivateOverlayWindowVisualBounds() : state.overlay;
 
   return {
     ...state,
@@ -1147,12 +1631,14 @@ let systemAudioProcess = null;
 let systemAudioStdout = '';
 let systemAudioSmoke = null;
 let localTranscriptionProcess = null;
+let localTranscriptionModelId = null;
 let localTranscriptionStdout = '';
 const localTranscriptionStopFlush = createStopFlushController();
 let localParakeetDaemonProcess = null;
 let localParakeetDaemonStdout = '';
 let persistentPiRpcBridge = null;
 let backupPersistentPiRpcBridge = null;
+let packagedLaunchSmokeCompleted = false;
 let llmWarmStatus = isPiLlmBridgeEnabled() ? 'warming' : 'disabled';
 
 function isPiLlmBridgeEnabled() {
@@ -1164,7 +1650,7 @@ function isPiLlmBridgeEnabled() {
     return ['1', 'enabled', 'on', 'pi', 'true', 'yes'].includes(piLlmBridgeMode);
   }
 
-  return Boolean(readSetupState().selectedPiModel);
+  return Boolean(readSetupState().selectedPiModel || getInferredPiModelFromAuth());
 }
 
 function assertPiLlmBridgeEnabled() {
@@ -1174,7 +1660,7 @@ function assertPiLlmBridgeEnabled() {
 }
 
 function writeTranscriptDebugLog(stage, payload = {}) {
-  if (!transcriptDebugLogEnabled) {
+  if (!isTranscriptDebugLogEnabled()) {
     return;
   }
 
@@ -1200,6 +1686,10 @@ function writeTranscriptDebugLog(stage, payload = {}) {
   }
 }
 
+function isTranscriptDebugLogEnabled() {
+  return process.env.SUSURA_TRANSCRIPT_DEBUG_LOG === '1' || getAppChannel() === 'dev';
+}
+
 function emitTranscriptionEvent(event) {
   if (process.env.SUSURA_BENCH_TRANSCRIPTION_EVENT_LOG === '1' && event.name !== 'frame_received_at') {
     console.log(`susura-transcription-event ${JSON.stringify(event)}`);
@@ -1222,8 +1712,11 @@ function emitLlmStatus() {
   });
 }
 
-function getPermissionsStatus() {
+async function getPermissionsStatus() {
   const isMac = process.platform === 'darwin';
+  const screenRecordingStatus = isMac
+    ? await getScreenRecordingPermissionStatus()
+    : 'unsupported';
 
   return {
     ok: true,
@@ -1233,9 +1726,7 @@ function getPermissionsStatus() {
         description: 'Required when listening to speaker audio output.',
         id: 'screen-recording',
         label: 'Screen & System Audio Recording',
-        status: isMac
-          ? mapMacMediaAccessStatus(systemPreferences.getMediaAccessStatus('screen'))
-          : 'unsupported'
+        status: screenRecordingStatus
       },
       {
         description: 'Required when listening to your microphone.',
@@ -1247,6 +1738,22 @@ function getPermissionsStatus() {
       }
     ]
   };
+}
+
+async function getScreenRecordingPermissionStatus() {
+  const electronStatus = mapMacMediaAccessStatus(systemPreferences.getMediaAccessStatus('screen'));
+
+  if (electronStatus === 'granted') {
+    return electronStatus;
+  }
+
+  const helperStatus = await getAudioHelperScreenCapturePermissionStatus(false);
+
+  if (helperStatus === 'granted') {
+    return helperStatus;
+  }
+
+  return electronStatus;
 }
 
 function mapMacMediaAccessStatus(status) {
@@ -1279,18 +1786,102 @@ async function requestPermission(permission) {
   if (permission === 'microphone') {
     const granted = await systemPreferences.askForMediaAccess('microphone');
 
+    if (!granted) {
+      openPermissionsSettings(permission);
+    }
+
     return { ok: granted };
   }
 
   if (permission === 'screen-recording') {
-    return openPermissionsSettings(permission);
+    const status = await getAudioHelperScreenCapturePermissionStatus(true);
+
+    if (status === 'granted') {
+      return { ok: true };
+    }
+
+    return {
+      ok: false,
+      message: 'macOS did not grant Screen & System Audio Recording yet.'
+    };
   }
 
   return { ok: false, message: 'Unknown permission.' };
 }
 
-function isPermissionSetupComplete() {
-  const status = getPermissionsStatus();
+async function getAudioHelperScreenCapturePermissionStatus(request) {
+  const command = getAudioHelperCommand([
+    request ? '--request-screen-capture-permission' : '--screen-capture-permission-status'
+  ]);
+
+  try {
+    const event = await runJsonLineCommand(command, 8000);
+
+    if (event?.type === 'screen_capture_permission' && event.text === 'granted') {
+      return 'granted';
+    }
+
+    const electronStatus = mapMacMediaAccessStatus(systemPreferences.getMediaAccessStatus('screen'));
+
+    return electronStatus === 'unknown' ? 'not-determined' : electronStatus;
+  } catch {
+    return mapMacMediaAccessStatus(systemPreferences.getMediaAccessStatus('screen'));
+  }
+}
+
+function runJsonLineCommand(command, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command.command, command.args, {
+      env: process.env,
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    let stderr = '';
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      child.kill('SIGTERM');
+      reject(new Error('Timed out waiting for helper response.'));
+    }, timeoutMs);
+
+    const settle = (callback, value) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timer);
+      callback(value);
+    };
+
+    const reader = readline.createInterface({ input: child.stdout });
+
+    reader.on('line', (line) => {
+      try {
+        settle(resolve, JSON.parse(line));
+      } catch {
+        // Ignore non-JSON helper output.
+      }
+    });
+
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on('error', (error) => settle(reject, error));
+    child.on('close', (code) => {
+      if (!settled) {
+        settle(reject, new Error(stderr.trim() || `Helper exited with code ${code}.`));
+      }
+    });
+  });
+}
+
+async function isPermissionSetupComplete() {
+  const status = await getPermissionsStatus();
 
   return status.permissions.every((permission) => (
     permission.status === 'granted' || permission.status === 'unsupported'
@@ -1305,23 +1896,186 @@ function validateParakeetModelDir(modelDir = getParakeetModelPath()) {
   }
 }
 
-function getParakeetStatus() {
-  if (parakeetDownload) {
+function validateMoonshineTinyModelDir(modelDir = getMoonshineTinyModelPath()) {
+  try {
+    return [
+      'frontend.ort',
+      'encoder.ort',
+      'adapter.ort',
+      'cross_kv.ort',
+      'decoder_kv.ort',
+      'streaming_config.json',
+      'tokenizer.bin'
+    ].every((fileName) => fsSync.existsSync(path.join(modelDir, fileName)));
+  } catch {
+    return false;
+  }
+}
+
+function validateLocalTranscriptionModel(modelId = getPreferredLocalModelId()) {
+  return modelId === 'moonshine-tiny'
+    ? validateMoonshineTinyModelDir()
+    : validateParakeetModelDir();
+}
+
+function normaliseLocalTranscriptionModelId(modelId) {
+  return modelId === 'moonshine-tiny' ? 'moonshine-tiny' : 'parakeet';
+}
+
+function getSelectedLocalTranscriptionModelId() {
+  const selectedModel = readSetupState().selectedLocalTranscriptionModel;
+
+  return selectedModel === 'parakeet' || selectedModel === 'moonshine-tiny'
+    ? selectedModel
+    : null;
+}
+
+function getPreferredLocalModelId() {
+  const selectedModel = getSelectedLocalTranscriptionModelId();
+
+  if (selectedModel) {
+    return selectedModel;
+  }
+
+  const recommendation = getTranscriptionRecommendation();
+  return recommendation.recommendedModel?.id ?? (recommendation.recommended === 'local-parakeet' ? 'parakeet' : 'moonshine-tiny');
+}
+
+function getParakeetStatus(modelId = getPreferredLocalModelId()) {
+  if (parakeetDownload || localModelDownload) {
+    const download = parakeetDownload ?? localModelDownload;
     return {
       ok: true,
       installed: false,
-      progress: parakeetDownload.progress,
+      modelId: download.modelId,
+      modelName: download.modelName,
+      progress: download.progress,
       status: 'downloading'
     };
   }
 
-  const installed = validateParakeetModelDir();
+  const normalisedModelId = normaliseLocalTranscriptionModelId(modelId);
+  const installed = validateLocalTranscriptionModel(normalisedModelId);
 
   return {
     ok: true,
     installed,
-    modelDir: getParakeetModelPath(),
+    modelDir: getLocalModelPath(normalisedModelId),
+    modelId: normalisedModelId,
+    modelName: normalisedModelId === 'moonshine-tiny' ? 'Moonshine tiny' : 'Parakeet v3',
     status: installed ? 'installed' : 'missing'
+  };
+}
+
+function setPreferredLocalTranscriptionModel(modelId) {
+  const selectedLocalTranscriptionModel = normaliseLocalTranscriptionModelId(modelId);
+
+  writeSetupState({ selectedLocalTranscriptionModel });
+  emitParakeetStatus();
+
+  return getParakeetStatus(selectedLocalTranscriptionModel);
+}
+
+function getTranscriptionRecommendation() {
+  const state = readSetupState();
+  const cached = state.transcriptionRecommendation;
+
+  if (
+    cached
+    && typeof cached === 'object'
+    && typeof cached.createdAtMs === 'number'
+    && Date.now() - cached.createdAtMs < transcriptionRecommendationTtlMs
+  ) {
+    return cached;
+  }
+
+  const recommendation = buildTranscriptionRecommendation();
+  writeSetupState({ transcriptionRecommendation: recommendation });
+
+  return recommendation;
+}
+
+function buildTranscriptionRecommendation() {
+  const cpuCores = Math.max(1, os.cpus().length);
+  const totalMemoryGb = Math.round((os.totalmem() / 1024 / 1024 / 1024) * 10) / 10;
+  const freeMemoryGb = Math.round((os.freemem() / 1024 / 1024 / 1024) * 10) / 10;
+  const probe = runShortMachineProbe();
+  const isAppleSilicon = process.platform === 'darwin' && process.arch === 'arm64';
+  const parakeetScore = Math.round(
+    (totalMemoryGb * 5)
+    + (cpuCores * 7)
+    + Math.min(40, probe.score)
+    + (isAppleSilicon ? 35 : 0)
+  );
+  const moonshineScore = Math.round(
+    (totalMemoryGb * 8)
+    + (cpuCores * 10)
+    + Math.min(45, probe.score)
+  );
+  const parakeetLooksGood = totalMemoryGb >= 12 && cpuCores >= 6 && parakeetScore >= 140;
+  const moonshineLooksGood = totalMemoryGb >= 4 && cpuCores >= 2 && moonshineScore >= 70;
+  const recommended = parakeetLooksGood ? 'local-parakeet' : 'local-moonshine-tiny';
+  const recommendedModel = parakeetLooksGood
+    ? {
+      id: 'parakeet',
+      name: 'Parakeet v3',
+      reason: 'Best local quality for this computer.'
+    }
+    : {
+      id: 'moonshine-tiny',
+      name: 'Moonshine tiny',
+      reason: moonshineLooksGood
+        ? 'Lightweight local fallback for this computer.'
+        : 'Lightest available local option.'
+    };
+
+  const autoDownloadModel = process.env.SUSURA_DISABLE_MODEL_AUTO_DOWNLOAD !== '1';
+
+  return {
+    ok: true,
+    autoDownloadParakeet: autoDownloadModel,
+    autoDownloadModel,
+    createdAtMs: Date.now(),
+    recommended,
+    recommendedModel,
+    resources: {
+      accelerator: isAppleSilicon ? 'apple-silicon' : 'unknown',
+      arch: process.arch,
+      cpuCores,
+      freeMemoryGb,
+      platform: process.platform,
+      totalMemoryGb
+    },
+    score: {
+      machineProbeIterationsPerMs: probe.iterationsPerMs,
+      parakeet: parakeetScore,
+      moonshineTiny: moonshineScore
+    },
+    status: 'ready',
+    summary: recommended === 'local-parakeet'
+      ? 'Recommended: Parakeet local transcription'
+      : 'Recommended: Moonshine local transcription'
+  };
+}
+
+function runShortMachineProbe() {
+  const startedAt = process.hrtime.bigint();
+  const durationNs = BigInt(75_000_000);
+  let iterations = 0;
+  let value = 0;
+
+  while (process.hrtime.bigint() - startedAt < durationNs) {
+    value = (value + Math.sqrt((iterations % 997) + 1)) % 1000;
+    iterations += 1;
+  }
+
+  const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+  const iterationsPerMs = Math.round(iterations / Math.max(1, elapsedMs));
+
+  return {
+    iterationsPerMs,
+    score: Math.min(40, Math.round(iterationsPerMs / 1200)),
+    value
   };
 }
 
@@ -1331,6 +2085,15 @@ function emitParakeetStatus() {
   BrowserWindow.getAllWindows().forEach((window) => {
     window.webContents.send('susura:parakeet-status', status);
   });
+}
+
+function downloadLocalTranscriptionModel(modelId = getPreferredLocalModelId()) {
+  const selectedLocalTranscriptionModel = normaliseLocalTranscriptionModelId(modelId);
+  writeSetupState({ selectedLocalTranscriptionModel });
+
+  return selectedLocalTranscriptionModel === 'moonshine-tiny'
+    ? downloadMoonshineTinyModel()
+    : downloadParakeetModel();
 }
 
 function downloadParakeetModel(downloadUrl = parakeetArchiveUrl) {
@@ -1349,6 +2112,8 @@ function downloadParakeetModel(downloadUrl = parakeetArchiveUrl) {
   const file = fsSync.createWriteStream(temporaryPath);
   const download = {
     file,
+    modelId: 'parakeet',
+    modelName: 'Parakeet v3',
     progress: {
       downloadedBytes: 0,
       percent: 0,
@@ -1368,6 +2133,10 @@ function downloadParakeetModel(downloadUrl = parakeetArchiveUrl) {
       file.destroy();
       fsSync.rmSync(temporaryPath, { force: true });
       emitParakeetStatus();
+      if (error?.message === 'Parakeet download cancelled.') {
+        resolve(getParakeetStatus());
+        return;
+      }
       reject(error);
     };
 
@@ -1437,7 +2206,136 @@ function downloadParakeetModel(downloadUrl = parakeetArchiveUrl) {
   });
 }
 
+function downloadMoonshineTinyModel(downloadUrl = moonshineTinyArchiveUrl) {
+  if (validateMoonshineTinyModelDir()) {
+    return Promise.resolve(getParakeetStatus());
+  }
+
+  if (localModelDownload) {
+    return Promise.resolve(getParakeetStatus());
+  }
+
+  const modelPath = getMoonshineTinyModelPath();
+  fsSync.mkdirSync(getParakeetModelRoot(), { recursive: true });
+
+  const archivePath = path.join(getParakeetModelRoot(), 'moonshine-tiny-streaming-en.tar.gz');
+  const temporaryPath = `${archivePath}.download`;
+  const file = fsSync.createWriteStream(temporaryPath);
+  const download = {
+    file,
+    modelId: 'moonshine-tiny',
+    modelName: 'Moonshine tiny',
+    progress: {
+      downloadedBytes: 0,
+      percent: 0,
+      totalBytes: null
+    },
+    request: null
+  };
+  localModelDownload = download;
+  emitParakeetStatus();
+
+  return new Promise((resolve, reject) => {
+    const fail = (error) => {
+      if (localModelDownload === download) {
+        localModelDownload = null;
+      }
+
+      file.destroy();
+      fsSync.rmSync(temporaryPath, { force: true });
+      emitParakeetStatus();
+      if (error?.message === 'Local model download cancelled.') {
+        resolve(getParakeetStatus());
+        return;
+      }
+      reject(error);
+    };
+
+    const request = https.get(downloadUrl, (response) => {
+      if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        request.destroy();
+        localModelDownload = null;
+        file.destroy();
+        fsSync.rmSync(temporaryPath, { force: true });
+        downloadMoonshineTinyModel(new URL(response.headers.location, downloadUrl).toString()).then(resolve, reject);
+        return;
+      }
+
+      if (response.statusCode !== 200) {
+        fail(new Error(`Moonshine model download failed with HTTP ${response.statusCode}.`));
+        return;
+      }
+
+      const totalBytes = Number(response.headers['content-length']);
+      download.progress.totalBytes = Number.isFinite(totalBytes) ? totalBytes : null;
+
+      response.on('data', (chunk) => {
+        download.progress.downloadedBytes += chunk.length;
+        download.progress.percent = download.progress.totalBytes
+          ? Math.min(100, Math.round((download.progress.downloadedBytes / download.progress.totalBytes) * 100))
+          : 0;
+        emitParakeetStatus();
+      });
+
+      response.pipe(file);
+      file.once('finish', () => {
+        file.close(() => {
+          fsSync.renameSync(temporaryPath, archivePath);
+          fsSync.rmSync(modelPath, { recursive: true, force: true });
+
+          const tar = spawn('tar', ['-xzf', archivePath, '-C', getParakeetModelRoot()], {
+            stdio: ['ignore', 'ignore', 'pipe']
+          });
+          const errors = [];
+
+          tar.stderr.on('data', (chunk) => errors.push(chunk.toString()));
+          tar.once('error', fail);
+          tar.once('exit', (code) => {
+            if (code !== 0) {
+              fail(new Error(errors.join('').trim() || 'Failed to extract Moonshine model.'));
+              return;
+            }
+
+            const nestedPath = path.join(getParakeetModelRoot(), 'moonshine-streaming', moonshineTinyModelDirName);
+            if (!validateMoonshineTinyModelDir() && validateMoonshineTinyModelDir(nestedPath)) {
+              fsSync.renameSync(nestedPath, modelPath);
+              fsSync.rmSync(path.join(getParakeetModelRoot(), 'moonshine-streaming'), { recursive: true, force: true });
+            }
+
+            if (!validateMoonshineTinyModelDir()) {
+              fail(new Error('Downloaded Moonshine model is missing required files.'));
+              return;
+            }
+
+            fsSync.rmSync(archivePath, { force: true });
+
+            if (localModelDownload === download) {
+              localModelDownload = null;
+            }
+
+            emitParakeetStatus();
+            resolve(getParakeetStatus());
+          });
+        });
+      });
+    });
+
+    download.request = request;
+    request.once('error', fail);
+  });
+}
+
 function cancelParakeetDownload() {
+  if (localModelDownload) {
+    localModelDownload.request?.destroy(new Error('Local model download cancelled.'));
+    localModelDownload.file?.destroy();
+    localModelDownload = null;
+    fsSync.rmSync(path.join(getParakeetModelRoot(), 'moonshine-tiny-streaming-en.tar.gz.download'), { force: true });
+    emitParakeetStatus();
+
+    return getParakeetStatus();
+  }
+
   if (!parakeetDownload) {
     return getParakeetStatus();
   }
@@ -1480,7 +2378,16 @@ function getPiCliPath() {
   try {
     return require.resolve('@earendil-works/pi-coding-agent/dist/cli.js');
   } catch {
-    return null;
+    const localPath = path.join(
+      getProjectRoot(),
+      'node_modules',
+      '@earendil-works',
+      'pi-coding-agent',
+      'dist',
+      'cli.js'
+    );
+
+    return fsSync.existsSync(localPath) ? localPath : null;
   }
 }
 
@@ -1503,19 +2410,49 @@ function getPiSpawnCommand(args = []) {
 function getPiStatus() {
   const state = readSetupState();
   const cliPath = getPiCliPath();
+  warmPiAuthStorage(cliPath);
   const selectedModel = typeof state.selectedPiModel === 'string' ? state.selectedPiModel : '';
+  const inferredModel = selectedModel || getInferredPiModelFromAuth();
+  const connected = Boolean(inferredModel);
 
   return {
     ok: true,
     agentDir: getPiAgentDir(),
     bundled: Boolean(cliPath),
-    connected: Boolean(selectedModel),
-    selectedModel: selectedModel || null,
-    status: selectedModel ? 'ready' : 'disconnected'
+    connected,
+    selectedModel: inferredModel || null,
+    status: connected ? 'ready' : 'disconnected'
   };
 }
 
+function getInferredPiModelFromAuth() {
+  return getStoredPiAuthProviderIds().includes(defaultPiChatGptProvider)
+    ? defaultPiChatGptModel
+    : '';
+}
+
+function getStoredPiAuthProviderIds() {
+  try {
+    const auth = JSON.parse(fsSync.readFileSync(getPiAuthPath(), 'utf8'));
+
+    return auth && typeof auth === 'object' ? Object.keys(auth) : [];
+  } catch {
+    return [];
+  }
+}
+
 function openPiSetup(mode = 'login') {
+  if (mode === 'chatgpt-login' || mode === 'login') {
+    return openPiChatGptLogin();
+  }
+
+  return {
+    ok: false,
+    message: 'Pi model setup is handled inside Susura. Sign in with ChatGPT first.'
+  };
+}
+
+function openPiChatGptLogin() {
   const cliPath = getPiCliPath();
 
   if (!cliPath) {
@@ -1524,28 +2461,198 @@ function openPiSetup(mode = 'login') {
 
   fsSync.mkdirSync(getPiAgentDir(), { recursive: true });
 
-  if (process.platform === 'darwin') {
-    const command = [
-      `export PI_CODING_AGENT_DIR=${shellQuote(getPiAgentDir())}`,
-      `export PI_CODING_AGENT_SESSION_DIR=${shellQuote(path.join(getPiAgentDir(), 'sessions'))}`,
-      'export PI_SKIP_VERSION_CHECK=1',
-      'export PI_TELEMETRY=0',
-      `export ELECTRON_RUN_AS_NODE=1`,
-      `${shellQuote(process.execPath)} ${shellQuote(cliPath)}`,
-      mode === 'model' ? '/model' : '/login'
-    ].join('; ');
-
-    const script = `tell application "Terminal" to do script ${JSON.stringify(command)}`;
-    spawn('osascript', ['-e', script], { stdio: 'ignore' });
-
-    return { ok: true };
+  if (process.platform !== 'darwin') {
+    return { ok: false, message: 'ChatGPT sign in is currently available on macOS.' };
   }
 
-  return { ok: false, message: 'Pi setup is currently available on macOS.' };
+  if (piChatGptLoginPromise) {
+    return piChatGptLoginPromise;
+  }
+
+  piChatGptLoginPromise = runPiChatGptBrowserLogin(cliPath)
+    .finally(() => {
+      piChatGptLoginPromise = null;
+    });
+
+  return piChatGptLoginPromise;
 }
 
-function shellQuote(value) {
-  return `'${String(value).replaceAll("'", "'\\''")}'`;
+async function runPiChatGptBrowserLogin(cliPath) {
+  try {
+    const { AuthStorage } = await (piAuthStorageImportPromise ?? importPiAuthStorage(cliPath));
+
+    withPiInProcessEnvironment(() => {
+      fsSync.mkdirSync(path.join(getPiAgentDir(), 'sessions'), { recursive: true });
+    });
+
+    await wait(50);
+
+    const authStorage = AuthStorage.create(getPiAuthPath());
+    await withPiInProcessEnvironmentAsync(() => authStorage.login(defaultPiChatGptProvider, {
+      onAuth: (info) => {
+        if (info?.url) {
+          void openUrlInDefaultBrowser(info.url).catch((error) => {
+            console.error('Failed to open ChatGPT sign-in URL in the default browser:', error);
+          });
+        }
+      },
+      onProgress: () => {},
+      onPrompt: async () => {
+        throw new Error('ChatGPT sign in did not complete in the browser.');
+      }
+    }));
+
+    writeSetupState({ selectedPiModel: defaultPiChatGptModel });
+    emitLlmStatus();
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+function openUrlInDefaultBrowser(url) {
+  if (process.platform !== 'darwin') {
+    return shell.openExternal(url);
+  }
+
+  return new Promise((resolve, reject) => {
+    const child = spawn('/usr/bin/open', [url], {
+      detached: true,
+      stdio: 'ignore'
+    });
+
+    child.once('error', reject);
+    child.once('spawn', () => {
+      child.unref();
+      resolve();
+    });
+  });
+}
+
+async function importPiAuthStorage(cliPath) {
+  const modulePath = path.join(path.dirname(cliPath), 'core', 'auth-storage.js');
+
+  if (!fsSync.existsSync(modulePath)) {
+    throw new Error('Bundled Pi auth storage is unavailable.');
+  }
+
+  return import(pathToFileURL(modulePath).href);
+}
+
+function warmPiAuthStorage(cliPath) {
+  if (!cliPath || piAuthStorageImportPromise) {
+    return;
+  }
+
+  piAuthStorageImportPromise = importPiAuthStorage(cliPath).catch((error) => {
+    piAuthStorageImportPromise = null;
+    console.error('Failed to warm Pi auth storage:', error);
+  });
+}
+
+function getPiInProcessEnvironment() {
+  return {
+    PI_CODING_AGENT_DIR: getPiAgentDir(),
+    PI_CODING_AGENT_SESSION_DIR: path.join(getPiAgentDir(), 'sessions'),
+    PI_SKIP_VERSION_CHECK: '1',
+    PI_TELEMETRY: '0'
+  };
+}
+
+function withPiInProcessEnvironment(callback) {
+  const previous = getCurrentPiEnvironment();
+  const next = getPiInProcessEnvironment();
+
+  process.env.PI_CODING_AGENT_DIR = next.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_SESSION_DIR = next.PI_CODING_AGENT_SESSION_DIR;
+  process.env.PI_SKIP_VERSION_CHECK = next.PI_SKIP_VERSION_CHECK;
+  process.env.PI_TELEMETRY = next.PI_TELEMETRY;
+
+  try {
+    return callback();
+  } finally {
+    restorePiEnvironment(previous);
+  }
+}
+
+async function withPiInProcessEnvironmentAsync(callback) {
+  const previous = getCurrentPiEnvironment();
+  const next = getPiInProcessEnvironment();
+
+  process.env.PI_CODING_AGENT_DIR = next.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_SESSION_DIR = next.PI_CODING_AGENT_SESSION_DIR;
+  process.env.PI_SKIP_VERSION_CHECK = next.PI_SKIP_VERSION_CHECK;
+  process.env.PI_TELEMETRY = next.PI_TELEMETRY;
+
+  try {
+    return await callback();
+  } finally {
+    restorePiEnvironment(previous);
+  }
+}
+
+function withPiEnvironment(callback) {
+  const previous = getCurrentPiEnvironment();
+  const next = getPiEnvironment();
+
+  process.env.ELECTRON_RUN_AS_NODE = next.ELECTRON_RUN_AS_NODE;
+  process.env.PI_CODING_AGENT_DIR = next.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_SESSION_DIR = next.PI_CODING_AGENT_SESSION_DIR;
+  process.env.PI_SKIP_VERSION_CHECK = next.PI_SKIP_VERSION_CHECK;
+  process.env.PI_TELEMETRY = next.PI_TELEMETRY;
+
+  try {
+    return callback();
+  } finally {
+    restorePiEnvironment(previous);
+  }
+}
+
+async function withPiEnvironmentAsync(callback) {
+  const previous = getCurrentPiEnvironment();
+  const next = getPiEnvironment();
+
+  process.env.ELECTRON_RUN_AS_NODE = next.ELECTRON_RUN_AS_NODE;
+  process.env.PI_CODING_AGENT_DIR = next.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_SESSION_DIR = next.PI_CODING_AGENT_SESSION_DIR;
+  process.env.PI_SKIP_VERSION_CHECK = next.PI_SKIP_VERSION_CHECK;
+  process.env.PI_TELEMETRY = next.PI_TELEMETRY;
+
+  try {
+    return await callback();
+  } finally {
+    restorePiEnvironment(previous);
+  }
+}
+
+function getCurrentPiEnvironment() {
+  return {
+    ELECTRON_RUN_AS_NODE: process.env.ELECTRON_RUN_AS_NODE,
+    PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR,
+    PI_CODING_AGENT_SESSION_DIR: process.env.PI_CODING_AGENT_SESSION_DIR,
+    PI_SKIP_VERSION_CHECK: process.env.PI_SKIP_VERSION_CHECK,
+    PI_TELEMETRY: process.env.PI_TELEMETRY
+  };
+}
+
+function restorePiEnvironment(previous) {
+  for (const [key, value] of Object.entries(previous)) {
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+}
+
+function wait(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 function savePiModel(model) {
@@ -1574,29 +2681,45 @@ function disconnectPi() {
   return getPiStatus();
 }
 
-function getOnboardingStatus() {
-  const permissionsComplete = isPermissionSetupComplete();
+async function getOnboardingStatus() {
+  const permissions = await getPermissionsStatus();
+  const permissionsComplete = permissions.permissions.every((permission) => (
+    permission.status === 'granted' || permission.status === 'unsupported'
+  ));
   const parakeet = getParakeetStatus();
   const pi = getPiStatus();
-  const complete = permissionsComplete && parakeet.installed && pi.connected;
+  const transcription = getTranscriptionRecommendation();
+  const selectedLocalTranscriptionModel = getSelectedLocalTranscriptionModelId();
+  const transcriptionModelReady = Boolean(
+    selectedLocalTranscriptionModel
+    && parakeet.installed
+    && parakeet.modelId === selectedLocalTranscriptionModel
+  );
+  const complete = permissionsComplete && transcriptionModelReady && pi.connected;
 
   return {
     ok: true,
     complete,
     completedAt: readSetupState().onboardingCompletedAt ?? null,
     parakeet,
-    permissions: getPermissionsStatus(),
+    permissions,
     pi,
-    required: !complete
+    required: !complete,
+    selectedLocalTranscriptionModel,
+    transcription
   };
 }
 
-function shouldShowOnboarding() {
+async function shouldShowOnboarding() {
   if (onboardingSmokeDir) {
     return true;
   }
 
-  return getOnboardingStatus().required;
+  if (packagedOnboardingCompletionSmoke) {
+    return true;
+  }
+
+  return (await getOnboardingStatus()).required;
 }
 
 function getAudioHelperCommand(args) {
@@ -1635,9 +2758,21 @@ function getSystemAudioHelperCommand() {
   return getDesktopBackendCommand([captureArg]);
 }
 
+function getAudioHelperEnvironment() {
+  const bundledPath = getBundledExecutablePath('SusuraAudioHelper');
+
+  return fsSync.existsSync(bundledPath)
+    ? { SUSURA_AUDIO_HELPER_PATH: bundledPath }
+    : {};
+}
+
 function getDesktopBackendCommand(args) {
+  const backendName = process.platform === 'win32'
+    ? 'susura-desktop-backend.exe'
+    : 'susura-desktop-backend';
+
   if (app.isPackaged) {
-    const bundledPath = getBundledExecutablePath('susura-desktop-backend');
+    const bundledPath = getBundledExecutablePath(backendName);
 
     if (fsSync.existsSync(bundledPath)) {
       return {
@@ -1647,8 +2782,8 @@ function getDesktopBackendCommand(args) {
     }
   }
 
-  const releaseBinaryPath = path.join(__dirname, '..', 'target', 'release', 'susura-desktop-backend');
-  const debugBinaryPath = path.join(__dirname, '..', 'target', 'debug', 'susura-desktop-backend');
+  const releaseBinaryPath = path.join(__dirname, '..', 'target', 'release', backendName);
+  const debugBinaryPath = path.join(__dirname, '..', 'target', 'debug', backendName);
   const binaryPath = fsSync.existsSync(releaseBinaryPath) ? releaseBinaryPath : debugBinaryPath;
 
   if (fsSync.existsSync(binaryPath)) {
@@ -1779,9 +2914,37 @@ function stopSystemAudioCapture() {
   systemAudioStdout = '';
 }
 
+function stopLocalTranscriptionWarmDaemon(force = false) {
+  if (!localTranscriptionProcess) {
+    return;
+  }
+
+  const child = localTranscriptionProcess;
+
+  if (child.stdin?.writable) {
+    child.stdin.write(`${JSON.stringify({ type: 'quit' })}\n`);
+    child.stdin.end();
+  } else {
+    child.kill('SIGTERM');
+  }
+
+  if (force) {
+    child.kill('SIGTERM');
+  }
+
+  localTranscriptionProcess = null;
+  localTranscriptionModelId = null;
+  localTranscriptionStdout = '';
+}
+
 function startLocalTranscriptionWarmDaemon() {
-  if (localTranscriptionProcess) {
+  const modelId = getPreferredLocalModelId();
+  if (localTranscriptionProcess && localTranscriptionModelId === modelId) {
     return { ok: true };
+  }
+
+  if (localTranscriptionProcess && localTranscriptionModelId !== modelId) {
+    stopLocalTranscriptionWarmDaemon(true);
   }
 
   const helper = getDesktopBackendCommand(['--local-transcription-daemon']);
@@ -1789,13 +2952,16 @@ function startLocalTranscriptionWarmDaemon() {
     cwd: getProjectRoot(),
     env: {
       ...process.env,
+      ...getAudioHelperEnvironment(),
       SUSURA_MODEL_ROOT: getParakeetModelRoot(),
-      SUSURA_PRELOAD_PARAKEET: '1'
+      SUSURA_PRELOAD_LOCAL_TRANSCRIPTION: '1',
+      SUSURA_TRANSCRIPTION_MODEL: modelId
     },
     stdio: ['pipe', 'pipe', 'pipe']
   });
 
   localTranscriptionProcess = child;
+  localTranscriptionModelId = modelId;
   localTranscriptionStdout = '';
 
   child.stdout.on('data', handleLocalTranscriptionStdout);
@@ -1814,6 +2980,7 @@ function startLocalTranscriptionWarmDaemon() {
   child.once('error', (error) => {
     if (localTranscriptionProcess === child) {
       localTranscriptionProcess = null;
+      localTranscriptionModelId = null;
       emitTranscriptionEvent({
         type: 'error',
         message: error.message
@@ -1824,6 +2991,7 @@ function startLocalTranscriptionWarmDaemon() {
   child.once('exit', (code, signal) => {
     if (localTranscriptionProcess === child) {
       localTranscriptionProcess = null;
+      localTranscriptionModelId = null;
       localTranscriptionStdout = '';
       localTranscriptionStopFlush.cancel('process-exit');
 
@@ -1840,12 +3008,12 @@ function startLocalTranscriptionWarmDaemon() {
     }
   });
 
-  return { ok: true, provider: 'parakeet' };
+  return { ok: true, provider: modelId };
 }
 
 function prepareLocalTranscriptionCapture(options) {
-  if (!validateParakeetModelDir()) {
-    return { ok: false, message: 'Download the local Parakeet model in onboarding or Settings before listening.' };
+  if (!validateLocalTranscriptionModel()) {
+    return { ok: false, message: 'Download the recommended local transcription model in onboarding or Settings before listening.' };
   }
 
   startLocalTranscriptionWarmDaemon();
@@ -1861,12 +3029,12 @@ function prepareLocalTranscriptionCapture(options) {
     sources: selectedSources
   })}\n`);
 
-  return { ok: true, provider: 'parakeet' };
+  return { ok: true, provider: getPreferredLocalModelId() };
 }
 
 function shouldWarmLocalTranscriptionOnStartup() {
   return process.env.SUSURA_DISABLE_PARAKEET_WARMUP !== '1'
-    && validateParakeetModelDir()
+    && validateLocalTranscriptionModel()
     && process.platform === 'darwin'
     && smokeExitMs === 0
     && resourceSmokeMs === 0
@@ -1874,9 +3042,44 @@ function shouldWarmLocalTranscriptionOnStartup() {
     && localParakeetSmokeMs === 0;
 }
 
+async function shouldPrepareLocalTranscriptionOnStartup() {
+  if (process.env.SUSURA_DISABLE_TRANSCRIPTION_HOT_PREPARE === '1') {
+    return false;
+  }
+
+  if (!shouldWarmLocalTranscriptionOnStartup()) {
+    return false;
+  }
+
+  const status = await getOnboardingStatus();
+
+  if (status.required) {
+    return false;
+  }
+
+  return status.permissions.permissions.some((permission) => (
+    permission.id === 'screen-recording'
+    && (permission.status === 'granted' || permission.status === 'unsupported')
+  ));
+}
+
+async function prepareLocalTranscriptionOnStartup() {
+  if (!(await shouldPrepareLocalTranscriptionOnStartup())) {
+    return;
+  }
+
+  wait(750)
+    .then(() => prepareLocalTranscriptionCapture({ sources: ['system'] }))
+    .catch((error) => {
+      writeTranscriptDebugLog('startup_hot_prepare_failed', {
+        message: error instanceof Error ? error.message : String(error)
+      });
+    });
+}
+
 function startLocalTranscriptionCapture(options) {
-  if (!validateParakeetModelDir()) {
-    throw new Error('Download the local Parakeet model in onboarding or Settings before listening.');
+  if (!validateLocalTranscriptionModel()) {
+    throw new Error('Download the recommended local transcription model in onboarding or Settings before listening.');
   }
 
   startLocalTranscriptionWarmDaemon();
@@ -1898,7 +3101,7 @@ function startLocalTranscriptionCapture(options) {
   })}\n`);
   emitTranscriptionEvent({ type: 'connected' });
 
-  return { ok: true, provider: 'parakeet' };
+  return { ok: true, provider: getPreferredLocalModelId() };
 }
 
 function stopLocalTranscriptionCapture() {
@@ -2341,7 +3544,7 @@ function runPiTextRequest(transcript, options = {}, onDelta = () => {}) {
   const requestedThinking = typeof options.reasoning === 'string' ? options.reasoning : '';
   const configuredModel = typeof readSetupState().selectedPiModel === 'string'
     ? readSetupState().selectedPiModel
-    : '';
+    : getInferredPiModelFromAuth();
   const model = requestedModel
     || configuredModel
     || process.env.SUSURA_LLM_MODEL
@@ -2491,6 +3694,7 @@ function warmPersistentPiRpcBridge() {
   }
 
   const model = readSetupState().selectedPiModel
+    || getInferredPiModelFromAuth()
     || process.env.SUSURA_LLM_MODEL
     || process.env.SUSURA_BENCH_LLM_MODEL
     || 'openai-codex/gpt-5.4-mini';
@@ -2886,10 +4090,6 @@ function isIgnorableHelperStderr(message) {
 }
 
 function startSystemAudioCapture() {
-  if (process.platform !== 'darwin') {
-    throw new Error('System audio capture is currently macOS-only.');
-  }
-
   if (systemAudioProcess) {
     return { ok: true };
   }
@@ -2897,6 +4097,10 @@ function startSystemAudioCapture() {
   const helper = getSystemAudioHelperCommand();
   const child = spawn(helper.command, helper.args, {
     cwd: getProjectRoot(),
+    env: {
+      ...process.env,
+      ...getAudioHelperEnvironment()
+    },
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
@@ -2995,12 +4199,13 @@ function handleSystemAudioStdout(chunk) {
 
 function loadRendererSurface(window, surface) {
   if (isDev) {
-    const url = new URL(process.env.VITE_DEV_SERVER_URL);
+    const url = new URL(process.env.VITE_DEV_SERVER_URL || 'http://127.0.0.1:5173');
 
     if (surface) {
       url.searchParams.set('susura-surface', surface);
     }
 
+    console.log(`Loading dev renderer ${url.toString()}`);
     window.loadURL(url.toString());
     return;
   }
@@ -3011,12 +4216,44 @@ function loadRendererSurface(window, surface) {
 }
 
 function applyPrivateWindowProtection(window) {
+  if (isDev) {
+    window.setSkipTaskbar(false);
+
+    try {
+      window.setContentProtection(false);
+    } catch {
+      // Unsupported platforms should still keep the window usable.
+    }
+
+    try {
+      window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    } catch {
+      // Best-effort on non-macOS platforms.
+    }
+
+    setPrivateWindowAlwaysOnTop(window);
+    return;
+  }
+
+  if (process.env.SUSURA_DISABLE_PRIVATE_WINDOW_PROTECTION === '1') {
+    window.setSkipTaskbar(false);
+    return;
+  }
+
   window.setSkipTaskbar(true);
 
-  try {
-    window.setContentProtection(true);
-  } catch {
-    // Unsupported platforms should still keep the overlay usable.
+  if (shouldProtectPrivateWindowContent()) {
+    try {
+      window.setContentProtection(true);
+    } catch {
+      // Unsupported platforms should still keep the overlay usable.
+    }
+  } else {
+    try {
+      window.setContentProtection(false);
+    } catch {
+      // Unsupported platforms should still keep the overlay usable.
+    }
   }
 
   if (typeof window.setHiddenInMissionControl === 'function') {
@@ -3033,11 +4270,23 @@ function applyPrivateWindowProtection(window) {
     // Best-effort on non-macOS platforms.
   }
 
+  setPrivateWindowAlwaysOnTop(window);
+}
+
+function setPrivateWindowAlwaysOnTop(window) {
   try {
     window.setAlwaysOnTop(true, 'floating');
   } catch {
     window.setAlwaysOnTop(true);
   }
+}
+
+function shouldProtectPrivateWindowContent() {
+  if (process.env.SUSURA_ENABLE_PRIVATE_WINDOW_PROTECTION === '1') {
+    return true;
+  }
+
+  return !isDev && getAppChannel() !== 'dev';
 }
 
 function createPrivateOverlayWindow() {
@@ -3046,21 +4295,22 @@ function createPrivateOverlayWindow() {
   }
 
   const state = readPrivateOverlayState();
+  const windowBounds = getOverlayWindowBoundsForVisualBounds(state.overlay);
   privateOverlayWindow = new BrowserWindow({
-    x: state.overlay.x,
-    y: state.overlay.y,
-    width: state.overlay.width,
-    height: state.overlay.height,
-    minWidth: minimumWindowSize.width,
-    minHeight: minimumWindowSize.height,
+    x: windowBounds.x,
+    y: windowBounds.y,
+    width: windowBounds.width,
+    height: windowBounds.height,
+    minWidth: minimumOverlayWindowSize.width + (overlayWindowResizeOutset * 2),
+    minHeight: minimumOverlayWindowSize.height + (overlayWindowResizeOutset * 2),
     useContentSize: true,
-    show: false,
+    show: true,
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
-    title: 'Susura',
+    title: getAppDisplayName(),
     skipTaskbar: true,
-    resizable: true,
+    resizable: false,
     maximizable: false,
     fullscreenable: false,
     webPreferences: {
@@ -3076,6 +4326,7 @@ function createPrivateOverlayWindow() {
   applyPrivateWindowProtection(privateOverlayWindow);
   persistPrivateOverlayWindowState(privateOverlayWindow);
   loadRendererSurface(privateOverlayWindow, null);
+  runPackagedLaunchSmokeIfRequested(privateOverlayWindow, 'private-overlay');
 
   privateOverlayWindow.on('closed', () => {
     if (mainWindow === privateOverlayWindow) {
@@ -3099,21 +4350,21 @@ function createOnboardingWindow() {
 
   const primaryDisplay = screen.getPrimaryDisplay();
   const workArea = primaryDisplay.workArea;
-  const width = 880;
-  const height = 660;
+  const width = onboardingContentSize.width;
+  const height = onboardingContentSize.initialHeight;
 
   onboardingWindow = new BrowserWindow({
     x: workArea.x + Math.round((workArea.width - width) / 2),
     y: workArea.y + Math.round((workArea.height - height) / 2),
     width,
     height,
-    minWidth: 760,
-    minHeight: 560,
+    minWidth: width,
+    minHeight: onboardingContentSize.minHeight,
     useContentSize: true,
     show: false,
     frame: true,
-    title: 'Set up Susura',
-    resizable: true,
+    title: getAppDisplayName(),
+    resizable: false,
     maximizable: false,
     fullscreenable: false,
     webPreferences: {
@@ -3127,22 +4378,306 @@ function createOnboardingWindow() {
   });
 
   loadRendererSurface(onboardingWindow, 'onboarding');
+  runPackagedLaunchSmokeIfRequested(onboardingWindow, 'onboarding');
 
   onboardingWindow.on('closed', () => {
     onboardingWindow = null;
 
-    if (!isQuitting && !shouldShowOnboarding()) {
-      createPrivateOverlayHandleWindow();
+    if (!isQuitting) {
+      void shouldShowOnboarding().then((required) => {
+        if (!required) {
+          createPrivateOverlayHandleWindow();
+        }
+      });
     }
   });
 
   onboardingWindow.once('ready-to-show', () => {
     onboardingWindow.show();
     onboardingWindow.focus();
+    runPackagedLaunchSmokeIfRequested(onboardingWindow, 'onboarding');
     runOnboardingSmokeIfRequested(onboardingWindow);
   });
 
   return onboardingWindow;
+}
+
+function runPackagedLaunchSmokeIfRequested(window, surface) {
+  if (packagedLaunchSmokeMs <= 0 || packagedLaunchSmokeStarted || packagedLaunchSmokeCompleted || window.isDestroyed()) {
+    return;
+  }
+
+  const runSmoke = async () => {
+    if (packagedLaunchSmokeStarted || packagedLaunchSmokeCompleted) {
+      return;
+    }
+
+    packagedLaunchSmokeStarted = true;
+
+    try {
+      const result = await getPackagedLaunchSmokeRendererResult(window);
+      if (packagedOnboardingCompletionSmoke && result.hasOnboarding) {
+        await completeOnboarding();
+      }
+      const completion = packagedOnboardingCompletionSmoke
+        ? await getPackagedOnboardingCompletionSmokeSummary()
+        : null;
+      const summary = {
+        ok: packagedLaunchSmokeRequiresOnboarding
+          ? Boolean(result.hasOnboarding)
+          : Boolean(result.hasOnboarding || result.hasHomeLayout || result.hasHandle),
+        appName: app.getName(),
+        appPath: app.getAppPath(),
+        isPackaged: app.isPackaged,
+        requiresOnboarding: packagedLaunchSmokeRequiresOnboarding,
+        resourcesPath: process.resourcesPath,
+        surface,
+        ...result
+      };
+
+      if (completion) {
+        summary.completion = completion;
+        summary.ok = summary.ok && completion.ok;
+      }
+
+      const privacy = packagedPrivacySmoke ? getPackagedPrivacySmokeSummary() : null;
+
+      if (privacy) {
+        summary.privacy = privacy;
+        summary.ok = summary.ok && privacy.ok;
+      }
+
+      emitSmokeLine(`susura-packaged-launch-smoke ${JSON.stringify(summary)}`);
+      packagedLaunchSmokeCompleted = true;
+
+      if (!summary.ok || !summary.isPackaged) {
+        app.exitCode = 1;
+        process.exitCode = 1;
+      }
+    } catch (error) {
+      console.error(`susura-packaged-launch-smoke failed ${error.message}`);
+      app.exitCode = 1;
+      process.exitCode = 1;
+    } finally {
+      setTimeout(() => {
+        app.exit(app.exitCode || process.exitCode || 0);
+      }, packagedLaunchSmokeMs);
+    }
+  };
+
+  if (window.webContents.isLoading()) {
+    window.webContents.once('did-finish-load', () => {
+      void runSmoke();
+    });
+  } else {
+    void runSmoke();
+  }
+}
+
+function getPackagedLaunchSmokeRendererResult(window) {
+  return window.webContents.executeJavaScript(`
+    (async () => {
+      const waitUntil = Date.now() + ${JSON.stringify(packagedLaunchSmokeWaitMs)};
+      let onboarding = null;
+      let homeLayout = null;
+      let handle = null;
+      let completion = null;
+
+      while (Date.now() <= waitUntil) {
+        const bodyText = (document.body?.textContent ?? '').trim();
+        onboarding = document.querySelector('[aria-label="Susura setup"]')
+          || (bodyText.includes('Welcome to Susura') && bodyText.includes('Start using Susura'));
+        homeLayout = document.querySelector('[aria-label="Home layout"]');
+        handle = document.querySelector('[aria-label="Susura overlay handle"]');
+
+        if (${JSON.stringify(packagedLaunchSmokeRequiresOnboarding)} ? onboarding : (onboarding || homeLayout || handle)) {
+          break;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+
+      if (${JSON.stringify(packagedOnboardingCompletionSmoke)} && onboarding) {
+        const startButton = Array.from(document.querySelectorAll('button'))
+          .find((button) => (button.textContent ?? '').includes('Start using Susura')) ?? null;
+        completion = {
+          attempted: true,
+          buttonEnabled: Boolean(startButton && !startButton.disabled),
+          clicked: false
+        };
+
+        if (startButton && !startButton.disabled) {
+          startButton.click();
+          completion.clicked = true;
+        }
+      }
+
+      const runtime = await window.susura.getRuntimeContext();
+      return {
+        runtime,
+        completion,
+        hasHandle: Boolean(handle),
+        hasOnboarding: Boolean(onboarding),
+        hasHomeLayout: Boolean(homeLayout),
+        location: window.location.href,
+        title: document.title,
+        bodyTextLength: (document.body?.textContent ?? '').trim().length,
+        bodyTextSample: (document.body?.textContent ?? '').trim().slice(0, 500)
+      };
+    })()
+  `);
+}
+
+async function getPackagedOnboardingCompletionSmokeSummary() {
+  await wait(1500);
+
+  const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
+  const windowSurfaces = [];
+
+  for (const window of windows) {
+    try {
+      windowSurfaces.push(await getPackagedWindowSurfaceFlags(window));
+    } catch (error) {
+      windowSurfaces.push({ error: error.message });
+    }
+  }
+
+  const setupState = readSetupState();
+  const completedAt = typeof setupState.onboardingCompletedAt === 'string'
+    ? setupState.onboardingCompletedAt
+    : null;
+  const hasHandle = windowSurfaces.some((surface) => surface.hasHandle);
+  const hasHomeLayout = windowSurfaces.some((surface) => surface.hasHomeLayout);
+
+  return {
+    ok: Boolean(completedAt && (hasHandle || hasHomeLayout)),
+    completedAt,
+    hasHandle,
+    hasHomeLayout,
+    windowSurfaces
+  };
+}
+
+function getPackagedWindowSurfaceFlags(window) {
+  return window.webContents.executeJavaScript(`
+    (() => {
+      const bodyText = (document.body?.textContent ?? '').trim();
+      return {
+        hasHandle: Boolean(document.querySelector('[aria-label="Susura overlay handle"]')),
+        hasHomeLayout: Boolean(document.querySelector('[aria-label="Home layout"]')),
+        hasOnboarding: Boolean(document.querySelector('[aria-label="Susura setup"]'))
+          || (bodyText.includes('Welcome to Susura') && bodyText.includes('Start using Susura')),
+        location: window.location.href,
+        title: document.title
+      };
+    })()
+  `);
+}
+
+function startPackagedLaunchSmokeFallback() {
+  if (packagedLaunchSmokeMs <= 0) {
+    return;
+  }
+
+  setTimeout(async () => {
+    if (packagedLaunchSmokeCompleted) {
+      return;
+    }
+
+    const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
+    const rendererResults = [];
+
+    for (const window of windows) {
+      try {
+        rendererResults.push(await getPackagedLaunchSmokeRendererResult(window));
+      } catch (error) {
+        rendererResults.push({ error: error.message });
+      }
+    }
+
+    const hasOnboarding = rendererResults.some((result) => result.hasOnboarding);
+    const hasHomeLayout = rendererResults.some((result) => result.hasHomeLayout);
+    const hasHandle = rendererResults.some((result) => result.hasHandle);
+
+    if (packagedOnboardingCompletionSmoke && hasOnboarding) {
+      await completeOnboarding();
+    }
+
+    const completion = packagedOnboardingCompletionSmoke
+      ? await getPackagedOnboardingCompletionSmokeSummary()
+      : null;
+    const summary = {
+      ok: packagedLaunchSmokeRequiresOnboarding
+        ? hasOnboarding
+        : Boolean(hasOnboarding || hasHomeLayout || hasHandle || windows.length > 0),
+      appName: app.getName(),
+      appPath: app.getAppPath(),
+      isPackaged: app.isPackaged,
+      requiresOnboarding: packagedLaunchSmokeRequiresOnboarding,
+      resourcesPath: process.resourcesPath,
+      surface: 'main-process-window',
+      hasHandle,
+      hasHomeLayout,
+      hasOnboarding,
+      rendererResults,
+      windowCount: windows.length,
+      windows: windows.map((window) => ({
+        title: window.getTitle(),
+        visible: window.isVisible(),
+        bounds: window.getBounds()
+      }))
+    };
+
+    if (completion) {
+      summary.completion = completion;
+      summary.ok = summary.ok && completion.ok;
+    }
+
+    const privacy = packagedPrivacySmoke ? getPackagedPrivacySmokeSummary() : null;
+
+    if (privacy) {
+      summary.privacy = privacy;
+      summary.ok = summary.ok && privacy.ok;
+    }
+
+    console.log(`susura-packaged-launch-smoke ${JSON.stringify(summary)}`);
+    packagedLaunchSmokeCompleted = true;
+
+    if (!summary.ok || !summary.isPackaged) {
+      app.exitCode = 1;
+      process.exitCode = 1;
+    }
+
+    setTimeout(() => {
+      app.exit(app.exitCode || process.exitCode || 0);
+    }, packagedLaunchSmokeMs);
+  }, packagedLaunchSmokeRequiresOnboarding ? Math.max(8000, packagedLaunchSmokeMs * 8) : Math.max(1000, packagedLaunchSmokeMs * 4));
+}
+
+function fitOnboardingWindowToContent(sender, size = {}) {
+  const window = onboardingWindow && !onboardingWindow.isDestroyed()
+    ? onboardingWindow
+    : null;
+
+  if (!window || sender !== window.webContents || typeof size.height !== 'number') {
+    return { ok: false };
+  }
+
+  const display = screen.getDisplayMatching(window.getBounds());
+  const workArea = display.workArea;
+  const width = onboardingContentSize.width;
+  const minHeight = onboardingContentSize.minHeight;
+  const maxHeight = Math.max(minHeight, workArea.height - 80);
+  const height = Math.min(maxHeight, Math.max(minHeight, Math.ceil(size.height)));
+
+  window.setContentSize(width, height);
+  const bounds = window.getBounds();
+  window.setPosition(
+    workArea.x + Math.round((workArea.width - bounds.width) / 2),
+    workArea.y + Math.round((workArea.height - bounds.height) / 2)
+  );
+
+  return { ok: true };
 }
 
 async function runOnboardingSmokeIfRequested(window) {
@@ -3155,8 +4690,7 @@ async function runOnboardingSmokeIfRequested(window) {
   const steps = [
     ['permissions', 'permissions.png'],
     ['parakeet', 'parakeet.png'],
-    ['ai', 'ai.png'],
-    ['done', 'done.png']
+    ['ai', 'ai.png']
   ];
 
   setTimeout(async () => {
@@ -3188,6 +4722,7 @@ function createPrivateOverlayHandleWindow() {
   }
 
   const state = readPrivateOverlayState();
+  const handleWindowSize = getHandleWindowSize(state.handle.size);
   privateOverlayHandleWindow = new BrowserWindow({
     x: state.handle.x,
     y: state.handle.y,
@@ -3199,6 +4734,8 @@ function createPrivateOverlayHandleWindow() {
     transparent: true,
     backgroundColor: '#00000000',
     title: 'Susura Overlay Handle',
+    alwaysOnTop: true,
+    focusable: false,
     skipTaskbar: true,
     resizable: false,
     movable: true,
@@ -3215,10 +4752,10 @@ function createPrivateOverlayHandleWindow() {
     }
   });
 
-  applyPrivateWindowProtection(privateOverlayHandleWindow);
   privateOverlayHandleWindow.setOpacity(state.handle.opacity);
   persistPrivateOverlayHandleState(privateOverlayHandleWindow);
   loadRendererSurface(privateOverlayHandleWindow, 'handle');
+  runPackagedLaunchSmokeIfRequested(privateOverlayHandleWindow, 'private-overlay-handle');
 
   privateOverlayHandleWindow.on('closed', () => {
     privateOverlayHandleWindow = null;
@@ -3231,6 +4768,59 @@ function createPrivateOverlayHandleWindow() {
 
 function persistPrivateOverlayWindowState(window) {
   let saveTimer = null;
+  let applyingAnchoredResize = false;
+  let lastAnchoredResizeBounds = null;
+
+  const persistBounds = (bounds) => {
+    const visualBounds = getVisualBoundsForOverlayWindowBounds(bounds);
+
+    updatePrivateOverlayState((state) => ({
+      ...state,
+      overlay: {
+        ...state.overlay,
+        height: visualBounds.height,
+        visible: window.isVisible(),
+        width: visualBounds.width,
+        x: visualBounds.x,
+        y: visualBounds.y
+      }
+    }));
+    broadcastPrivateOverlayState();
+  };
+
+  const setAnchoredBounds = (size, { persist = false } = {}) => {
+    if (window.isDestroyed() || !window.isVisible()) {
+      return window.isDestroyed() ? null : getPrivateOverlayWindowVisualBounds();
+    }
+
+    const bounds = getPrivateOverlayWindowVisualBounds();
+    const anchoredBounds = getAnchoredOverlayBounds(size, {
+      orientForEdge: false,
+      restoreNonCompactWidth: false
+    });
+
+    if (
+      bounds.x === anchoredBounds.x
+      && bounds.y === anchoredBounds.y
+      && bounds.width === anchoredBounds.width
+      && bounds.height === anchoredBounds.height
+    ) {
+      return anchoredBounds;
+    }
+
+    applyingAnchoredResize = true;
+    lastAnchoredResizeBounds = anchoredBounds;
+    window.setBounds(getOverlayWindowBoundsForVisualBounds(anchoredBounds), false);
+    setImmediate(() => {
+      applyingAnchoredResize = false;
+    });
+
+    if (persist) {
+      persistBounds(getOverlayWindowBoundsForVisualBounds(anchoredBounds));
+    }
+
+    return anchoredBounds;
+  };
 
   const scheduleSave = () => {
     clearTimeout(saveTimer);
@@ -3240,40 +4830,40 @@ function persistPrivateOverlayWindowState(window) {
         return;
       }
 
-      const bounds = window.getBounds();
-      const [width, height] = window.getContentSize();
-      const anchoredBounds = window.isVisible()
-        ? getAnchoredOverlayBounds({ height, width })
-        : bounds;
+      const [contentWidth, contentHeight] = window.getContentSize();
+      const width = Math.max(1, contentWidth - (overlayWindowResizeOutset * 2));
+      const height = Math.max(1, contentHeight - (overlayWindowResizeOutset * 2));
+      const anchoredBounds = lastAnchoredResizeBounds ?? setAnchoredBounds({ height, width }) ?? window.getBounds();
 
-      if (
-        window.isVisible()
-        && (
-          bounds.x !== anchoredBounds.x
-          || bounds.y !== anchoredBounds.y
-          || bounds.width !== anchoredBounds.width
-          || bounds.height !== anchoredBounds.height
-        )
-      ) {
-        window.setBounds(anchoredBounds);
-      }
-
-      updatePrivateOverlayState((state) => ({
-        ...state,
-        overlay: {
-          ...state.overlay,
-          height: anchoredBounds.height,
-          visible: window.isVisible(),
-          width: anchoredBounds.width,
-          x: anchoredBounds.x,
-          y: anchoredBounds.y
-        }
-      }));
-      broadcastPrivateOverlayState();
+      persistBounds(getOverlayWindowBoundsForVisualBounds(anchoredBounds));
+      lastAnchoredResizeBounds = null;
     }, 250);
   };
 
-  window.on('resize', scheduleSave);
+  window.on('will-resize', (event, bounds) => {
+    if (applyingAnchoredResize || !window.isVisible()) {
+      return;
+    }
+
+    event.preventDefault();
+    setAnchoredBounds({
+      height: Math.max(1, bounds.height - (overlayWindowResizeOutset * 2)),
+      width: Math.max(1, bounds.width - (overlayWindowResizeOutset * 2))
+    }, {
+      persist: true
+    });
+    scheduleSave();
+  });
+  window.on('resize', () => {
+    if (!applyingAnchoredResize) {
+      const [contentWidth, contentHeight] = window.getContentSize();
+      const width = Math.max(1, contentWidth - (overlayWindowResizeOutset * 2));
+      const height = Math.max(1, contentHeight - (overlayWindowResizeOutset * 2));
+      setAnchoredBounds({ height, width }, { persist: true });
+    }
+
+    scheduleSave();
+  });
   window.on('show', scheduleSave);
   window.on('hide', scheduleSave);
   window.on('close', () => {
@@ -3325,7 +4915,10 @@ function broadcastPrivateOverlayState() {
 
 function showPrivateOverlayWindow() {
   const window = createPrivateOverlayWindow();
-  const bounds = getAnchoredOverlayBounds();
+  const bounds = getAnchoredOverlayBounds({}, {
+    orientForEdge: false,
+    restoreNonCompactWidth: false
+  });
 
   updatePrivateOverlayState((current) => ({
     ...current,
@@ -3339,11 +4932,13 @@ function showPrivateOverlayWindow() {
     }
   }));
 
-  window.setBounds(bounds);
+  setPrivateOverlayWindowVisualBounds(bounds);
   window.setIgnoreMouseEvents(false);
+  applyPrivateWindowProtection(window);
   window.show();
   window.focus();
-  applyPrivateWindowProtection(window);
+  window.moveTop();
+  showPrivateOverlayHandleWindow();
   broadcastPrivateOverlayState();
 }
 
@@ -3390,8 +4985,18 @@ function showPrivateOverlayHandleWindow() {
 
   window.setBounds(bounds);
   window.setOpacity(state.handle.opacity);
+  window.setIgnoreMouseEvents(false);
+  try {
+    window.setAlwaysOnTop(true, 'pop-up-menu');
+  } catch {
+    window.setAlwaysOnTop(true);
+  }
   window.showInactive();
-  applyPrivateWindowProtection(window);
+  try {
+    window.moveTop();
+  } catch {
+    // Some platforms may not support explicit front ordering for accessory windows.
+  }
   broadcastPrivateOverlayState();
 }
 
@@ -3401,6 +5006,37 @@ function setPrivateOverlayClickThrough(enabled) {
     clickThrough: Boolean(enabled)
   }));
 
+  broadcastPrivateOverlayState();
+  return getPrivateOverlayStatus();
+}
+
+function setPrivateOverlayHandleSize(size) {
+  const handleSize = normaliseHandleSizePreset(size);
+  const nextSize = getHandleWindowSize(handleSize);
+  const window = createPrivateOverlayHandleWindow();
+  const currentBounds = window.getBounds();
+  const currentCentreX = currentBounds.x + Math.round(currentBounds.width / 2);
+  const currentCentreY = currentBounds.y + Math.round(currentBounds.height / 2);
+  const nextBounds = normaliseHandleBounds({
+    height: nextSize.height,
+    size: handleSize,
+    width: nextSize.width,
+    x: currentCentreX - Math.round(nextSize.width / 2),
+    y: currentCentreY - Math.round(nextSize.height / 2)
+  });
+
+  window.setBounds(nextBounds);
+  updatePrivateOverlayState((state) => ({
+    ...state,
+    handle: {
+      ...state.handle,
+      size: handleSize,
+      visible: window.isVisible(),
+      x: nextBounds.x,
+      y: nextBounds.y
+    }
+  }));
+  positionVisibleOverlayFromHandle(getVisibleOverlayContentSize());
   broadcastPrivateOverlayState();
   return getPrivateOverlayStatus();
 }
@@ -3417,14 +5053,13 @@ function showPrivateOverlayHandleMenu(sender) {
   const status = getPrivateOverlayStatus();
   const menu = Menu.buildFromTemplate([
     {
-      label: status.overlayWindowVisible ? 'Hide Susura' : 'Open Susura',
-      click: () => {
-        if (status.overlayWindowVisible) {
-          hidePrivateOverlayWindow();
-        } else {
-          showMainWindow();
-        }
-      }
+      label: 'Floating Button Size',
+      submenu: Object.entries(handleWindowSizePresets).map(([size, pixels]) => ({
+        checked: status.handle.size === size,
+        click: () => setPrivateOverlayHandleSize(size),
+        label: `${size[0].toUpperCase()}${size.slice(1)} (${pixels}px)`,
+        type: 'radio'
+      }))
     },
     { type: 'separator' },
     {
@@ -3475,8 +5110,8 @@ function normaliseHandleDragPoint(request) {
 function getVisibleOverlayContentSize() {
   return privateOverlayWindow && !privateOverlayWindow.isDestroyed()
     ? {
-      height: privateOverlayWindow.getContentSize()[1],
-      width: privateOverlayWindow.getContentSize()[0]
+      height: getPrivateOverlayWindowVisualBounds().height,
+      width: getPrivateOverlayWindowVisualBounds().width
     }
     : {};
 }
@@ -3562,9 +5197,11 @@ function getHandleDragBounds(request) {
     return null;
   }
 
+  const handleBounds = getPrivateOverlayHandleBounds();
+
   return {
-    height: handleWindowSize.height,
-    width: handleWindowSize.width,
+    height: handleBounds.height,
+    width: handleBounds.width,
     x: Math.round(point.screenX - privateOverlayHandleDrag.offsetX),
     y: Math.round(point.screenY - privateOverlayHandleDrag.offsetY)
   };
@@ -3693,7 +5330,7 @@ function startPrivateOverlayWindowDrag(request) {
     return getPrivateOverlayStatus();
   }
 
-  const bounds = privateOverlayWindow.getBounds();
+  const bounds = getPrivateOverlayWindowVisualBounds();
 
   privateOverlayWindowDrag = {
     height: bounds.height,
@@ -3719,7 +5356,7 @@ function movePrivateOverlayWindowDrag(request) {
   const overlayBounds = clampOverlayBoundsToDisplay(dragBounds);
   const handleBounds = getHandleBoundsForOverlayBounds(overlayBounds);
 
-  privateOverlayWindow.setBounds(overlayBounds);
+  setPrivateOverlayWindowVisualBounds(overlayBounds);
   setPrivateOverlayHandleBounds(handleBounds, { persist: false });
   broadcastPrivateOverlayState();
   return getPrivateOverlayStatus();
@@ -3731,7 +5368,7 @@ function endPrivateOverlayWindowDrag(request) {
     return getPrivateOverlayStatus();
   }
 
-  const dragBounds = getOverlayDragBounds(request) ?? privateOverlayWindow.getBounds();
+  const dragBounds = getOverlayDragBounds(request) ?? getPrivateOverlayWindowVisualBounds();
   const overlayBounds = clampOverlayBoundsToDisplay(dragBounds);
   const snappedHandleBounds = getHandleBoundsForOverlayBounds(overlayBounds, { snap: true });
 
@@ -3740,9 +5377,12 @@ function endPrivateOverlayWindowDrag(request) {
   const anchoredBounds = getAnchoredOverlayBounds({
     height: overlayBounds.height,
     width: overlayBounds.width
+  }, {
+    orientForEdge: false,
+    restoreNonCompactWidth: false
   });
 
-  privateOverlayWindow.setBounds(anchoredBounds);
+  setPrivateOverlayWindowVisualBounds(anchoredBounds);
   updatePrivateOverlayState((state) => ({
     ...state,
     overlay: {
@@ -3758,8 +5398,239 @@ function endPrivateOverlayWindowDrag(request) {
   return getPrivateOverlayStatus();
 }
 
+function normaliseOverlayResizeRequest(request) {
+  const direction = typeof request?.direction === 'string'
+    ? request.direction.toLowerCase()
+    : '';
+
+  return {
+    direction: /^[nesw]{1,2}$/.test(direction) ? direction : '',
+    screenX: Number(request?.screenX),
+    screenY: Number(request?.screenY)
+  };
+}
+
+function startPrivateOverlayWindowResize(request) {
+  if (!privateOverlayWindow || privateOverlayWindow.isDestroyed()) {
+    return getPrivateOverlayStatus();
+  }
+
+  const point = normaliseOverlayResizeRequest(request);
+
+  if (!point.direction || !Number.isFinite(point.screenX) || !Number.isFinite(point.screenY)) {
+    return getPrivateOverlayStatus();
+  }
+
+  const overlayBounds = getPrivateOverlayWindowVisualBounds();
+  const handleBounds = getPrivateOverlayHandleBounds();
+  const display = screen.getDisplayMatching(handleBounds);
+  const edge = getNearestHandleEdge(handleBounds, display);
+  const handleIsCornerSnapped = isHandleBoundsAtDisplayCorner(handleBounds, display);
+  const handleCentreX = handleBounds.x + Math.round(handleBounds.width / 2);
+  const handleCentreY = handleBounds.y + Math.round(handleBounds.height / 2);
+  const anchorX = handleCentreX;
+  const anchorY = edge === 'top'
+    ? handleBounds.y + handleBounds.height + overlayWindowGap
+    : edge === 'bottom'
+      ? handleBounds.y - overlayWindowGap
+      : handleCentreY;
+
+  privateOverlayWindowResize = {
+    anchorX,
+    anchorY,
+    direction: point.direction,
+    edge,
+    handleIsCornerSnapped,
+    height: overlayBounds.height,
+    pointerOffsetX: point.direction.includes('e')
+      ? point.screenX - (overlayBounds.x + overlayBounds.width)
+      : point.direction.includes('w')
+        ? point.screenX - overlayBounds.x
+        : 0,
+    pointerOffsetY: point.direction.includes('s')
+      ? point.screenY - (overlayBounds.y + overlayBounds.height)
+      : point.direction.includes('n')
+        ? point.screenY - overlayBounds.y
+        : 0,
+    width: overlayBounds.width,
+    x: overlayBounds.x,
+    y: overlayBounds.y
+  };
+
+  return getPrivateOverlayStatus();
+}
+
+function getOverlayResizeBounds(request) {
+  const point = normaliseOverlayResizeRequest(request);
+
+  if (
+    !privateOverlayWindowResize
+    || !Number.isFinite(point.screenX)
+    || !Number.isFinite(point.screenY)
+  ) {
+    return null;
+  }
+
+  const resize = privateOverlayWindowResize;
+  let width = resize.width;
+  let height = resize.height;
+  const canMirrorResize = !resize.handleIsCornerSnapped;
+  const mirrorHorizontalResize = canMirrorResize && (resize.edge === 'top' || resize.edge === 'bottom');
+  const mirrorVerticalResize = canMirrorResize && (resize.edge === 'left' || resize.edge === 'right');
+  const pointX = point.screenX - resize.pointerOffsetX;
+  const pointY = point.screenY - resize.pointerOffsetY;
+
+  if (resize.direction.includes('e') || resize.direction.includes('w')) {
+    if (mirrorHorizontalResize) {
+      width = resize.direction.includes('e')
+        ? (pointX - resize.anchorX) * 2
+        : (resize.anchorX - pointX) * 2;
+    } else {
+      width = resize.direction.includes('e')
+        ? pointX - resize.x
+        : resize.x + resize.width - pointX;
+    }
+  }
+
+  if (resize.direction.includes('n') || resize.direction.includes('s')) {
+    if (mirrorVerticalResize) {
+      height = resize.direction.includes('s')
+        ? (pointY - resize.anchorY) * 2
+        : (resize.anchorY - pointY) * 2;
+    } else if (resize.edge === 'left' || resize.edge === 'right') {
+      height = resize.direction.includes('s')
+        ? pointY - resize.y
+        : resize.y + resize.height - pointY;
+    } else if (resize.edge === 'top') {
+      height = pointY - resize.anchorY;
+    } else {
+      height = resize.anchorY - pointY;
+    }
+  }
+
+  const bounds = getAnchoredOverlayBounds({
+    height,
+    width
+  }, {
+    orientForEdge: false,
+    restoreNonCompactWidth: false
+  });
+
+  if (resize.direction.includes('e') || resize.direction.includes('w')) {
+    const display = screen.getDisplayMatching(getPrivateOverlayHandleBounds());
+    const workArea = display.workArea;
+
+    if (mirrorHorizontalResize) {
+      bounds.x = clampNumber(
+        Math.round(resize.anchorX - (bounds.width / 2)),
+        workArea.x + windowScreenMargin,
+        workArea.x + workArea.width - bounds.width - windowScreenMargin,
+        bounds.x
+      );
+    } else if (resize.edge === 'top' || resize.edge === 'bottom') {
+      bounds.x = resize.direction.includes('e')
+        ? clampNumber(
+          resize.x,
+          workArea.x + windowScreenMargin,
+          workArea.x + workArea.width - bounds.width - windowScreenMargin,
+          bounds.x
+        )
+        : clampNumber(
+          resize.x + resize.width - bounds.width,
+          workArea.x + windowScreenMargin,
+          workArea.x + workArea.width - bounds.width - windowScreenMargin,
+          bounds.x
+        );
+    }
+  }
+
+  if (
+    mirrorVerticalResize
+    && (resize.direction.includes('n') || resize.direction.includes('s'))
+  ) {
+    const display = screen.getDisplayMatching(getPrivateOverlayHandleBounds());
+    const workArea = display.workArea;
+
+    bounds.y = clampNumber(
+      Math.round(resize.anchorY - (bounds.height / 2)),
+      workArea.y + windowScreenMargin,
+      workArea.y + workArea.height - bounds.height - windowScreenMargin,
+      bounds.y
+    );
+  }
+
+  if (
+    (resize.edge === 'left' || resize.edge === 'right')
+    && (resize.direction.includes('n') || resize.direction.includes('s'))
+    && !mirrorVerticalResize
+  ) {
+    const display = screen.getDisplayMatching(getPrivateOverlayHandleBounds());
+    const workArea = display.workArea;
+
+    bounds.y = resize.direction.includes('s')
+      ? clampNumber(
+        resize.y,
+        workArea.y + windowScreenMargin,
+        workArea.y + workArea.height - bounds.height - windowScreenMargin,
+        bounds.y
+      )
+      : clampNumber(
+        resize.y + resize.height - bounds.height,
+        workArea.y + windowScreenMargin,
+        workArea.y + workArea.height - bounds.height - windowScreenMargin,
+        bounds.y
+      );
+  }
+
+  return bounds;
+}
+
+function movePrivateOverlayWindowResize(request) {
+  if (!privateOverlayWindow || privateOverlayWindow.isDestroyed()) {
+    return getPrivateOverlayStatus();
+  }
+
+  const bounds = getOverlayResizeBounds(request);
+
+  if (!bounds) {
+    return getPrivateOverlayStatus();
+  }
+
+  setPrivateOverlayWindowVisualBounds(bounds, false);
+  return null;
+}
+
+function endPrivateOverlayWindowResize(request) {
+  if (!privateOverlayWindow || privateOverlayWindow.isDestroyed()) {
+    privateOverlayWindowResize = null;
+    return getPrivateOverlayStatus();
+  }
+
+  const bounds = getOverlayResizeBounds(request) ?? getPrivateOverlayWindowVisualBounds();
+
+  privateOverlayWindowResize = null;
+  setPrivateOverlayWindowVisualBounds(bounds, false);
+  updatePrivateOverlayState((state) => ({
+    ...state,
+    overlay: {
+      ...state.overlay,
+      height: bounds.height,
+      visible: privateOverlayWindow.isVisible(),
+      width: bounds.width,
+      x: bounds.x,
+      y: bounds.y
+    }
+  }));
+  broadcastPrivateOverlayState();
+  return getPrivateOverlayStatus();
+}
+
 function applyMacPrivateActivationPolicy() {
   if (process.platform !== 'darwin') {
+    return;
+  }
+
+  if (isDev) {
     return;
   }
 
@@ -3801,7 +5672,8 @@ function registerPrivateOverlayShortcuts() {
 }
 
 function shouldOpenFullAppOverlayOnLaunch() {
-  return smokeExitMs > 0
+  return isDev
+    || smokeExitMs > 0
     || systemAudioSmokeMs > 0
     || localParakeetSmokeMs > 0
     || rendererTranscriptionSmokeMs > 0
@@ -3812,7 +5684,7 @@ function shouldOpenFullAppOverlayOnLaunch() {
 function createWindow() {
   mainWindow = createPrivateOverlayWindow();
 
-  if (transcriptDebugLogEnabled) {
+  if (isTranscriptDebugLogEnabled()) {
     mainWindow.webContents.on('console-message', (_event, _level, message) => {
       if (message.startsWith('susura-renderer-transcript-debug ')) {
         writeTranscriptDebugLog('renderer.console', {
@@ -4016,15 +5888,30 @@ function createWindow() {
   }
 
   if (rendererTranscriptionSmokeMs > 0) {
-    mainWindow.webContents.once('did-finish-load', async () => {
+    emitSmokeLine(`susura-renderer-transcription-smoke-armed ${JSON.stringify({
+      armed: true,
+      detected: false,
+      errors: [],
+      rendererTranscriptionSmokeMs
+    })}`);
+
+    const runRendererTranscriptionSmoke = async () => {
       try {
         const result = await mainWindow.webContents.executeJavaScript(`
           (async () => {
             const events = [];
             const snapshots = [];
             const statusPattern = /^(Not listening\\.|Requesting audio access\\.\\.\\.|Starting local Parakeet\\.\\.\\.|Loading local Parakeet\\.\\.\\.|Listening with local Parakeet\\.\\.\\.|Listening\\. Waiting for speech\\.\\.\\.|Speech detected\\.\\.\\.|Transcribing local audio\\.\\.\\.|local Parakeet capture started|local Parakeet loaded|reading default output device|creating Core Audio process tap|creating private aggregate device|reading Core Audio tap format|Core Audio tap format .*|creating aggregate device IO callback|starting aggregate device|Core Audio capture started|starting system audio capture|starting microphone capture|microphone capture started)$/;
+            const transcriptPlaceholder = 'Your live transcript will appear here once you start listening.';
             let previousLongest = '';
             let clearCount = 0;
+            let usedBridgeFallback = false;
+            let restartAttempted = false;
+            let restartStartButtonFound = false;
+            let restartStartButtonDisabled = null;
+            let restartUsedBridgeFallback = false;
+            let autoSendButtonFound = false;
+            let autoSendDisabled = false;
             const unsubscribe = window.susura.transcription.onEvent((event) => {
               events.push(event);
             });
@@ -4032,22 +5919,51 @@ function createWindow() {
             await new Promise((resolve) => setTimeout(resolve, ${JSON.stringify(rendererRealLlmSmoke ? 1500 : 300)}));
 
             const output = document.querySelector('[aria-label="Transcription output"]');
-            const startButton = Array.from(document.querySelectorAll('button'))
-              .find((button) => /start listening/i.test(button.textContent ?? ''));
+            const findButton = (pattern) => Array.from(document.querySelectorAll('button'))
+              .find((button) => pattern.test(button.textContent ?? ''));
+            const waitForButton = async (pattern, timeoutMs = 5_000) => {
+              const deadline = Date.now() + timeoutMs;
 
-            if (!output || !startButton) {
+              while (Date.now() < deadline) {
+                const button = findButton(pattern);
+
+                if (button) {
+                  return button;
+                }
+
+                await new Promise((resolve) => setTimeout(resolve, 100));
+              }
+
+              return null;
+            };
+            const startButton = findButton(/start listening/i);
+
+            if (!output) {
               throw new Error('Renderer transcription controls were not found.');
             }
 
+            const autoSendButton = document.querySelector('button[aria-label="Auto Send"]');
+            autoSendButtonFound = Boolean(autoSendButton);
+
+            if (autoSendButton?.getAttribute('aria-pressed') === 'true') {
+              autoSendButton.click();
+              await new Promise((resolve) => setTimeout(resolve, 300));
+            }
+
+            autoSendDisabled = autoSendButton?.getAttribute('aria-pressed') === 'false';
+
             const startedAt = Date.now();
             const sample = () => {
-              const text = (output.textContent ?? '').trim();
+              const sectionBodies = Array.from(output.querySelectorAll('.transcript-section-body'))
+                .map((section) => (section.textContent ?? '').trim())
+                .filter(Boolean);
+              const text = (sectionBodies.join('\\n') || output.textContent || '').trim();
               snapshots.push({
                 atMs: Date.now() - startedAt,
                 text
               });
 
-              if (!text || statusPattern.test(text)) {
+              if (!text || text === transcriptPlaceholder || statusPattern.test(text)) {
                 return;
               }
 
@@ -4061,21 +5977,55 @@ function createWindow() {
             };
 
             sample();
-            startButton.click();
+            if (startButton && !startButton.disabled) {
+              startButton.click();
+            } else {
+              usedBridgeFallback = true;
+              await window.susura.transcription.start({ sources: ['system'] });
+            }
 
             const interval = setInterval(sample, 500);
             await new Promise((resolve) => setTimeout(resolve, ${JSON.stringify(rendererTranscriptionSmokeMs)}));
             clearInterval(interval);
             sample();
 
-            const stopButton = Array.from(document.querySelectorAll('button'))
-              .find((button) => /stop listening/i.test(button.textContent ?? ''));
+            const stopButton = findButton(/stop listening/i);
 
             if (stopButton) {
               stopButton.click();
               await new Promise((resolve) => setTimeout(resolve, 1_500));
               sample();
+            } else if (${JSON.stringify(rendererTranscriptionSmokeNoLlm)}) {
+              await window.susura.transcription.stop();
+              await new Promise((resolve) => setTimeout(resolve, 1_500));
+              sample();
             }
+
+            const restartStartButton = await waitForButton(/start listening/i);
+            restartAttempted = true;
+            restartStartButtonFound = Boolean(restartStartButton);
+            restartStartButtonDisabled = restartStartButton ? Boolean(restartStartButton.disabled) : null;
+
+            if (restartStartButton && !restartStartButton.disabled) {
+              restartStartButton.click();
+              await new Promise((resolve) => setTimeout(resolve, 2_000));
+            } else {
+              restartUsedBridgeFallback = true;
+              await window.susura.transcription.start({ sources: ['system'] });
+              await new Promise((resolve) => setTimeout(resolve, 2_000));
+            }
+
+            sample();
+
+            const restartStopButton = findButton(/stop listening/i);
+            if (restartStopButton) {
+              restartStopButton.click();
+            } else {
+              await window.susura.transcription.stop();
+            }
+
+            await new Promise((resolve) => setTimeout(resolve, 1_000));
+            sample();
 
             unsubscribe();
 
@@ -4101,13 +6051,27 @@ function createWindow() {
               .map((event) => event.message);
             const metrics = events
               .filter((event) => event.type === 'metric');
-            const renderedOutput = (output.textContent ?? '').trim();
+            const renderedTranscriptOutput = Array.from(output.querySelectorAll('.transcript-section-body'))
+              .map((section) => (section.textContent ?? '').trim())
+              .filter(Boolean)
+              .join('\\n');
+            const renderedOutput = renderedTranscriptOutput || (output.textContent ?? '').trim();
 
             return {
               renderedOutput,
+              renderedTranscriptOutput,
               longestOutput: previousLongest,
               snapshots,
               snapshotCount: snapshots.length,
+              startButtonFound: Boolean(startButton),
+              startButtonDisabled: Boolean(startButton?.disabled),
+              usedBridgeFallback,
+              autoSendButtonFound,
+              autoSendDisabled,
+              restartAttempted,
+              restartStartButtonFound,
+              restartStartButtonDisabled,
+              restartUsedBridgeFallback,
               clearCount,
               completed,
               completedEvents,
@@ -4121,18 +6085,36 @@ function createWindow() {
           })()
         `);
 
-        console.log(`susura-renderer-transcription-smoke ${JSON.stringify(result)}`);
+        emitSmokeLine(`susura-renderer-transcription-smoke ${JSON.stringify(result)}`);
 
         if (!result.detected || result.errors.length > 0) {
           app.exitCode = 1;
         }
       } catch (error) {
-        console.error(`susura-renderer-transcription-smoke failed ${error.message}`);
+        emitSmokeLine(`susura-renderer-transcription-smoke ${JSON.stringify({
+          detected: false,
+          errors: [error.message],
+          failed: true,
+          modelDiagnostics: {
+            selectedLocalTranscriptionModel: getSelectedLocalTranscriptionModelId(),
+            preferredLocalModel: getPreferredLocalModelId(),
+            localModelPath: getLocalModelPath(),
+            parakeetModelPath: getParakeetModelPath(),
+            parakeetModelValid: validateParakeetModelDir(),
+            userData: app.getPath('userData')
+          }
+        })}`);
         app.exitCode = 1;
       } finally {
         app.quit();
       }
-    });
+    };
+
+    if (mainWindow.webContents.isLoading()) {
+      mainWindow.webContents.once('did-finish-load', runRendererTranscriptionSmoke);
+    } else {
+      setImmediate(runRendererTranscriptionSmoke);
+    }
   }
 
   if (rendererLlmSmoke || rendererRealLlmSmoke) {
@@ -4335,11 +6317,14 @@ function startResourceSmokeTimer() {
   }, resourceSmokeMs);
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   nativeTheme.themeSource = 'system';
+  seedPackagedOnboardingCompletionSmokeState();
+  installPackagedPrivacyRendererNetworkHooks();
   applyMacPrivateActivationPolicy();
   if (shouldWarmLocalTranscriptionOnStartup()) {
     startLocalTranscriptionWarmDaemon();
+    void prepareLocalTranscriptionOnStartup();
   }
   warmPersistentPiRpcBridge();
   updatePrivateOverlayState((state) => ({
@@ -4359,7 +6344,7 @@ app.whenReady().then(() => {
     }));
   }
 
-  if (shouldShowOnboarding()) {
+  if (await shouldShowOnboarding()) {
     createOnboardingWindow();
   } else {
     createPrivateOverlayHandleWindow();
@@ -4372,10 +6357,11 @@ app.whenReady().then(() => {
 
   startResourceSmokeTimer();
   registerPrivateOverlayShortcuts();
+  startPackagedLaunchSmokeFallback();
 
-  app.on('activate', () => {
+  app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      if (shouldShowOnboarding()) {
+      if (await shouldShowOnboarding()) {
         createOnboardingWindow();
       } else {
         createPrivateOverlayHandleWindow();
@@ -4410,6 +6396,8 @@ ipcMain.handle('susura:get-runtime-context', () => ({
   platform: process.platform,
   arch: process.arch,
   isMac: process.platform === 'darwin',
+  appChannel: getAppChannel(),
+  appName: getAppDisplayName(),
   vmTestingTarget: 'Parallels macOS VM'
 }));
 
@@ -4439,6 +6427,16 @@ ipcMain.handle('susura:private-overlay-window-drag-move', (_event, request) => m
 
 ipcMain.handle('susura:private-overlay-window-drag-end', (_event, request) => endPrivateOverlayWindowDrag(request));
 
+ipcMain.handle('susura:private-overlay-window-resize-start', (_event, request) => startPrivateOverlayWindowResize(request));
+
+ipcMain.handle('susura:private-overlay-window-resize-move', (_event, request) => movePrivateOverlayWindowResize(request));
+
+ipcMain.on('susura:private-overlay-window-resize-move-live', (_event, request) => {
+  movePrivateOverlayWindowResize(request);
+});
+
+ipcMain.handle('susura:private-overlay-window-resize-end', (_event, request) => endPrivateOverlayWindowResize(request));
+
 ipcMain.handle('susura:private-overlay-show-main', () => {
   showMainWindow();
   return getPrivateOverlayStatus();
@@ -4451,6 +6449,10 @@ ipcMain.handle('susura:private-overlay-panic-hide', () => {
 
 ipcMain.handle('susura:private-overlay-set-click-through', (_event, request) => (
   setPrivateOverlayClickThrough(Boolean(request?.enabled))
+));
+
+ipcMain.handle('susura:private-overlay-set-handle-size', (_event, request) => (
+  setPrivateOverlayHandleSize(request?.size)
 ));
 
 ipcMain.handle('susura:private-overlay-reset-handle', () => resetPrivateOverlayHandlePosition());
@@ -4491,15 +6493,21 @@ ipcMain.handle('susura:onboarding-status', () => getOnboardingStatus());
 
 ipcMain.handle('susura:onboarding-complete', () => completeOnboarding());
 
+ipcMain.handle('susura:onboarding-fit-content', (event, size) => fitOnboardingWindowToContent(event.sender, size));
+
 ipcMain.handle('susura:onboarding-open', () => reopenOnboarding());
 
 ipcMain.handle('susura:parakeet-status', () => getParakeetStatus());
 
-ipcMain.handle('susura:parakeet-download', () => downloadParakeetModel());
+ipcMain.handle('susura:parakeet-download', (_event, request) => downloadLocalTranscriptionModel(request?.modelId));
+
+ipcMain.handle('susura:parakeet-set-model', (_event, request) => setPreferredLocalTranscriptionModel(request?.modelId));
 
 ipcMain.handle('susura:parakeet-cancel-download', () => cancelParakeetDownload());
 
 ipcMain.handle('susura:pi-status', () => getPiStatus());
+
+ipcMain.handle('susura:pi-chatgpt-login', () => openPiSetup('chatgpt-login'));
 
 ipcMain.handle('susura:pi-login', () => openPiSetup('login'));
 

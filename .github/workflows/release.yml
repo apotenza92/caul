@@ -9,10 +9,14 @@ on:
       - "v*"
   workflow_dispatch:
 
+env:
+  NODE_VERSION: "20"
+  RUST_TOOLCHAIN: "1.88"
+
 jobs:
   build-macos:
-    name: Build macOS
-    runs-on: macos-latest
+    name: Build macOS ARM64
+    runs-on: macos-26
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -20,106 +24,204 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.88"
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
 
       - name: Install dependencies
         run: npm ci
         timeout-minutes: 10
 
-      - name: Build stable macOS artefacts
-        run: npm run dist:mac
-        timeout-minutes: 60
-        env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-
-      - name: Back up stable update metadata
-        if: ${{ !contains(github.ref, 'alpha') && !contains(github.ref, 'beta') && !contains(github.ref, 'rc') }}
-        run: |
-          mkdir -p release/stable-yml-backup
-          cp release/*.yml release/stable-yml-backup/ || true
-
-      - name: Build beta-channel artefacts for stable release
-        if: ${{ !contains(github.ref, 'alpha') && !contains(github.ref, 'beta') && !contains(github.ref, 'rc') }}
-        run: npx electron-builder --config electron-builder.config.cjs --mac --publish=never
-        timeout-minutes: 45
-        env:
-          FORCE_BETA_BUILD: "true"
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-
-      - name: Restore stable update metadata
-        if: ${{ !contains(github.ref, 'alpha') && !contains(github.ref, 'beta') && !contains(github.ref, 'rc') }}
-        run: |
-          cp release/stable-yml-backup/latest*.yml release/ || true
-          rm -rf release/stable-yml-backup
-
-      - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
-          files: |
-            release/*.zip
-            release/latest*.yml
-            release/beta*.yml
-            release/*.blockmap
-
-      - name: Verify published macOS release artefacts
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Build macOS artefacts
         run: |
           set -euo pipefail
 
-          if [[ "$GITHUB_REF_NAME" == *alpha* || "$GITHUB_REF_NAME" == *beta* || "$GITHUB_REF_NAME" == *rc* ]]; then
-            asset_names=("Susura-Beta-macos-arm64.zip")
-            app_names=("Susura Beta.app")
-          else
-            asset_names=("Susura-macos-arm64.zip" "Susura-Beta-macos-arm64.zip")
-            app_names=("Susura.app" "Susura Beta.app")
+          npm run dist:mac
+
+          if [[ "$GITHUB_REF_NAME" != *alpha* && "$GITHUB_REF_NAME" != *beta* && "$GITHUB_REF_NAME" != *rc* ]]; then
+            mkdir -p release/stable-yml-backup
+            cp release/*.yml release/stable-yml-backup/ || true
+            FORCE_BETA_BUILD=true npx electron-builder --config electron-builder.config.cjs --mac --publish=never
+            cp release/stable-yml-backup/latest*.yml release/ || true
+            rm -rf release/stable-yml-backup
           fi
+        timeout-minutes: 75
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+
+      - name: Verify macOS app signatures
+        run: |
+          set -euo pipefail
 
           rm -rf verified-release
           mkdir -p verified-release
 
-          for index in "${!asset_names[@]}"; do
-            asset_name="${asset_names[$index]}"
-            app_name="${app_names[$index]}"
-            app_dir="verified-release/${asset_name%.zip}"
-
+          shopt -s nullglob
+          for zip_path in release/Susura*-macos-arm64.zip; do
+            app_dir="verified-release/$(basename "${zip_path%.zip}")"
             mkdir -p "$app_dir"
+            unzip -q "$zip_path" -d "$app_dir"
 
-            for attempt in 1 2 3 4 5; do
-              if gh release download "$GITHUB_REF_NAME" --pattern "$asset_name" --dir "$app_dir"; then
-                break
-              fi
-
-              if [ "$attempt" -eq 5 ]; then
-                echo "Unable to download published release asset: $asset_name"
-                exit 1
-              fi
-
-              sleep 6
-            done
-
-            unzip -q "$app_dir/$asset_name" -d "$app_dir"
-            codesign --verify --deep --strict --verbose=2 "$app_dir/$app_name"
-            spctl -a -vv "$app_dir/$app_name"
+            app_path="$(find "$app_dir" -maxdepth 1 -name '*.app' -type d | head -n 1)"
+            test -n "$app_path"
+            codesign --verify --deep --strict --verbose=2 "$app_path"
+            spctl -a -vv "$app_path"
           done
+
+      - name: Upload macOS artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-arm64
+          path: |
+            release/*.zip
+            release/latest*.yml
+            release/beta*.yml
+            release/*.blockmap
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: windows-11-arm
+          - arch: x64
+            runner: windows-2025
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Install dependencies
+        run: npm ci
+        timeout-minutes: 10
+
+      - name: Build Windows artefacts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          npm run dist:win:${{ matrix.arch }}
+
+          if (-not ($env:GITHUB_REF_NAME.Contains("alpha") -or $env:GITHUB_REF_NAME.Contains("beta") -or $env:GITHUB_REF_NAME.Contains("rc"))) {
+            $env:FORCE_BETA_BUILD = "true"
+            $env:SUSURA_PACKAGE_PLATFORM = "win"
+            $env:SUSURA_PACKAGE_ARCH = "${{ matrix.arch }}"
+            if ("${{ matrix.arch }}" -eq "arm64") {
+              $env:USE_SYSTEM_7ZA = "true"
+              node scripts/prepare-windows-7za.mjs
+            }
+            npx electron-builder --config electron-builder.config.cjs --win nsis --${{ matrix.arch }} --publish=never
+          }
+        timeout-minutes: 75
+
+      - name: Upload Windows artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-${{ matrix.arch }}
+          path: |
+            release/*windows-${{ matrix.arch }}-setup.exe
+            release/*windows-${{ matrix.arch }}-setup.exe.blockmap
+          if-no-files-found: error
+
+  build-linux:
+    name: Build Linux ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+          - arch: x64
+            runner: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Install dependencies
+        run: npm ci
+        timeout-minutes: 10
+
+      - name: Build Linux artefacts
+        run: |
+          set -euo pipefail
+
+          npm run dist:linux:${{ matrix.arch }}
+
+          if [[ "$GITHUB_REF_NAME" != *alpha* && "$GITHUB_REF_NAME" != *beta* && "$GITHUB_REF_NAME" != *rc* ]]; then
+            FORCE_BETA_BUILD=true SUSURA_PACKAGE_PLATFORM=linux SUSURA_PACKAGE_ARCH=${{ matrix.arch }} npx electron-builder --config electron-builder.config.cjs --linux AppImage --${{ matrix.arch }} --publish=never
+            FORCE_BETA_BUILD=true node scripts/build-linux-deb.mjs ${{ matrix.arch }}
+          fi
+        timeout-minutes: 75
+
+      - name: Upload Linux artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: |
+            release/*-${{ matrix.arch }}.AppImage
+            release/*-${{ matrix.arch }}.deb
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub release
+    needs:
+      - build-macos
+      - build-windows
+      - build-linux
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download release artefacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+
+      - name: List release artefacts
+        run: find release -maxdepth 1 -type f -print | sort
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+          files: release/*
 
   update-homebrew:
     name: Update Homebrew (Stable)
-    needs: build-macos
-    runs-on: ubuntu-latest
+    needs: publish-release
+    runs-on: ubuntu-24.04
     if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, 'alpha') && !contains(github.ref, 'beta') && !contains(github.ref, 'rc')
     steps:
       - name: Extract version from tag
@@ -233,8 +335,8 @@ jobs:
 
   update-homebrew-beta:
     name: Update Homebrew (Beta)
-    needs: build-macos
-    runs-on: ubuntu-latest
+    needs: publish-release
+    runs-on: ubuntu-24.04
     if: startsWith(github.ref, 'refs/tags/v') && (contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc'))
     steps:
       - name: Extract version from tag

@@ -7,10 +7,12 @@ import {
   type TranscriptionBridgeEvent
 } from '../foundation/desktopBridge';
 import type { CaptureSource } from '../foundation/capture';
+import { getRuntimeContext } from '../foundation/runtime';
 
 const awaitingResponseText = '';
 const idleLlmText = 'Auto Send is on.\nStop listening to send to AI.';
 const idleTranscriptText = 'Your live transcript will appear here once you start listening.';
+let rendererTranscriptDebugEnabled = import.meta.env.VITE_SUSURA_TRANSCRIPT_DEBUG_LOG === '1';
 
 export type LiveTranscriptionOptions = {
   listenToMicrophone: boolean;
@@ -29,6 +31,13 @@ export type TranscriptSession = {
   id: string;
   output: string;
   startedAt: string;
+};
+
+export type AiResponseSession = {
+  id: string;
+  isWaiting?: boolean;
+  requestedAt: string;
+  response: string;
 };
 
 type SpeculativeRequest = {
@@ -59,6 +68,7 @@ export function useLiveTranscription() {
   const [llmQuery, setLlmQuery] = useState('No query sent yet.');
   const [llmOutput, setLlmOutput] = useState(idleLlmText);
   const [llmRequestedAt, setLlmRequestedAt] = useState<string | null>(null);
+  const [llmResponses, setLlmResponses] = useState<AiResponseSession[]>([]);
   const finalTranscriptRef = useRef('');
   const finalTranscriptLinesRef = useRef<TranscriptLine[]>([]);
   const partialTranscriptLinesRef = useRef<Map<string, TranscriptLine>>(new Map());
@@ -66,6 +76,7 @@ export function useLiveTranscription() {
   const sessionStartedAtRef = useRef<Date | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
   const activeLlmRequestIdRef = useRef<string | null>(null);
+  const activeLlmResponseIdRef = useRef<string | null>(null);
   const speculativeRequestRef = useRef<SpeculativeRequest | null>(null);
   const speculativeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
@@ -73,6 +84,12 @@ export function useLiveTranscription() {
 
   useEffect(() => () => {
     void stop();
+  }, []);
+
+  useEffect(() => {
+    void getRuntimeContext().then((context) => {
+      rendererTranscriptDebugEnabled = rendererTranscriptDebugEnabled || context.appChannel === 'dev';
+    });
   }, []);
 
   async function start(options: LiveTranscriptionOptions) {
@@ -174,10 +191,19 @@ export function useLiveTranscription() {
 
     if (sendToLlm && transcript) {
       const requestTranscript = formatPromptTemplateRequest(transcript, promptTemplateText);
+      const requestedAt = new Date().toISOString();
+      const responseId = `ai-response-${Date.now()}`;
       setIsAsking(true);
       setLlmQuery(requestTranscript);
-      setLlmRequestedAt(new Date().toISOString());
+      setLlmRequestedAt(requestedAt);
       setLlmOutput(awaitingResponseText);
+      activeLlmResponseIdRef.current = responseId;
+      setLlmResponses((current) => [...current, {
+        id: responseId,
+        isWaiting: true,
+        requestedAt,
+        response: ''
+      }]);
 
       try {
         const matchingSpeculativeRequest = speculativeRequest
@@ -197,14 +223,19 @@ export function useLiveTranscription() {
           });
 
         const response = await responsePromise;
-        setLlmOutput(response?.text?.trim() || 'No response returned.');
+        const responseText = response?.text?.trim() || 'No response returned.';
+        setLlmOutput(responseText);
+        updateLlmResponse(responseId, { isWaiting: false, response: responseText });
       } catch (error) {
-        setLlmOutput(getErrorMessage(error));
+        const responseText = getErrorMessage(error);
+        setLlmOutput(responseText);
+        updateLlmResponse(responseId, { isWaiting: false, response: responseText });
       } finally {
         setIsAsking(false);
         unsubscribeRef.current?.();
         unsubscribeRef.current = null;
         activeLlmRequestIdRef.current = null;
+        activeLlmResponseIdRef.current = null;
       }
 
       return;
@@ -234,8 +265,17 @@ export function useLiveTranscription() {
 
     setIsAsking(true);
     setLlmQuery(requestTranscript);
-    setLlmRequestedAt(new Date().toISOString());
+    const requestedAt = new Date().toISOString();
+    const responseId = `ai-response-${Date.now()}`;
+    setLlmRequestedAt(requestedAt);
     setLlmOutput(awaitingResponseText);
+    activeLlmResponseIdRef.current = responseId;
+    setLlmResponses((current) => [...current, {
+      id: responseId,
+      isWaiting: true,
+      requestedAt,
+      response: ''
+    }]);
 
     try {
       const response = await requestVisibleLlm({
@@ -245,12 +285,17 @@ export function useLiveTranscription() {
         llmReasoning,
         transcript: requestTranscript
       });
-      setLlmOutput(response?.text?.trim() || 'No response returned.');
+      const responseText = response?.text?.trim() || 'No response returned.';
+      setLlmOutput(responseText);
+      updateLlmResponse(responseId, { isWaiting: false, response: responseText });
     } catch (error) {
-      setLlmOutput(getErrorMessage(error));
+      const responseText = getErrorMessage(error);
+      setLlmOutput(responseText);
+      updateLlmResponse(responseId, { isWaiting: false, response: responseText });
     } finally {
       setIsAsking(false);
       activeLlmRequestIdRef.current = null;
+      activeLlmResponseIdRef.current = null;
     }
   }
 
@@ -317,6 +362,7 @@ export function useLiveTranscription() {
           shouldClearPartial,
           after
         });
+        invalidateSpeculativeRequest(after);
         publishTranscript(after);
         scheduleSpeculativeRequest();
       } else {
@@ -365,6 +411,7 @@ export function useLiveTranscription() {
           sequence,
           after
         });
+        invalidateSpeculativeRequest(after);
         publishTranscript(after);
         clearSpeculativeTimer();
       } else {
@@ -389,7 +436,17 @@ export function useLiveTranscription() {
     }
 
     if (event.type === 'error') {
-      setOutput(event.message);
+      const message = event.message.trim() || 'Live transcription failed.';
+
+      if (!renderTranscriptBody()) {
+        publishTranscript(appendTranscript(getTranscriptHeader(sessionStartedAtRef.current), message));
+      } else {
+        setOutput(message);
+      }
+
+      setIsListening(false);
+      setIsStarting(false);
+      void getTranscriptionBridge()?.stop().catch(() => undefined);
       logTranscriptDebug('renderer.error_displayed', {
         event,
         sequence,
@@ -409,8 +466,13 @@ export function useLiveTranscription() {
         return;
       }
 
-      setLlmOutput(event.text.trim() || 'No response returned.');
+      const responseText = event.text.trim() || 'No response returned.';
+      setLlmOutput(responseText);
+      if (activeLlmResponseIdRef.current) {
+        updateLlmResponse(activeLlmResponseIdRef.current, { isWaiting: false, response: responseText });
+      }
       setIsAsking(false);
+      activeLlmResponseIdRef.current = null;
       return;
     }
 
@@ -425,9 +487,15 @@ export function useLiveTranscription() {
         return;
       }
 
-      setLlmOutput((current) => (
-        current === awaitingResponseText ? event.text : `${current}${event.text}`
-      ));
+      setLlmOutput((current) => {
+        const next = current === awaitingResponseText ? event.text : `${current}${event.text}`;
+
+        if (activeLlmResponseIdRef.current) {
+          updateLlmResponse(activeLlmResponseIdRef.current, { response: next });
+        }
+
+        return next;
+      });
       setIsAsking(true);
       return;
     }
@@ -635,6 +703,12 @@ export function useLiveTranscription() {
     }
   }
 
+  function invalidateSpeculativeRequest(transcript: string) {
+    if (speculativeRequestRef.current?.transcript !== transcript) {
+      speculativeRequestRef.current = null;
+    }
+  }
+
   return {
     isListening,
     isStarting,
@@ -642,12 +716,46 @@ export function useLiveTranscription() {
     llmQuery,
     llmOutput,
     llmRequestedAt,
+    llmResponses,
     output,
     sessions,
     ask,
+    clearAiResponses,
+    clearTranscript,
     start,
     stop
   };
+
+  function clearAiResponses() {
+    if (isAsking) {
+      return;
+    }
+
+    setLlmOutput(idleLlmText);
+    setLlmRequestedAt(null);
+    setLlmResponses([]);
+    activeLlmResponseIdRef.current = null;
+  }
+
+  function clearTranscript() {
+    if (isListening || isStarting) {
+      return;
+    }
+
+    setOutput(idleTranscriptText);
+    setSessions([]);
+    finalTranscriptRef.current = '';
+    finalTranscriptLinesRef.current = [];
+    partialTranscriptLinesRef.current = new Map();
+    activeSessionIdRef.current = null;
+    sessionStartedAtRef.current = null;
+  }
+
+  function updateLlmResponse(id: string, patch: Partial<AiResponseSession>) {
+    setLlmResponses((current) => current.map((response) => (
+      response.id === id ? { ...response, ...patch } : response
+    )));
+  }
 }
 
 function getSelectedSources(options: LiveTranscriptionOptions): CaptureSource[] {
@@ -898,7 +1006,7 @@ function isSpeculativeLlmEnabled() {
 }
 
 function logTranscriptDebug(stage: string, payload: Record<string, unknown>) {
-  if (import.meta.env.VITE_SUSURA_TRANSCRIPT_DEBUG_LOG !== '1') {
+  if (!rendererTranscriptDebugEnabled) {
     return;
   }
 

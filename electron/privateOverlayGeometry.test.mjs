@@ -9,29 +9,58 @@ describe('private overlay geometry', () => {
     expect(getPreferredOverlaySizeForEdge(
       { height: 900, width: 600 },
       'top',
-      { minimumNonCompactWidth: 920 }
+      { minimumNonCompactWidth: 960 }
     )).toEqual({
       height: 600,
-      width: 920
+      width: 960
     });
 
     expect(getPreferredOverlaySizeForEdge(
       { height: 900, width: 600 },
       'bottom',
-      { minimumNonCompactWidth: 920 }
+      { minimumNonCompactWidth: 960 }
     )).toEqual({
       height: 600,
-      width: 920
+      width: 960
     });
   });
 
-  it('keeps side edges compact when moving a horizontal overlay to a side edge', () => {
+  it('preserves horizontal overlay size when moving to side edges', () => {
     expect(getPreferredOverlaySizeForEdge(
-      { height: 600, width: 920 },
+      { height: 600, width: 960 },
       'right',
-      { minimumNonCompactWidth: 920 }
+      { minimumNonCompactWidth: 960 }
     )).toEqual({
-      height: 920,
+      height: 600,
+      width: 960
+    });
+
+    expect(getPreferredOverlaySizeForEdge(
+      { height: 600, width: 960 },
+      'left',
+      { minimumNonCompactWidth: 960 }
+    )).toEqual({
+      height: 600,
+      width: 960
+    });
+  });
+
+  it('preserves compact manual sizes on horizontal edges when orientation is disabled', () => {
+    expect(getPreferredOverlaySizeForEdge(
+      { height: 900, width: 600 },
+      'top',
+      { minimumNonCompactWidth: 0, orient: false }
+    )).toEqual({
+      height: 900,
+      width: 600
+    });
+
+    expect(getPreferredOverlaySizeForEdge(
+      { height: 900, width: 600 },
+      'bottom',
+      { minimumNonCompactWidth: 0, orient: false }
+    )).toEqual({
+      height: 900,
       width: 600
     });
   });

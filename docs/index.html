@@ -208,6 +208,51 @@
         width: 16px;
       }
 
+      .download-links {
+        align-items: center;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        justify-content: center;
+      }
+
+      .download-btn.secondary {
+        background: transparent;
+        border: 1px solid var(--accent);
+        box-shadow: none;
+        color: var(--accent);
+      }
+
+      .download-btn.secondary:hover {
+        background: var(--code-bg);
+      }
+
+      .platform-note {
+        color: var(--text-muted);
+        display: none;
+        font-size: 0.78rem;
+        line-height: 1.45;
+        max-width: 420px;
+      }
+
+      .extra-download-links {
+        display: none;
+        flex-wrap: wrap;
+        gap: 0.65rem;
+        justify-content: center;
+        max-width: 520px;
+      }
+
+      .extra-download-links a {
+        color: var(--accent);
+        font-size: 0.78rem;
+        text-decoration: none;
+      }
+
+      .extra-download-links a:hover {
+        text-decoration: underline;
+      }
+
       .homebrew-section {
         display: block;
         width: min(100%, 420px);
@@ -358,15 +403,27 @@
         </button>
       </div>
 
-      <section id="mac-download" class="download-wrapper">
-        <a id="download-btn" class="download-btn" href="https://github.com/apotenza92/susura/releases/latest/download/Susura-macos-arm64.zip">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <path d="M7 10l5 5 5-5"/>
-            <path d="M12 15V3"/>
-          </svg>
-          <span id="download-label">Download for Apple Silicon Mac</span>
-        </a>
+      <section id="download-section" class="download-wrapper">
+        <div class="download-links">
+          <a id="download-btn" class="download-btn" href="https://github.com/apotenza92/susura/releases/latest/download/Susura-macos-arm64.zip">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <path d="M7 10l5 5 5-5"/>
+              <path d="M12 15V3"/>
+            </svg>
+            <span id="download-label">Download for Apple Silicon Mac</span>
+          </a>
+          <a id="secondary-download-btn" class="download-btn secondary" href="https://github.com/apotenza92/susura/releases/latest/download/susura-arm64.deb">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <path d="M7 10l5 5 5-5"/>
+              <path d="M12 15V3"/>
+            </svg>
+            <span id="secondary-download-label">Download .deb</span>
+          </a>
+        </div>
+        <div id="extra-download-links" class="extra-download-links"></div>
+        <p id="platform-note" class="platform-note"></p>
         <div id="homebrew-section" class="homebrew-section">
           <p id="homebrew-label" class="command-label">Or install via Homebrew:</p>
           <div id="homebrew-box" class="command-box" role="button" tabindex="0" aria-label="Copy Homebrew install command">
@@ -389,10 +446,30 @@
       const assetPrefix = location.pathname.includes("/docs/") ? ".." : ".";
       const downloads = {
         stable: {
-          mac: `https://github.com/${repo}/releases/latest/download/Susura-macos-arm64.zip`
+          linux: {
+            appImageArm64: `https://github.com/${repo}/releases/latest/download/susura-arm64.AppImage`,
+            debArm64: `https://github.com/${repo}/releases/latest/download/susura-arm64.deb`,
+            appImageX64: `https://github.com/${repo}/releases/latest/download/susura-x64.AppImage`,
+            debX64: `https://github.com/${repo}/releases/latest/download/susura-x64.deb`
+          },
+          mac: `https://github.com/${repo}/releases/latest/download/Susura-macos-arm64.zip`,
+          windows: {
+            arm64: `https://github.com/${repo}/releases/latest/download/Susura-windows-arm64-setup.exe`,
+            x64: `https://github.com/${repo}/releases/latest/download/Susura-windows-x64-setup.exe`
+          }
         },
         beta: {
-          mac: ""
+          linux: {
+            appImageArm64: `https://github.com/${repo}/releases/latest/download/susura-beta-arm64.AppImage`,
+            debArm64: `https://github.com/${repo}/releases/latest/download/susura-beta-arm64.deb`,
+            appImageX64: `https://github.com/${repo}/releases/latest/download/susura-beta-x64.AppImage`,
+            debX64: `https://github.com/${repo}/releases/latest/download/susura-beta-x64.deb`
+          },
+          mac: `https://github.com/${repo}/releases/latest/download/Susura-Beta-macos-arm64.zip`,
+          windows: {
+            arm64: `https://github.com/${repo}/releases/latest/download/Susura-Beta-windows-arm64-setup.exe`,
+            x64: `https://github.com/${repo}/releases/latest/download/Susura-Beta-windows-x64-setup.exe`
+          }
         }
       };
       const state = {
@@ -435,6 +512,16 @@
             if (beta) {
               const base = `https://github.com/${repo}/releases/download/${beta.tag_name}`;
               downloads.beta.mac = `${base}/Susura-Beta-macos-arm64.zip`;
+              downloads.beta.windows = {
+                arm64: `${base}/Susura-Beta-windows-arm64-setup.exe`,
+                x64: `${base}/Susura-Beta-windows-x64-setup.exe`
+              };
+              downloads.beta.linux = {
+                appImageArm64: `${base}/susura-beta-arm64.AppImage`,
+                debArm64: `${base}/susura-beta-arm64.deb`,
+                appImageX64: `${base}/susura-beta-x64.AppImage`,
+                debX64: `${base}/susura-beta-x64.deb`
+              };
             }
           }
         } catch {
@@ -449,9 +536,16 @@
         const homebrewCode = document.getElementById("homebrew-code");
         const homebrewLabel = document.getElementById("homebrew-label");
         const homebrewCopy = document.getElementById("homebrew-copy");
-        const macDownload = document.getElementById("mac-download");
+        const downloadLabel = document.getElementById("download-label");
+        const downloadSection = document.getElementById("download-section");
+        const secondaryDownload = document.getElementById("secondary-download-btn");
+        const secondaryDownloadLabel = document.getElementById("secondary-download-label");
+        const extraDownloadLinks = document.getElementById("extra-download-links");
+        const platformNote = document.getElementById("platform-note");
         const comingSoon = document.getElementById("coming-soon");
         const comingSoonLabel = document.getElementById("coming-soon-label");
+        const channelDownloads = downloads[state.channel];
+        const fallbackDownloads = downloads.stable;
 
         document.body.classList.toggle("beta-mode", state.channel === "beta");
         icon.src = getIconSrc();
@@ -459,20 +553,74 @@
         setActive(".channel-btn", `channel-${state.channel}`);
         setActive(".platform-btn", `platform-${state.platform}`);
 
-        if (state.platform !== "mac") {
-          macDownload.style.display = "none";
+        homebrewCopy.textContent = "Copy";
+        secondaryDownload.style.display = "none";
+        extraDownloadLinks.style.display = "none";
+        extraDownloadLinks.innerHTML = "";
+        platformNote.style.display = "none";
+
+        if (state.platform === "windows") {
+          const windowsDownloads = channelDownloads.windows || {};
+          const windowsDownload = windowsDownloads.arm64 || "";
+
+          if (!windowsDownload) {
+            downloadSection.style.display = "none";
+            comingSoon.style.display = "block";
+            comingSoonLabel.textContent = "Susura for Windows beta is coming soon.";
+            return;
+          }
+
+          downloadSection.style.display = "flex";
           homebrewSection.style.display = "none";
-          download.removeAttribute("href");
-          download.setAttribute("aria-disabled", "true");
-          download.setAttribute("tabindex", "-1");
-          comingSoon.style.display = "block";
-          comingSoonLabel.textContent = state.platform === "windows"
-            ? "Susura for Windows is coming soon."
-            : "Susura for Linux is coming soon.";
+          comingSoon.style.display = "none";
+          download.href = windowsDownload;
+          downloadLabel.textContent = "Download for Windows 11 ARM64";
+          download.removeAttribute("aria-disabled");
+          download.removeAttribute("tabindex");
+          renderExtraLinks(extraDownloadLinks, [
+            ["Windows x64 installer", windowsDownloads.x64]
+          ]);
+          platformNote.textContent = "Windows builds are available for Windows 11 ARM64 and Windows x64. ARM64 has passed the local Windows 11 ARM release smoke; x64 is CI-built from the same platform backend.";
+          platformNote.style.display = "block";
           return;
         }
 
-        macDownload.style.display = "flex";
+        if (state.platform === "linux") {
+          const linuxDownloads = channelDownloads.linux || {};
+          const appImage = linuxDownloads.appImageArm64 || "";
+          const deb = linuxDownloads.debArm64 || "";
+
+          if (!appImage && !deb) {
+            downloadSection.style.display = "none";
+            comingSoon.style.display = "block";
+            comingSoonLabel.textContent = "Susura for Linux beta is coming soon.";
+            return;
+          }
+
+          downloadSection.style.display = "flex";
+          homebrewSection.style.display = "none";
+          comingSoon.style.display = "none";
+          download.href = appImage || deb;
+          downloadLabel.textContent = appImage ? "Download AppImage for Linux ARM64" : "Download .deb for Ubuntu ARM64";
+          download.removeAttribute("aria-disabled");
+          download.removeAttribute("tabindex");
+
+          if (appImage && deb) {
+            secondaryDownload.href = deb;
+            secondaryDownloadLabel.textContent = "Download ARM64 .deb";
+            secondaryDownload.style.display = "inline-flex";
+          }
+
+          renderExtraLinks(extraDownloadLinks, [
+            ["Linux x64 AppImage", linuxDownloads.appImageX64],
+            ["Ubuntu x64 .deb", linuxDownloads.debX64]
+          ]);
+          platformNote.textContent = "Linux builds are available for Ubuntu/Linux ARM64 and x64. ARM64 has passed the local Ubuntu 24.04 ARM64 release smoke; x64 is CI-built from the same platform backend.";
+          platformNote.style.display = "block";
+          return;
+        }
+
+        downloadSection.style.display = "flex";
         homebrewSection.style.display = "block";
         comingSoon.style.display = "none";
         homebrewCode.textContent = state.channel === "beta"
@@ -481,13 +629,23 @@
         homebrewLabel.textContent = state.channel === "beta"
           ? "Or install via Homebrew (Beta):"
           : "Or install via Homebrew:";
-        homebrewCopy.textContent = "Copy";
-
-        const channelDownloads = downloads[state.channel];
-        const fallbackDownloads = downloads.stable;
         download.href = channelDownloads.mac || fallbackDownloads.mac;
+        downloadLabel.textContent = "Download for Apple Silicon Mac";
         download.removeAttribute("aria-disabled");
         download.removeAttribute("tabindex");
+      }
+
+      function renderExtraLinks(container, links) {
+        const availableLinks = links.filter(([, href]) => href);
+
+        if (availableLinks.length === 0) {
+          return;
+        }
+
+        container.innerHTML = availableLinks
+          .map(([label, href]) => `<a href="${href}">${label}</a>`)
+          .join("");
+        container.style.display = "flex";
       }
 
       document.getElementById("channel-stable").addEventListener("click", () => {

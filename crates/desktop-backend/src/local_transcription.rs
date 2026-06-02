@@ -12,9 +12,11 @@ use base64::Engine;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rubato::{FftFixedIn, Resampler};
 use serde_json::{json, Value};
-use susura_macos_capture::{CaptureUpdate, RunningCapture};
+use transcribe_rs::onnx::moonshine::{MoonshineStreamingParams, StreamingModel};
 use transcribe_rs::onnx::parakeet::{ParakeetModel, ParakeetParams, TimestampGranularity};
 use transcribe_rs::onnx::Quantization;
+
+use crate::system_audio::{RunningSystemAudio, SystemAudioUpdate};
 
 const OUTPUT_SAMPLE_RATE_HZ: u32 = 16_000;
 const VAD_FRAME_MS: u64 = 30;
@@ -34,6 +36,16 @@ pub enum TranscriptSource {
     System,
 }
 
+#[derive(Debug, Default)]
+pub struct MicrophoneSmokeSummary {
+    pub audio_frames: u64,
+    pub capture_started: bool,
+    pub detected: bool,
+    pub elapsed_ms: u128,
+    pub level_events: u64,
+    pub max_level: f64,
+}
+
 impl TranscriptSource {
     pub fn parse(value: &str) -> Option<Self> {
         match value {
@@ -49,6 +61,43 @@ impl TranscriptSource {
             Self::System => "system",
         }
     }
+}
+
+pub fn run_microphone_smoke(
+    duration_limit: Duration,
+) -> Result<MicrophoneSmokeSummary, Box<dyn std::error::Error>> {
+    let (audio_tx, audio_rx) = mpsc::channel::<AudioFrame>();
+    let (event_tx, event_rx) = mpsc::channel::<BackendEvent>();
+    let _microphone_capture = MicrophoneCapture::start(audio_tx, event_tx)?;
+    let started_at = Instant::now();
+    let mut summary = MicrophoneSmokeSummary::default();
+
+    while started_at.elapsed() < duration_limit {
+        while let Ok(event) = event_rx.try_recv() {
+            match event {
+                BackendEvent::Stage(message) if message == "microphone capture started" => {
+                    summary.capture_started = true;
+                }
+                BackendEvent::Error(message) => return Err(message.into()),
+                _ => {}
+            }
+        }
+
+        match audio_rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(frame) => {
+                summary.audio_frames += 1;
+                summary.level_events += 1;
+                let level = f64::from(frame_rms(&frame.samples));
+                summary.max_level = summary.max_level.max(level);
+                summary.detected = summary.detected || level > 0.001;
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+
+    summary.elapsed_ms = started_at.elapsed().as_millis();
+    Ok(summary)
 }
 
 #[derive(Debug)]
@@ -918,7 +967,7 @@ fn start_system_audio_thread(
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let Ok((mut capture, receiver)) =
-            RunningCapture::start_system_audio(repository_root, false)
+            RunningSystemAudio::start(repository_root, false)
         else {
             let _ = event_tx.send(BackendEvent::Error(
                 "System audio capture is currently unavailable.".to_string(),
@@ -928,15 +977,15 @@ fn start_system_audio_thread(
 
         while running.load(Ordering::SeqCst) {
             match receiver.recv_timeout(Duration::from_millis(100)) {
-                Ok(CaptureUpdate::Started { .. }) => {
+                Ok(SystemAudioUpdate::Started { .. }) => {
                     let _ = event_tx.send(BackendEvent::Stage(
-                        "Core Audio capture started".to_string(),
+                        system_audio_started_stage(),
                     ));
                 }
-                Ok(CaptureUpdate::Stage(message)) => {
+                Ok(SystemAudioUpdate::Stage(message)) => {
                     let _ = event_tx.send(BackendEvent::Stage(message));
                 }
-                Ok(CaptureUpdate::AudioFrame {
+                Ok(SystemAudioUpdate::AudioFrame {
                     sample_rate_hz,
                     channels,
                     pcm16_base64,
@@ -953,7 +1002,7 @@ fn start_system_audio_thread(
                         let _ = event_tx.send(BackendEvent::Error(error));
                     }
                 },
-                Ok(CaptureUpdate::Error(message)) => {
+                Ok(SystemAudioUpdate::Error(message)) => {
                     let _ = event_tx.send(BackendEvent::Error(message));
                 }
                 Ok(_) => {}
@@ -981,6 +1030,18 @@ fn decode_pcm16_base64(encoded: &str) -> Result<Vec<f32>, String> {
         .collect())
 }
 
+fn system_audio_started_stage() -> String {
+    if cfg!(target_os = "macos") {
+        "Core Audio capture started".to_string()
+    } else if cfg!(target_os = "windows") {
+        "WASAPI loopback capture started".to_string()
+    } else if cfg!(target_os = "linux") {
+        "Pulse/PipeWire monitor capture started".to_string()
+    } else {
+        "system audio capture started".to_string()
+    }
+}
+
 struct MicrophoneCapture {
     _stream: cpal::Stream,
 }
@@ -993,7 +1054,7 @@ impl MicrophoneCapture {
         let host = cpal::default_host();
         let device = host
             .default_input_device()
-            .ok_or("macOS did not return a default microphone input device")?;
+            .ok_or("No default microphone input device is available")?;
         let config = device.default_input_config()?;
         let sample_rate_hz = config.sample_rate();
         let channels = config.channels();
@@ -1605,16 +1666,17 @@ fn run_transcription_worker(
     event_tx: Sender<BackendEvent>,
     clock: PipelineClock,
 ) {
-    let mut model: Option<ParakeetModel> = None;
+    let selected_model = LocalTranscriptionModel::from_environment();
+    let mut model: Option<LocalTranscriber> = None;
     let mut partial_stability = HashMap::<(TranscriptSource, u64), PartialStability>::new();
-    if preload_parakeet_enabled() {
-        let _ = get_or_load_parakeet_model(&mut model, &event_tx);
+    if preload_local_transcription_enabled() {
+        let _ = get_or_load_local_model(&mut model, selected_model, &event_tx);
     }
 
     while let Ok(job) = receiver.recv() {
         match job {
             TranscriptionJob::Warmup => {
-                let _ = get_or_load_parakeet_model(&mut model, &event_tx);
+                let _ = get_or_load_local_model(&mut model, selected_model, &event_tx);
             }
             TranscriptionJob::Partial(preview) => {
                 emit_metric(
@@ -1624,7 +1686,7 @@ fn run_transcription_worker(
                     Some(preview.queued_at_ms),
                 );
 
-                let Some(model) = get_or_load_parakeet_model(&mut model, &event_tx) else {
+                let Some(model) = get_or_load_local_model(&mut model, selected_model, &event_tx) else {
                     preview.partial_gate.store(false, Ordering::SeqCst);
                     continue;
                 };
@@ -1689,7 +1751,7 @@ fn run_transcription_worker(
                     segment.metrics.asr_queued_at_ms,
                 );
 
-                let Some(model) = get_or_load_parakeet_model(&mut model, &event_tx) else {
+                let Some(model) = get_or_load_local_model(&mut model, selected_model, &event_tx) else {
                     continue;
                 };
 
@@ -1787,8 +1849,10 @@ fn env_u64(name: &str) -> Option<u64> {
         .and_then(|value| value.parse::<u64>().ok())
 }
 
-fn preload_parakeet_enabled() -> bool {
-    std::env::var("SUSURA_PRELOAD_PARAKEET").is_ok_and(|value| value == "1" || value == "true")
+fn preload_local_transcription_enabled() -> bool {
+    std::env::var("SUSURA_PRELOAD_LOCAL_TRANSCRIPTION")
+        .or_else(|_| std::env::var("SUSURA_PRELOAD_PARAKEET"))
+        .is_ok_and(|value| value == "1" || value == "true")
 }
 
 fn expected_speech_end_ms() -> Option<u64> {
@@ -1797,22 +1861,58 @@ fn expected_speech_end_ms() -> Option<u64> {
         .and_then(|value| value.parse::<u64>().ok())
 }
 
-fn get_or_load_parakeet_model<'a>(
-    model: &'a mut Option<ParakeetModel>,
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LocalTranscriptionModel {
+    Parakeet,
+    MoonshineTiny,
+}
+
+impl LocalTranscriptionModel {
+    fn from_environment() -> Self {
+        match std::env::var("SUSURA_TRANSCRIPTION_MODEL")
+            .unwrap_or_else(|_| "parakeet".to_string())
+            .as_str()
+        {
+            "moonshine-tiny" | "moonshine" => Self::MoonshineTiny,
+            _ => Self::Parakeet,
+        }
+    }
+
+    fn display_name(self) -> &'static str {
+        match self {
+            Self::Parakeet => "Parakeet",
+            Self::MoonshineTiny => "Moonshine tiny",
+        }
+    }
+}
+
+enum LocalTranscriber {
+    Parakeet(ParakeetModel),
+    MoonshineTiny(StreamingModel),
+}
+
+fn get_or_load_local_model<'a>(
+    model: &'a mut Option<LocalTranscriber>,
+    selected_model: LocalTranscriptionModel,
     event_tx: &Sender<BackendEvent>,
-) -> Option<&'a mut ParakeetModel> {
+) -> Option<&'a mut LocalTranscriber> {
     if model.is_none() {
-        let _ = event_tx.send(BackendEvent::Stage("loading local Parakeet".to_string()));
-        match ensure_parakeet_model().and_then(|model_dir| {
-            ParakeetModel::load(&model_dir, &Quantization::Int8).map_err(|error| error.into())
-        }) {
+        let _ = event_tx.send(BackendEvent::Stage(format!(
+            "loading local {}",
+            selected_model.display_name()
+        )));
+        match load_local_transcriber(selected_model) {
             Ok(loaded) => {
                 *model = Some(loaded);
-                let _ = event_tx.send(BackendEvent::Stage("local Parakeet loaded".to_string()));
+                let _ = event_tx.send(BackendEvent::Stage(format!(
+                    "local {} loaded",
+                    selected_model.display_name()
+                )));
             }
             Err(error) => {
                 let _ = event_tx.send(BackendEvent::Error(format!(
-                    "Local Parakeet model failed to load: {error}"
+                    "Local {} model failed to load: {error}",
+                    selected_model.display_name()
                 )));
                 return None;
             }
@@ -1822,17 +1922,43 @@ fn get_or_load_parakeet_model<'a>(
     model.as_mut()
 }
 
+fn load_local_transcriber(
+    selected_model: LocalTranscriptionModel,
+) -> Result<LocalTranscriber, Box<dyn std::error::Error>> {
+    match selected_model {
+        LocalTranscriptionModel::Parakeet => {
+            let model_dir = ensure_parakeet_model()?;
+            let model = ParakeetModel::load(&model_dir, &Quantization::Int8)?;
+            Ok(LocalTranscriber::Parakeet(model))
+        }
+        LocalTranscriptionModel::MoonshineTiny => {
+            let model_dir = ensure_moonshine_tiny_model()?;
+            let model = StreamingModel::load(&model_dir, 2, &Quantization::default())?;
+            Ok(LocalTranscriber::MoonshineTiny(model))
+        }
+    }
+}
+
 fn transcribe_samples(
-    model: &mut ParakeetModel,
+    model: &mut LocalTranscriber,
     samples: &[f32],
     event_tx: &Sender<BackendEvent>,
 ) -> Option<String> {
-    let params = ParakeetParams {
-        timestamp_granularity: Some(TimestampGranularity::Segment),
-        ..Default::default()
+    let result = match model {
+        LocalTranscriber::Parakeet(model) => {
+            let params = ParakeetParams {
+                timestamp_granularity: Some(TimestampGranularity::Segment),
+                ..Default::default()
+            };
+            model.transcribe_with(samples, &params)
+        }
+        LocalTranscriber::MoonshineTiny(model) => {
+            let params = MoonshineStreamingParams::default();
+            model.transcribe_with(samples, &params)
+        }
     };
 
-    match model.transcribe_with(samples, &params) {
+    match result {
         Ok(result) => {
             let text = result.text.trim().to_string();
 
@@ -1844,7 +1970,7 @@ fn transcribe_samples(
         }
         Err(error) => {
             let _ = event_tx.send(BackendEvent::Error(format!(
-                "Local Parakeet transcription failed: {error}"
+                "Local transcription failed: {error}"
             )));
             None
         }
@@ -1862,7 +1988,8 @@ fn stable_partial_text(
 
     if state.previous_raw_text.is_empty() {
         state.previous_raw_text = raw_text.to_string();
-        return None;
+        state.emitted_text = raw_text.to_string();
+        return Some(raw_text.to_string());
     }
 
     let stable_text = common_word_prefix(&state.previous_raw_text, raw_text);
@@ -1985,6 +2112,37 @@ fn validate_parakeet_dir(path: &Path) -> Result<(), Box<dyn std::error::Error>> 
         let file_path = path.join(file_name);
         if !file_path.exists() {
             return Err(format!("missing Parakeet model file: {}", file_path.display()).into());
+        }
+    }
+
+    Ok(())
+}
+
+fn ensure_moonshine_tiny_model() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    if let Ok(path) = std::env::var("SUSURA_MOONSHINE_MODEL_DIR") {
+        let path = PathBuf::from(path);
+        validate_moonshine_tiny_dir(&path)?;
+        return Ok(path);
+    }
+
+    let model_dir = model_root().join("moonshine-tiny-streaming-en");
+    validate_moonshine_tiny_dir(&model_dir)?;
+    Ok(model_dir)
+}
+
+fn validate_moonshine_tiny_dir(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    for file_name in [
+        "frontend.ort",
+        "encoder.ort",
+        "adapter.ort",
+        "cross_kv.ort",
+        "decoder_kv.ort",
+        "streaming_config.json",
+        "tokenizer.bin",
+    ] {
+        let file_path = path.join(file_name);
+        if !file_path.exists() {
+            return Err(format!("missing Moonshine model file: {}", file_path.display()).into());
         }
     }
 
@@ -2267,7 +2425,7 @@ mod tests {
                 1,
                 "The fervently of it is is is is is unique"
             ),
-            None
+            Some("The fervently of it is is is is is unique".to_string())
         );
         assert_eq!(
             stable_partial_text(
@@ -2276,7 +2434,7 @@ mod tests {
                 1,
                 "The fervently of it is is unique in the sense"
             ),
-            Some("The fervently of it is is".to_string())
+            None
         );
         assert_eq!(
             stable_partial_text(
@@ -2300,7 +2458,7 @@ mod tests {
                 1,
                 "speaker first guess"
             ),
-            None
+            Some("speaker first guess".to_string())
         );
         assert_eq!(
             stable_partial_text(
@@ -2309,7 +2467,7 @@ mod tests {
                 1,
                 "microphone first guess"
             ),
-            None
+            Some("microphone first guess".to_string())
         );
         assert_eq!(
             stable_partial_text(
@@ -2318,7 +2476,7 @@ mod tests {
                 1,
                 "speaker first guess continues"
             ),
-            Some("speaker first guess".to_string())
+            None
         );
         assert_eq!(
             stable_partial_text(
@@ -2327,7 +2485,7 @@ mod tests {
                 1,
                 "microphone first guess continues"
             ),
-            Some("microphone first guess".to_string())
+            None
         );
     }
 

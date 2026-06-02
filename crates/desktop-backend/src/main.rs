@@ -6,12 +6,14 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::json;
-use susura_macos_capture::{CaptureUpdate, RunningCapture};
 
 mod local_transcription;
+mod system_audio;
+
+use system_audio::{RunningSystemAudio, SystemAudioUpdate};
 
 fn main() {
     if let Err(error) = run() {
@@ -54,11 +56,57 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if args.iter().any(|arg| arg == "--stream-system-audio") {
-        stream_system_audio(args.iter().any(|arg| arg == "--transcribe-parakeet"))?;
+        stream_system_audio(
+            args.iter().any(|arg| arg == "--transcribe-parakeet"),
+            StreamSystemAudioOptions {
+                duration_limit: parse_duration_limit(&args),
+                smoke_summary: args.iter().any(|arg| arg == "--smoke-summary"),
+            },
+        )?;
+        return Ok(());
+    }
+
+    if args.iter().any(|arg| arg == "--stream-microphone") {
+        stream_microphone(StreamMicrophoneOptions {
+            duration_limit: parse_duration_limit(&args).unwrap_or(Duration::from_secs(3)),
+            smoke_summary: args.iter().any(|arg| arg == "--smoke-summary"),
+        })?;
+        return Ok(());
+    }
+
+    if args.iter().any(|arg| arg == "--capture-restart-smoke") {
+        run_capture_restart_smoke(CaptureRestartSmokeOptions {
+            duration_limit: parse_duration_limit(&args).unwrap_or(Duration::from_secs(2)),
+            source: parse_capture_restart_source(&args),
+        })?;
         return Ok(());
     }
 
     Err("unknown backend command".into())
+}
+
+fn parse_duration_limit(args: &[String]) -> Option<Duration> {
+    let mut index = 0;
+
+    while index < args.len() {
+        if args[index] == "--duration-ms" {
+            return args
+                .get(index + 1)
+                .and_then(|value| value.parse::<u64>().ok())
+                .map(Duration::from_millis);
+        }
+
+        if args[index] == "--duration" {
+            return args
+                .get(index + 1)
+                .and_then(|value| value.parse::<u64>().ok())
+                .map(Duration::from_secs);
+        }
+
+        index += 1;
+    }
+
+    None
 }
 
 fn parse_local_transcription_sources(
@@ -86,33 +134,254 @@ fn parse_local_transcription_sources(
     sources
 }
 
-fn stream_system_audio(transcribe_parakeet: bool) -> Result<(), Box<dyn std::error::Error>> {
-    let running = Arc::new(AtomicBool::new(true));
-    let signal_running = running.clone();
+fn parse_capture_restart_source(args: &[String]) -> CaptureRestartSource {
+    let mut index = 0;
 
-    ctrlc::set_handler(move || {
-        signal_running.store(false, Ordering::SeqCst);
-    })?;
+    while index < args.len() {
+        if args[index] == "--source" {
+            return match args.get(index + 1).map(String::as_str) {
+                Some("microphone") => CaptureRestartSource::Microphone,
+                _ => CaptureRestartSource::System,
+            };
+        }
+
+        index += 1;
+    }
+
+    CaptureRestartSource::System
+}
+
+struct StreamSystemAudioOptions {
+    duration_limit: Option<Duration>,
+    smoke_summary: bool,
+}
+
+struct StreamMicrophoneOptions {
+    duration_limit: Duration,
+    smoke_summary: bool,
+}
+
+struct CaptureRestartSmokeOptions {
+    duration_limit: Duration,
+    source: CaptureRestartSource,
+}
+
+#[derive(Clone, Copy)]
+enum CaptureRestartSource {
+    Microphone,
+    System,
+}
+
+impl CaptureRestartSource {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Microphone => "microphone",
+            Self::System => "system",
+        }
+    }
+}
+
+#[derive(Default)]
+struct SystemAudioSmokeSummary {
+    audio_frames: u64,
+    capture_started: bool,
+    detected: bool,
+    level_events: u64,
+    max_level: f64,
+}
+
+fn stream_system_audio(
+    transcribe_parakeet: bool,
+    options: StreamSystemAudioOptions,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let started_at = Instant::now();
+    let smoke_summary =
+        collect_system_audio_smoke_summary(
+            transcribe_parakeet,
+            options.duration_limit,
+            !options.smoke_summary,
+            true,
+        )?;
+
+    if options.smoke_summary {
+        emit_json(json!({
+            "type": "system_audio_smoke",
+            "audio_frames": smoke_summary.audio_frames,
+            "capture_started": smoke_summary.capture_started,
+            "detected": smoke_summary.detected,
+            "elapsed_ms": started_at.elapsed().as_millis(),
+            "level_events": smoke_summary.level_events,
+            "max_level": smoke_summary.max_level
+        }));
+    }
+
+    Ok(())
+}
+
+fn collect_system_audio_smoke_summary(
+    transcribe_parakeet: bool,
+    duration_limit: Option<Duration>,
+    emit_updates: bool,
+    install_signal_handler: bool,
+) -> Result<SystemAudioSmokeSummary, Box<dyn std::error::Error>> {
+    let running = Arc::new(AtomicBool::new(true));
+
+    if install_signal_handler {
+        let signal_running = running.clone();
+
+        ctrlc::set_handler(move || {
+            signal_running.store(false, Ordering::SeqCst);
+        })?;
+    }
 
     let repository_root = env::current_dir()?;
     let (mut capture, receiver) =
-        RunningCapture::start_system_audio(repository_root, transcribe_parakeet)?;
+        RunningSystemAudio::start(repository_root, transcribe_parakeet)?;
+    let started_at = Instant::now();
+    let mut smoke_summary = SystemAudioSmokeSummary::default();
 
     while running.load(Ordering::SeqCst) {
+        if duration_limit.is_some_and(|limit| started_at.elapsed() >= limit) {
+            break;
+        }
+
         match receiver.recv_timeout(Duration::from_millis(100)) {
-            Ok(update) => emit_capture_update(update),
+            Ok(update) => {
+                apply_smoke_summary_update(&mut smoke_summary, &update);
+                if emit_updates {
+                    emit_capture_update(update);
+                }
+            }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
         }
     }
 
     capture.stop();
+
+    Ok(smoke_summary)
+}
+
+fn stream_microphone(
+    options: StreamMicrophoneOptions,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let summary = local_transcription::run_microphone_smoke(options.duration_limit)?;
+
+    if options.smoke_summary {
+        emit_json(json!({
+            "type": "microphone_smoke",
+            "audio_frames": summary.audio_frames,
+            "capture_started": summary.capture_started,
+            "detected": summary.detected,
+            "elapsed_ms": summary.elapsed_ms,
+            "level_events": summary.level_events,
+            "max_level": summary.max_level
+        }));
+    }
+
     Ok(())
 }
 
-fn emit_capture_update(update: CaptureUpdate) {
+fn run_capture_restart_smoke(
+    options: CaptureRestartSmokeOptions,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let first = run_capture_restart_cycle(options.source, options.duration_limit)?;
+    wait_between_restart_cycles();
+    let second = run_capture_restart_cycle(options.source, options.duration_limit)?;
+
+    let ok = first.ok() && second.ok();
+
+    emit_json(json!({
+        "type": "capture_restart_smoke",
+        "ok": ok,
+        "source": options.source.as_str(),
+        "cycles": [first, second]
+    }));
+
+    if ok {
+        Ok(())
+    } else {
+        Err(format!("{} capture did not restart cleanly", options.source.as_str()).into())
+    }
+}
+
+fn run_capture_restart_cycle(
+    source: CaptureRestartSource,
+    duration_limit: Duration,
+) -> Result<CaptureRestartCycleSummary, Box<dyn std::error::Error>> {
+    match source {
+        CaptureRestartSource::Microphone => {
+            let summary = local_transcription::run_microphone_smoke(duration_limit)?;
+
+            Ok(CaptureRestartCycleSummary {
+                audio_frames: summary.audio_frames,
+                capture_started: summary.capture_started,
+                elapsed_ms: summary.elapsed_ms,
+                level_events: summary.level_events,
+                max_level: summary.max_level,
+            })
+        }
+        CaptureRestartSource::System => {
+            let summary =
+                collect_system_audio_smoke_summary(false, Some(duration_limit), false, false)?;
+
+            Ok(CaptureRestartCycleSummary {
+                audio_frames: summary.audio_frames,
+                capture_started: summary.capture_started,
+                elapsed_ms: duration_limit.as_millis(),
+                level_events: summary.level_events,
+                max_level: summary.max_level,
+            })
+        }
+    }
+}
+
+#[derive(serde::Serialize)]
+struct CaptureRestartCycleSummary {
+    audio_frames: u64,
+    capture_started: bool,
+    elapsed_ms: u128,
+    level_events: u64,
+    max_level: f64,
+}
+
+impl CaptureRestartCycleSummary {
+    fn ok(&self) -> bool {
+        self.capture_started
+            && self.audio_frames > 0
+            && self.level_events > 0
+            && self.max_level > 0.0
+    }
+}
+
+fn wait_between_restart_cycles() {
+    std::thread::sleep(Duration::from_millis(300));
+}
+
+fn apply_smoke_summary_update(
+    summary: &mut SystemAudioSmokeSummary,
+    update: &SystemAudioUpdate,
+) {
     match update {
-        CaptureUpdate::Started {
+        SystemAudioUpdate::Started { .. } => {
+            summary.capture_started = true;
+        }
+        SystemAudioUpdate::Level(level) => {
+            summary.level_events += 1;
+            let rms = f64::from(level.rms);
+            summary.max_level = summary.max_level.max(rms);
+            summary.detected = summary.detected || rms > 0.001;
+        }
+        SystemAudioUpdate::AudioFrame { .. } => {
+            summary.audio_frames += 1;
+        }
+        _ => {}
+    }
+}
+
+fn emit_capture_update(update: SystemAudioUpdate) {
+    match update {
+        SystemAudioUpdate::Started {
             sample_rate_hz,
             channels,
         } => emit_json(json!({
@@ -121,14 +390,14 @@ fn emit_capture_update(update: CaptureUpdate) {
             "sample_rate": sample_rate_hz,
             "channels": channels
         })),
-        CaptureUpdate::Stopped => emit_json(json!({
+        SystemAudioUpdate::Stopped => emit_json(json!({
             "type": "capture_stopped"
         })),
-        CaptureUpdate::Stage(message) => emit_json(json!({
+        SystemAudioUpdate::Stage(message) => emit_json(json!({
             "type": "capture_stage",
             "message": message
         })),
-        CaptureUpdate::SystemLevel(level) => {
+        SystemAudioUpdate::Level(level) => {
             let percent = f64::from(level.rms * 100.0);
             let decibels = if level.rms <= 0.0 {
                 -120.0
@@ -142,7 +411,7 @@ fn emit_capture_update(update: CaptureUpdate) {
                 "decibels": decibels
             }));
         }
-        CaptureUpdate::AudioFrame {
+        SystemAudioUpdate::AudioFrame {
             sample_rate_hz,
             channels,
             pcm16_base64,
@@ -152,21 +421,21 @@ fn emit_capture_update(update: CaptureUpdate) {
             "channels": channels,
             "pcm16": pcm16_base64
         })),
-        CaptureUpdate::TranscriptionCompleted(text) => emit_json(json!({
+        SystemAudioUpdate::TranscriptionCompleted(text) => emit_json(json!({
             "type": "transcription_completed",
             "text": text
         })),
-        CaptureUpdate::TranscriptionPartial(text) => emit_json(json!({
+        SystemAudioUpdate::TranscriptionPartial(text) => emit_json(json!({
             "type": "transcription_partial",
             "text": text
         })),
-        CaptureUpdate::SpeechStarted => emit_json(json!({
+        SystemAudioUpdate::SpeechStarted => emit_json(json!({
             "type": "speech_started"
         })),
-        CaptureUpdate::SpeechStopped => emit_json(json!({
+        SystemAudioUpdate::SpeechStopped => emit_json(json!({
             "type": "speech_stopped"
         })),
-        CaptureUpdate::Error(message) => emit_json(json!({
+        SystemAudioUpdate::Error(message) => emit_json(json!({
             "type": "capture_error",
             "message": message
         })),

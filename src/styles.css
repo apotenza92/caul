@@ -1,7 +1,10 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+
+@source "../index.html";
+@source "./**/*.{ts,tsx}";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -46,10 +49,11 @@
 
 body {
   margin: 0;
-  min-width: 320px;
+  min-width: 416px;
   min-height: 100vh;
 }
 
+html[data-susura-surface='app'] body,
 html[data-susura-surface='overlay'] body,
 html[data-susura-surface='handle'] body {
   background: transparent !important;
@@ -235,11 +239,12 @@ textarea,
     border-radius: 9999px;
     box-shadow: none;
     color: var(--handle-icon);
+    cursor: default !important;
     display: grid;
     font: inherit;
     font-size: 1rem;
     font-weight: 720;
-    height: 32px;
+    height: 100%;
     isolation: isolate;
     line-height: 0.82;
     margin: 0;
@@ -250,7 +255,7 @@ textarea,
     transition:
       background 180ms ease,
       color 180ms ease;
-    width: 32px;
+    width: 100%;
   }
 
   .dark .susura-handle-button {
@@ -287,16 +292,16 @@ textarea,
   .susura-handle-icon {
     background: currentColor;
     display: block;
-    height: 24px;
+    height: 75%;
     mask-image: var(--susura-handle-icon-url);
     mask-position: center;
     mask-repeat: no-repeat;
-    mask-size: 125% 125%;
-    width: 24px;
+    mask-size: 100% 100%;
+    width: 75%;
     -webkit-mask-image: var(--susura-handle-icon-url);
     -webkit-mask-position: center;
     -webkit-mask-repeat: no-repeat;
-    -webkit-mask-size: 125% 125%;
+    -webkit-mask-size: 100% 100%;
   }
 
   .susura-handle-button:focus-visible {
@@ -305,14 +310,14 @@ textarea,
   }
 
   .susura-handle-button[data-motion='dragging'] {
-    cursor: grabbing;
+    cursor: default !important;
     transition:
       background 120ms ease,
       color 120ms ease;
   }
 
   .susura-handle-button[data-motion='snapping'] {
-    cursor: grabbing;
+    cursor: default !important;
   }
 
   .section-title-full {
@@ -323,7 +328,7 @@ textarea,
     display: none;
   }
 
-  @media (max-width: 919px) {
+  @media (max-width: 959px) {
     .section-title-full {
       display: none;
     }
@@ -336,6 +341,7 @@ textarea,
       box-sizing: border-box;
       flex-basis: 2.25rem;
       height: 2.25rem !important;
+      justify-content: center;
       min-height: 2.25rem;
       min-width: 2.25rem !important;
       width: 2.25rem !important;

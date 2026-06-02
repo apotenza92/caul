@@ -128,6 +128,17 @@ function hexToRgb(hex) {
   };
 }
 
+async function trimTransparentPadding(imageBuffer) {
+  return sharp(imageBuffer)
+    .ensureAlpha()
+    .trim({
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+      threshold: 10
+    })
+    .png()
+    .toBuffer();
+}
+
 async function renderGlyph(svgBuffer, size, colour) {
   const { r, g, b } = hexToRgb(colour);
   const { data, info } = await sharp(svgBuffer)
@@ -153,11 +164,11 @@ async function renderGlyph(svgBuffer, size, colour) {
     .toBuffer();
 }
 
-async function renderIcon(svgBuffer, size, outputPath, palette, backgroundScale = 0.83, glyphScale = 0.62) {
+async function renderIcon(svgBuffer, size, outputPath, palette, backgroundScale = 0.83, glyphScale = 0.9) {
   const backgroundSvg = renderBackgroundSvg(size, palette, backgroundScale);
   const glyphSize = Math.floor(size * glyphScale);
   const glyphPaddingX = Math.floor((size - glyphSize) / 2);
-  const glyphPaddingY = Math.floor((size - glyphSize) / 2) + Math.floor(size * 0.018);
+  const glyphPaddingY = Math.floor((size - glyphSize) / 2);
   const glyph = await renderGlyph(svgBuffer, glyphSize, '#ffffff');
 
   await sharp(Buffer.from(backgroundSvg))
@@ -167,7 +178,7 @@ async function renderIcon(svgBuffer, size, outputPath, palette, backgroundScale 
 }
 
 async function renderPlainPng(svgBuffer, size, outputPath, palette) {
-  await renderIcon(svgBuffer, size, outputPath, palette, 0.85, 0.62);
+  await renderIcon(svgBuffer, size, outputPath, palette, 0.85, 0.9);
 }
 
 async function generateVariant(variant) {

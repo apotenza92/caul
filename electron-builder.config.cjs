@@ -1,16 +1,22 @@
 const packageJson = require('./package.json');
 
 const version = packageJson.version;
-const isBeta = process.env.FORCE_BETA_BUILD === 'true'
+const isDevBuild = process.env.FORCE_DEV_BUILD === 'true';
+const isBeta = !isDevBuild && (process.env.FORCE_BETA_BUILD === 'true'
   || version.includes('-alpha')
   || version.includes('-beta')
-  || version.includes('-rc');
-const appDisplayName = isBeta ? 'Susura Beta' : 'Susura';
-const appId = isBeta ? 'dev.susura.app.beta' : 'dev.susura.app';
-const artifactPrefix = isBeta ? 'Susura-Beta' : 'Susura';
+  || version.includes('-rc'));
+const buildChannel = isDevBuild ? 'DEV' : isBeta ? 'BETA' : 'STABLE';
+const appDisplayName = isDevBuild ? 'Susura Dev' : isBeta ? 'Susura Beta' : 'Susura';
+const appId = isDevBuild ? 'dev.susura.app.dev' : isBeta ? 'dev.susura.app.beta' : 'dev.susura.app';
+const artifactPrefix = isDevBuild ? 'Susura-Dev' : isBeta ? 'Susura-Beta' : 'Susura';
+const packagePlatform = process.env.SUSURA_PACKAGE_PLATFORM ?? process.platform;
+const packageArch = process.env.SUSURA_PACKAGE_ARCH;
+const winArchitectures = packageArch ? [packageArch] : ['arm64'];
+const linuxArchitectures = packageArch ? [packageArch] : ['arm64'];
 
 console.log(`\nSusura build configuration for v${version}`);
-console.log(`  Type: ${isBeta ? 'BETA' : 'STABLE'}`);
+console.log(`  Type: ${buildChannel}`);
 console.log(`  App ID: ${appId}`);
 console.log(`  Product Name: ${appDisplayName}\n`);
 
@@ -26,19 +32,73 @@ const iconPaths = {
     linux: 'assets/icons/beta/linux'
   }
 };
-const icons = isBeta ? iconPaths.beta : iconPaths.stable;
+const icons = isBeta || isDevBuild ? iconPaths.beta : iconPaths.stable;
+const backendBinaryName = packagePlatform === 'win' || packagePlatform === 'win32'
+  ? 'susura-desktop-backend.exe'
+  : 'susura-desktop-backend';
+const macConfig = {
+  artifactName: `${artifactPrefix}-macos-\${arch}.\${ext}`,
+  category: 'public.app-category.productivity',
+  entitlements: 'electron/SusuraRelease.entitlements',
+  entitlementsInherit: 'electron/SusuraRelease.entitlements',
+  extendInfo: {
+    NSAudioCaptureUsageDescription: `${appDisplayName} needs access to system audio so it can transcribe audio playing on this Mac.`,
+    NSMicrophoneUsageDescription: `${appDisplayName} needs microphone access when microphone listening is enabled.`,
+    NSScreenCaptureUsageDescription: `${appDisplayName} needs screen and system audio recording access to capture call audio from this Mac.`
+  },
+  hardenedRuntime: !isDevBuild,
+  icon: icons.icns,
+  ...(isDevBuild ? {
+    identity: null
+  } : {
+    notarize: {
+      teamId: '27JL2VERNC'
+    }
+  }),
+  target: [
+    {
+      target: isDevBuild ? 'dir' : 'zip',
+      arch: ['arm64']
+    }
+  ]
+};
+const commonExtraResources = [
+  {
+    from: `target/release/${backendBinaryName}`,
+    to: `bin/${backendBinaryName}`
+  },
+  {
+    from: 'scripts/run-pi-json.py',
+    to: 'scripts/run-pi-json.py'
+  },
+  {
+    from: 'node_modules/@earendil-works/pi-coding-agent',
+    to: 'pi/node_modules/@earendil-works/pi-coding-agent'
+  }
+];
+const macExtraResources = [
+  ...commonExtraResources,
+  {
+    from: 'native/macos-audio-helper/.build/release/SusuraAudioHelper',
+    to: 'bin/SusuraAudioHelper'
+  }
+];
 
 module.exports = {
   afterPack: './scripts/after-pack.cjs',
   appId,
   productName: appDisplayName,
-  ...(isBeta ? {
+  ...(isDevBuild ? {
+    extraMetadata: {
+      name: 'susura-dev'
+    }
+  } : isBeta ? {
     extraMetadata: {
       name: 'susura-beta'
     }
   } : {}),
   directories: {
-    output: 'release'
+    output: isDevBuild ? 'release-dev' : 'release'
   },
   files: [
     'dist/**/*',
@@ -46,27 +106,12 @@ module.exports = {
     'package.json',
     'assets/icons/**/*'
   ],
-  extraResources: [
-    {
-      from: 'target/release/susura-desktop-backend',
-      to: 'bin/susura-desktop-backend'
-    },
-    {
-      from: 'native/macos-audio-helper/.build/release/SusuraAudioHelper',
-      to: 'bin/SusuraAudioHelper'
-    },
-    {
-      from: 'scripts/run-pi-json.py',
-      to: 'scripts/run-pi-json.py'
-    },
-    {
-      from: '.susura/pi-bundle/node_modules',
-      to: 'pi/node_modules'
-    }
-  ],
+  extraResources: packagePlatform === 'darwin' || packagePlatform === 'mac'
+    ? macExtraResources
+    : commonExtraResources,
   asar: true,
   compression: 'normal',
-  publish: [
+  publish: isDevBuild ? [] : [
     {
       provider: 'github',
       owner: 'apotenza92',
@@ -74,37 +119,31 @@ module.exports = {
       ...(isBeta ? { channel: 'beta' } : {})
     }
   ],
-  mac: {
-    artifactName: `${artifactPrefix}-macos-\${arch}.\${ext}`,
-    category: 'public.app-category.productivity',
-    entitlements: 'electron/SusuraRelease.entitlements',
-    entitlementsInherit: 'electron/SusuraRelease.entitlements',
-    extendInfo: {
-      NSAudioCaptureUsageDescription: `${appDisplayName} needs access to system audio so it can transcribe audio playing on this Mac.`,
-      NSMicrophoneUsageDescription: `${appDisplayName} needs microphone access when microphone listening is enabled.`,
-      NSScreenCaptureUsageDescription: `${appDisplayName} needs screen and system audio recording access to capture call audio from this Mac.`
-    },
-    hardenedRuntime: true,
-    icon: icons.icns,
-    notarize: {
-      teamId: '27JL2VERNC'
-    },
-    target: [
-      {
-        target: 'zip',
-        arch: ['arm64']
-      }
-    ]
-  },
+  mac: macConfig,
   win: {
     artifactName: `${artifactPrefix}-windows-\${arch}-setup.\${ext}`,
     icon: icons.ico,
-    target: []
+    target: [
+      {
+        target: 'nsis',
+        arch: winArchitectures
+      }
+    ]
   },
   linux: {
     artifactName: `susura${isBeta ? '-beta' : ''}-\${arch}.\${ext}`,
     category: 'Utility',
     icon: icons.linux,
-    target: []
+    maintainer: 'Alex Potenza <apotenza92@users.noreply.github.com>',
+    target: [
+      {
+        target: 'AppImage',
+        arch: linuxArchitectures
+      },
+      {
+        target: 'deb',
+        arch: linuxArchitectures
+      }
+    ]
   }
 };

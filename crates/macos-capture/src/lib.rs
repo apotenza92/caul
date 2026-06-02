@@ -50,12 +50,6 @@ pub struct HelperCommand {
 impl HelperCommand {
     pub fn system_audio(repository_root: impl AsRef<Path>, transcribe_parakeet: bool) -> Self {
         let repository_root = repository_root.as_ref();
-        let package_path = repository_root.join("native").join("macos-audio-helper");
-        let binary_path = package_path
-            .join(".build")
-            .join("debug")
-            .join("SusuraAudioHelper");
-
         let capture_args = if transcribe_parakeet {
             vec![
                 "--stream-system-audio".to_string(),
@@ -64,6 +58,23 @@ impl HelperCommand {
         } else {
             vec!["--stream-system-audio".to_string()]
         };
+
+        if let Ok(helper_path) = std::env::var("SUSURA_AUDIO_HELPER_PATH") {
+            let helper_path = PathBuf::from(helper_path);
+
+            if fs::metadata(&helper_path).is_ok() {
+                return Self {
+                    command: helper_path,
+                    args: capture_args,
+                };
+            }
+        }
+
+        let package_path = repository_root.join("native").join("macos-audio-helper");
+        let binary_path = package_path
+            .join(".build")
+            .join("debug")
+            .join("SusuraAudioHelper");
 
         if fs::metadata(&binary_path).is_ok() {
             return Self {
@@ -316,5 +327,17 @@ mod tests {
 
         assert_eq!(command.command, PathBuf::from("swift"));
         assert!(command.args.contains(&"--stream-system-audio".to_string()));
+    }
+
+    #[test]
+    fn uses_configured_audio_helper_path() {
+        let helper_path = std::env::current_exe().expect("test executable path");
+        std::env::set_var("SUSURA_AUDIO_HELPER_PATH", &helper_path);
+
+        let command = HelperCommand::system_audio("/tmp/susura-missing-root", false);
+
+        std::env::remove_var("SUSURA_AUDIO_HELPER_PATH");
+        assert_eq!(command.command, helper_path);
+        assert_eq!(command.args, vec!["--stream-system-audio".to_string()]);
     }
 }

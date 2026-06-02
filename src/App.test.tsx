@@ -3,14 +3,12 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { initialCaptureStatus, type CaptureRunState } from './foundation/capture';
-import type { OnboardingStatus, ParakeetStatus, PermissionItem, PiStatus, PrivateOverlayState, PromptTemplate, PromptTemplateAttachment, PromptTemplateState, TranscriptionBridgeEvent } from './foundation/desktopBridge';
+import type { LocalTranscriptionModelId, OnboardingStatus, ParakeetStatus, PermissionItem, PiStatus, PrivateOverlayState, PromptTemplate, PromptTemplateAttachment, PromptTemplateState, TranscriptionBridgeEvent } from './foundation/desktopBridge';
 import type { RuntimeContext } from './foundation/runtime';
 
 function currentLongDatePattern() {
   const formattedDate = new Intl.DateTimeFormat('en-US', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric'
+    dateStyle: 'medium'
   }).format(new Date());
 
   return new RegExp(formattedDate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
@@ -45,13 +43,18 @@ describe('App', () => {
     expect(screen.queryByRole('navigation', { name: 'Primary' })).not.toBeInTheDocument();
     expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
     expect(screen.queryByRole('separator', { name: 'Resize transcript and AI response panes' })).not.toBeInTheDocument();
-    expect(screen.getByTestId('home-panels')).toHaveAttribute('data-panel-flow', 'stacked');
+    expect(screen.getByTestId('home-panels')).toHaveAttribute('data-panel-flow', 'side-by-side');
   });
 
   it('opens settings as a modal page and closes it from either control', async () => {
     const user = userEvent.setup();
 
     render(<App />);
+
+    await user.hover(screen.getByRole('button', { name: 'Susura Settings' }));
+    expect((await screen.findAllByText('Open Susura settings'))
+      .find((element) => element.getAttribute('data-slot') === 'tooltip-content'))
+      .toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Susura Settings' }));
     expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
@@ -77,25 +80,162 @@ describe('App', () => {
 
     await user.click(screen.getByRole('button', { name: 'Susura Settings' }));
     expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Close settings backdrop' })).toHaveClass('cursor-default');
 
     await user.click(screen.getByRole('button', { name: 'Close settings backdrop' }));
 
     expect(screen.queryByRole('dialog', { name: 'Settings' })).not.toBeInTheDocument();
   });
 
-  it('renders guided onboarding from the permissions step', async () => {
+  it('renders guided onboarding setup rows', async () => {
     window.history.pushState({}, '', '/?susura-surface=onboarding');
     installTestBridge();
 
     render(<App />);
 
-    expect(await screen.findByRole('heading', { name: 'Set up Susura' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Permissions' })).toBeInTheDocument();
+    expect(await screen.findByAltText('Susura')).toBeInTheDocument();
     expect(screen.getByText('Microphone')).toBeInTheDocument();
     expect(screen.getByText('Screen & System Audio Recording')).toBeInTheDocument();
   });
 
-  it('shows Parakeet download progress in onboarding', async () => {
+  it('shows targeted onboarding permission status and actions', async () => {
+    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    window.localStorage.setItem('susura.initial-permission-requested', '1');
+    const bridge = installTestBridge({
+      permissions: [
+        {
+          description: 'Required when listening to speaker audio output.',
+          id: 'screen-recording',
+          label: 'Screen & System Audio Recording',
+          status: 'denied'
+        },
+        {
+          description: 'Required when listening to your microphone.',
+          id: 'microphone',
+          label: 'Microphone',
+          status: 'granted'
+        }
+      ]
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText('Not granted')).toBeInTheDocument();
+    expect(screen.getByText('Granted')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Request Permissions' })).not.toBeInTheDocument();
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Grant Screen & System Audio Recording' }));
+
+    expect(bridge.requestedPermissions).toEqual(['screen-recording']);
+  });
+
+  it('waits for the user to grant missing permissions during onboarding', async () => {
+    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    const bridge = installTestBridge({
+      permissions: [
+        {
+          description: 'Required when listening to speaker audio output.',
+          id: 'screen-recording',
+          label: 'Screen & System Audio Recording',
+          status: 'not-determined'
+        },
+        {
+          description: 'Required when listening to your microphone.',
+          id: 'microphone',
+          label: 'Microphone',
+          status: 'not-determined'
+        }
+      ]
+    });
+
+    render(<App />);
+
+    expect(await screen.findAllByText('Not granted')).toHaveLength(2);
+
+    expect(bridge.requestedPermissions).toEqual([]);
+  });
+
+  it('uses the packaged app name on onboarding', async () => {
+    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    installTestBridge({
+      runtimeContext: testRuntimeContext({
+        appChannel: 'dev',
+        appName: 'Susura Dev'
+      })
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Welcome to Susura Dev' })).toBeInTheDocument();
+    expect(screen.getByAltText('Susura Dev')).toBeInTheDocument();
+  });
+
+  it('waits for the user to download the recommended local model', async () => {
+    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    const user = userEvent.setup();
+    const bridge = installTestBridge({
+      parakeetStatus: testParakeetStatus({
+        installed: false,
+        status: 'missing'
+      })
+    });
+
+    render(<App />);
+
+    const modelSelect = await screen.findByLabelText('Transcription model');
+    expect(modelSelect).toHaveTextContent('Parakeet v3');
+    expect(modelSelect).toHaveClass('w-44');
+    expect(modelSelect).toHaveAttribute('title', 'Parakeet v3');
+    expect(screen.getByText('Recommended')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Use' })).toBeInTheDocument();
+    expect(bridge.parakeetDownloads).toBe(0);
+
+    await user.click(screen.getByRole('button', { name: 'Use' }));
+
+    expect(bridge.parakeetDownloads).toBe(1);
+  });
+
+  it('allows choosing another local transcription model from onboarding', async () => {
+    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    const user = userEvent.setup();
+    const bridge = installTestBridge();
+
+    render(<App />);
+
+    await selectSetting(user, 'Transcription model', 'Moonshine tiny');
+    await user.click(screen.getByRole('button', { name: 'Use' }));
+
+    expect(bridge.selectedLocalTranscriptionModels).toEqual(['moonshine-tiny']);
+  });
+
+  it('does not download a local model automatically when cloud transcription is recommended', async () => {
+    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    const bridge = installTestBridge({
+      onboardingStatus: testOnboardingStatus({
+        parakeet: testParakeetStatus({
+          installed: false,
+          status: 'missing'
+        }),
+        transcription: testTranscriptionRecommendation({
+          autoDownloadParakeet: false,
+          recommended: 'cloud',
+          summary: 'Recommended: cloud transcription'
+        })
+      }),
+      parakeetStatus: testParakeetStatus({
+        installed: false,
+        status: 'missing'
+      })
+    });
+
+    render(<App />);
+
+    await screen.findByLabelText('Transcription model');
+
+    expect(bridge.parakeetDownloads).toBe(0);
+  });
+
+  it('shows local model download progress in onboarding', async () => {
     window.history.pushState({}, '', '/?susura-surface=onboarding');
     installTestBridge({
       parakeetStatus: testParakeetStatus({
@@ -111,24 +251,212 @@ describe('App', () => {
 
     render(<App />);
 
-    await userEvent.setup().click(await screen.findByRole('button', { name: 'Transcription' }));
-
-    expect(screen.getByText('42% downloaded')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Transcription model')).toHaveTextContent('Parakeet v3');
+    expect(screen.getByText('Downloading 42%')).toBeInTheDocument();
+    expect(screen.queryByText('Downloading Parakeet v3')).not.toBeInTheDocument();
   });
 
-  it('saves the selected Pi model from onboarding', async () => {
+  it('shows Moonshine as a ready local recommendation instead of a failed state', async () => {
+    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    installTestBridge({
+      onboardingStatus: testOnboardingStatus({
+        parakeet: testParakeetStatus({
+          modelId: 'moonshine-tiny',
+          modelName: 'Moonshine tiny'
+        }),
+        transcription: testTranscriptionRecommendation({
+          recommended: 'local-moonshine-tiny',
+          recommendedModel: {
+            id: 'moonshine-tiny',
+            name: 'Moonshine tiny',
+            reason: 'Lightweight local fallback for this computer.'
+          },
+          summary: 'Recommended: Moonshine local transcription'
+        })
+      }),
+      parakeetStatus: testParakeetStatus({
+        modelId: 'moonshine-tiny',
+        modelName: 'Moonshine tiny'
+      })
+    });
+
+    render(<App />);
+
+    expect(await screen.findByLabelText('Transcription model')).toHaveTextContent('Moonshine tiny');
+    expect(screen.getByText('Ready')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Use' })).toBeDisabled();
+    expect(screen.queryByText('Recommended model')).not.toBeInTheDocument();
+  });
+
+  it('keeps Use enabled for a different model when the current model is ready', async () => {
+    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    const user = userEvent.setup();
+    installTestBridge({
+      parakeetStatus: testParakeetStatus({
+        modelId: 'parakeet',
+        modelName: 'Parakeet v3'
+      })
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText('Ready')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Use' })).toBeDisabled();
+
+    await selectSetting(user, 'Transcription model', 'Moonshine tiny');
+
+    expect(screen.queryByText('Ready')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Use' })).toBeEnabled();
+  });
+
+  it('starts ChatGPT sign in from onboarding', async () => {
     window.history.pushState({}, '', '/?susura-surface=onboarding');
     const user = userEvent.setup();
     const bridge = installTestBridge();
 
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: 'AI account' }));
-    await user.clear(screen.getByLabelText('Model'));
-    await user.type(screen.getByLabelText('Model'), 'anthropic/claude-sonnet');
-    await user.click(screen.getByRole('button', { name: 'Save model' }));
+    await user.click(await screen.findByRole('button', { name: 'Sign in' }));
 
-    expect(bridge.savedPiModels).toEqual(['anthropic/claude-sonnet']);
+    expect(bridge.chatGptLoginOpens).toBe(1);
+  });
+
+  it('shows a loading state while ChatGPT sign in opens from onboarding', async () => {
+    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    const user = userEvent.setup();
+    let resolveLogin!: (value: { ok: boolean }) => void;
+    const loginPromise = new Promise<{ ok: boolean }>((resolve) => {
+      resolveLogin = resolve;
+    });
+
+    installTestBridge({
+      openChatGptLogin: () => loginPromise
+    });
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Sign in' }));
+
+    expect(screen.getByRole('button', { name: 'Opening' })).toBeDisabled();
+    expect(screen.getByText('Opening browser')).toBeInTheDocument();
+
+    resolveLogin({ ok: true });
+
+    expect(await screen.findByRole('button', { name: 'Sign in' })).toBeEnabled();
+  });
+
+  it('keeps onboarding start disabled and explains missing setup', async () => {
+    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    const user = userEvent.setup();
+    installTestBridge({
+      onboardingStatus: testOnboardingStatus({
+        parakeet: testParakeetStatus({
+          installed: false,
+          status: 'missing'
+        }),
+        transcription: testTranscriptionRecommendation({
+          autoDownloadModel: false,
+          autoDownloadParakeet: false
+        })
+      }),
+      parakeetStatus: testParakeetStatus({
+        installed: false,
+        status: 'missing'
+      }),
+      permissions: [
+        {
+          description: 'Required when listening to speaker audio output.',
+          id: 'screen-recording',
+          label: 'Screen & System Audio Recording',
+          status: 'denied'
+        },
+        {
+          description: 'Required when listening to your microphone.',
+          id: 'microphone',
+          label: 'Microphone',
+          status: 'granted'
+        }
+      ]
+    });
+
+    render(<App />);
+
+    const startButton = await screen.findByRole('button', { name: 'Start using Susura' });
+    expect(startButton).toBeDisabled();
+
+    await user.hover(startButton.parentElement!);
+
+    expect(await screen.findAllByText('Still needed')).not.toHaveLength(0);
+    expect(screen.getAllByText('Screen & System Audio Recording')).not.toHaveLength(0);
+    expect(screen.getAllByText('Transcription model')).not.toHaveLength(0);
+    expect(screen.getAllByText('ChatGPT sign in')).not.toHaveLength(0);
+  });
+
+  it('enables onboarding start when setup is complete', async () => {
+    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    const user = userEvent.setup();
+    const bridge = installTestBridge({
+      piStatus: testPiStatus({
+        connected: true,
+        selectedModel: 'openai-codex/gpt-5.5',
+        status: 'ready'
+      })
+    });
+
+    render(<App />);
+
+    const startButton = await screen.findByRole('button', { name: 'Start using Susura' });
+    expect(startButton).toBeEnabled();
+
+    await user.click(startButton);
+
+    expect(bridge.onboardingCompletes).toBe(1);
+  });
+
+  it('keeps onboarding start disabled until the local transcription model is used', async () => {
+    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    const user = userEvent.setup();
+    const bridge = installTestBridge({
+      piStatus: testPiStatus({
+        connected: true,
+        selectedModel: 'openai-codex/gpt-5.5',
+        status: 'ready'
+      }),
+      selectedLocalTranscriptionModel: null
+    });
+
+    render(<App />);
+
+    const startButton = await screen.findByRole('button', { name: 'Start using Susura' });
+    expect(startButton).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Use' })).toBeEnabled();
+
+    await user.hover(startButton.parentElement!);
+
+    expect(await screen.findAllByText('Still needed')).not.toHaveLength(0);
+    expect(screen.getAllByText('Transcription model')).not.toHaveLength(0);
+
+    await user.click(screen.getByRole('button', { name: 'Use' }));
+
+    expect(bridge.selectedLocalTranscriptionModels).toEqual(['parakeet']);
+    expect(await screen.findByRole('button', { name: 'Start using Susura' })).toBeEnabled();
+  });
+
+  it('does not show extra ChatGPT sign-in status text in onboarding', async () => {
+    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    installTestBridge({
+      piStatus: testPiStatus({
+        connected: true,
+        selectedModel: 'openai-codex/gpt-5.5',
+        status: 'ready'
+      })
+    });
+
+    render(<App />);
+
+    await screen.findByText('ChatGPT');
+
+    expect(screen.queryByText('Sign in required')).not.toBeInTheDocument();
   });
 
   it('uses platform-specific modal close controls', async () => {
@@ -293,6 +621,38 @@ describe('App', () => {
     expect(bridge.privateOverlayToggles).toBe(0);
   });
 
+  it('sends live resize events from the invisible window resize affordance', async () => {
+    const bridge = installTestBridge();
+
+    render(<App />);
+
+    const resizeHandle = await screen.findByLabelText('Resize window from left edge');
+
+    expect(screen.getByLabelText('Resize window from top edge')).toHaveClass('top-0', 'h-[11px]');
+    expect(resizeHandle).toHaveClass('left-0', 'w-[11px]');
+
+    fireEvent.pointerDown(resizeHandle, {
+      button: 0,
+      pointerId: 3,
+      screenX: 120,
+      screenY: 180
+    });
+    fireEvent.pointerMove(resizeHandle, {
+      pointerId: 3,
+      screenX: 96,
+      screenY: 180
+    });
+    fireEvent.pointerUp(resizeHandle, {
+      pointerId: 3,
+      screenX: 96,
+      screenY: 180
+    });
+
+    expect(bridge.privateOverlayWindowResizeStarts).toBe(1);
+    expect(bridge.privateOverlayWindowResizeMoves).toBe(1);
+    expect(bridge.privateOverlayWindowResizeEnds).toBe(1);
+  });
+
   it('uses a centred title and macOS traffic-light close dot on macOS', async () => {
     installTestBridge({
       runtimeContext: testRuntimeContext({
@@ -308,7 +668,7 @@ describe('App', () => {
     });
 
     expect(screen.getByLabelText('Move Susura window')).toHaveClass('justify-center');
-    expect(screen.getByLabelText('Move Susura window').parentElement).toHaveClass('h-12');
+    expect(screen.getByLabelText('Move Susura window').parentElement).toHaveClass('h-8');
     expect(screen.getByLabelText('Move Susura window')).toHaveClass('cursor-default');
     expect(screen.getByText('Susura')).toHaveClass('text-sm', 'font-medium');
     expect(screen.getByRole('button', { name: 'Hide Susura app' })).toHaveClass('left-3', 'size-[14px]', 'cursor-default', 'rounded-full', 'border-[0.5px]', 'border-[#FB1626]', 'bg-[#FF5C60]', 'shadow-none', 'hover:bg-[#FF5C60]', 'active:bg-[#D94D4F]');
@@ -317,7 +677,8 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Hide Susura app' }).querySelector('svg')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Susura Settings' })).toHaveClass('right-1.5');
     expect(screen.getByRole('button', { name: 'Susura Settings' })).not.toHaveClass('left-1.5');
-    expect(screen.getByRole('button', { name: 'Susura Settings' })).toHaveClass('border-border', 'bg-background');
+    expect(screen.getByRole('button', { name: 'Susura Settings' })).toHaveClass('size-7', 'bg-transparent');
+    expect(screen.getByRole('button', { name: 'Susura Settings' })).not.toHaveClass('border-border');
   });
 
   it('keeps the top-right X close button on non-macOS platforms', async () => {
@@ -339,7 +700,8 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Hide Susura app' }).querySelector('svg')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Susura Settings' })).toHaveClass('left-1.5');
     expect(screen.getByRole('button', { name: 'Susura Settings' })).not.toHaveClass('right-1.5');
-    expect(screen.getByRole('button', { name: 'Susura Settings' })).toHaveClass('border-border', 'bg-background');
+    expect(screen.getByRole('button', { name: 'Susura Settings' })).toHaveClass('size-7', 'bg-transparent');
+    expect(screen.getByRole('button', { name: 'Susura Settings' })).not.toHaveClass('border-border');
   });
 
   it.each([
@@ -370,61 +732,59 @@ describe('App', () => {
 
     expect(screen.getByTestId('home-panels')).toHaveAttribute(
       'data-panel-flow',
-      handleEdge === 'left' || handleEdge === 'right' ? 'stacked' : 'side-by-side'
+      'side-by-side'
     );
 
     const toolbar = screen.getByLabelText('Home actions');
+    const bottomToolbar = screen.queryByLabelText('Bottom transcript actions');
+    const panels = screen.getByTestId('home-panels');
     const transcriptSection = toolbar.querySelector('[data-toolbar-section="transcript"]');
     const aiSection = toolbar.querySelector('[data-toolbar-section="ai"]');
+    const transcriptPanelBottomSection = panels.querySelector('[data-toolbar-section="transcript-bottom"]');
+    const aiPanelBottomSection = panels.querySelector('[data-toolbar-section="ai-bottom"]');
+    const transcriptBottomSection = bottomToolbar?.querySelector('[data-toolbar-section="transcript-bottom"]') ?? transcriptPanelBottomSection;
+    const aiBottomSection = bottomToolbar?.querySelector('[data-toolbar-section="ai-bottom"]') ?? aiPanelBottomSection;
 
     expect(transcriptSection).toBeInTheDocument();
     expect(aiSection).toBeInTheDocument();
 
-    if (handleEdge === 'left' || handleEdge === 'right') {
-      expect(toolbar).toHaveClass('grid');
-      expect(toolbar).toHaveClass('w-12');
-      expect(toolbar).not.toHaveClass('w-16');
-      expect(toolbar).toHaveClass('divide-y');
-      expect(transcriptSection).toHaveClass('justify-between');
-      expect(aiSection).toHaveClass('justify-between');
-    } else {
-      expect(toolbar).toHaveClass('grid');
-      expect(toolbar).toHaveClass('divide-x');
-      expect(aiSection).not.toHaveClass('border-l');
-    }
+    expect(bottomToolbar).toBeInTheDocument();
+    expect(transcriptBottomSection).toBeInTheDocument();
+    expect(aiBottomSection).toBeInTheDocument();
+    expect(transcriptPanelBottomSection).not.toBeInTheDocument();
+    expect(aiPanelBottomSection).not.toBeInTheDocument();
+    expect(toolbar).toHaveClass('grid');
+    expect(toolbar).toHaveClass('divide-x');
+    expect(toolbar).not.toHaveClass('w-12');
+    expect(toolbar).not.toHaveClass('divide-y');
+    expect(aiSection).not.toHaveClass('border-l');
 
     const transcriptQueries = within(transcriptSection as HTMLElement);
     const aiQueries = within(aiSection as HTMLElement);
 
-    expect(transcriptQueries.getByRole('button', { name: 'Copy full transcript' })).toBeInTheDocument();
-    expect(transcriptQueries.getByRole('button', { name: 'Download full transcript' })).toBeInTheDocument();
-    expect(transcriptQueries.getByRole('button', { name: 'Send full transcript to AI' })).toBeInTheDocument();
+    const transcriptActionQueries = within((transcriptBottomSection ?? transcriptSection) as HTMLElement);
+    const aiActionQueries = within((aiBottomSection ?? aiSection) as HTMLElement);
+
+    expect(transcriptActionQueries.getByRole('button', { name: 'Copy full transcript' })).toBeInTheDocument();
+    expect(transcriptActionQueries.getByRole('button', { name: 'Download full transcript' })).toBeInTheDocument();
+    expect(transcriptActionQueries.getByRole('button', { name: 'Send full transcript to AI' })).toBeInTheDocument();
     expect(transcriptQueries.queryByRole('button', { name: 'Prompt template' })).not.toBeInTheDocument();
     expect(transcriptQueries.queryByRole('button', { name: 'Manage prompt templates' })).not.toBeInTheDocument();
 
     expect(aiQueries.getByRole('button', { name: 'Prompt template' })).toBeInTheDocument();
     expect(aiQueries.getByRole('button', { name: 'Manage prompt templates' })).toBeInTheDocument();
-    expect(aiQueries.queryByRole('button', { name: 'Send full transcript to AI' })).not.toBeInTheDocument();
+    expect(aiActionQueries.queryByRole('button', { name: 'Send full transcript to AI' })).not.toBeInTheDocument();
 
     await user.hover(transcriptQueries.getByRole('button', { name: 'Start Listening' }));
 
-    expect((await screen.findAllByText('Start listening to the selected audio sources'))
+    expect((await screen.findAllByText('Start listening to the selected sound input and output sources'))
       .find((element) => element.getAttribute('data-slot') === 'tooltip-content'))
       .toHaveAttribute('data-side', expectedTooltipSide);
 
     await user.unhover(transcriptQueries.getByRole('button', { name: 'Start Listening' }));
 
-    if (handleEdge === 'left' || handleEdge === 'right') {
-      const templateButton = aiQueries.getByRole('button', { name: 'Prompt template' });
-      const settingsButton = aiQueries.getByRole('button', { name: 'Manage prompt templates' });
-
-      expect(templateButton).toHaveClass('size-9');
-      expect(templateButton).not.toHaveClass('compact-prompt-template-trigger');
-      expect(templateButton.querySelector('svg')).toBeInTheDocument();
-      expect(templateButton.querySelector('svg + span + svg')).not.toBeInTheDocument();
-      expect(templateButton.parentElement).toHaveClass('justify-center');
-      expect(templateButton.compareDocumentPosition(settingsButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    }
+    expect(aiQueries.getByRole('button', { name: 'Prompt template' })).not.toHaveClass('size-9');
+    expect(transcriptQueries.getByRole('button', { name: 'Start Listening' })).toHaveClass('w-[140px]');
   });
 
   it('updates adaptive overlay layout from live private overlay state', async () => {
@@ -470,15 +830,27 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: 'Reset Handle Position' })).not.toBeInTheDocument();
   });
 
+  it('changes the floating button size from Settings', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge();
+
+    render(<App />);
+
+    await openSettings(user);
+    await selectSetting(user, 'Size', 'Large');
+
+    expect(bridge.privateOverlayState.handle.size).toBe('large');
+  });
+
   it('shows long scroll fixture sections when requested in development', () => {
     window.history.pushState({}, '', '/?susura-scroll-fixture=1');
 
     const { container } = render(<App />);
 
-    expect(screen.getByLabelText('Transcription output')).toHaveTextContent('Launch readiness review fixture line 34');
-    expect(screen.getByLabelText('Transcription output')).toHaveTextContent('Support handover fixture line 34');
-    expect(screen.getByLabelText('AI response')).toHaveTextContent('Launch readiness review section 10');
+    expect(screen.getByLabelText('Transcription output')).toHaveTextContent('Incident follow-up fixture line 34');
+    expect(screen.getByLabelText('Transcription output')).not.toHaveTextContent('Launch readiness review fixture line 34');
     expect(screen.getByLabelText('AI response')).toHaveTextContent('Incident follow-up section 10');
+    expect(screen.getByLabelText('AI response')).not.toHaveTextContent('Launch readiness review section 10');
     expect(container.querySelectorAll('#transcript-output article')).toHaveLength(3);
     expect(container.querySelectorAll('#llm-output article')).toHaveLength(3);
     expect(container.querySelector('#transcript-output')).toHaveClass('-mt-px');
@@ -494,28 +866,9 @@ describe('App', () => {
     expect(container.querySelector('#transcript-output .transcript-section-header > div')).toHaveClass('truncate');
   });
 
-  it('listens to system audio only by default', async () => {
+  it('shows permission status rows in Settings', async () => {
     const user = userEvent.setup();
-    render(<App />);
-
-    await openSettings(user);
-
-    const microphone = screen.getByRole('checkbox', { name: 'Microphone' });
-    const systemAudio = screen.getByRole('checkbox', { name: 'Speaker' });
-
-    expect(microphone).not.toBeChecked();
-    expect(systemAudio).toBeChecked();
-
-    await user.click(microphone);
-    await user.click(systemAudio);
-
-    expect(microphone).toBeChecked();
-    expect(systemAudio).not.toBeChecked();
-  });
-
-  it('shows contextual permission action for a selected source in Settings', async () => {
-    const user = userEvent.setup();
-    const bridge = installTestBridge({
+    installTestBridge({
       permissions: [
         {
           description: 'Required when listening to speaker audio output.',
@@ -536,18 +889,17 @@ describe('App', () => {
 
     await openSettings(user);
 
-    expect(screen.queryByText('Permissions')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Permissions required: Screen & System Audio Recording' })).toHaveTextContent('Click here to grant permission for Speaker: Screen & System Audio Recording');
-    expect(screen.queryByRole('button', { name: 'Permissions required: Microphone' })).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Permissions required: Screen & System Audio Recording' }));
-
-    expect(bridge.requestedPermissions).toEqual(['screen-recording']);
+    expect(screen.getByText('Permissions')).toBeInTheDocument();
+    expect(screen.getByText('Screen & System Audio Recording')).toBeInTheDocument();
+    expect(screen.getByText('Microphone')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Grant Screen & System Audio Recording' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Grant Microphone' })).not.toBeInTheDocument();
   });
 
-  it('shows contextual permission actions for selected sources without permission', async () => {
+  it('requests a permission from the Settings permissions area', async () => {
     const user = userEvent.setup();
-    installTestBridge({
+    window.localStorage.setItem('susura.initial-permission-requested', '1');
+    const bridge = installTestBridge({
       permissions: [
         {
           description: 'Required when listening to speaker audio output.',
@@ -568,21 +920,14 @@ describe('App', () => {
 
     await openSettings(user);
 
-    expect(screen.getByRole('button', { name: 'Permissions required: Screen & System Audio Recording' })).toHaveTextContent('Click here to grant permission for Speaker: Screen & System Audio Recording');
-    expect(screen.queryByRole('button', { name: 'Permissions required: Microphone' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Grant Screen & System Audio Recording' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Grant Microphone' })).toBeInTheDocument();
 
-    await user.click(screen.getByRole('checkbox', { name: 'Microphone' }));
-
-    expect(screen.getByRole('button', { name: 'Permissions required: Screen & System Audio Recording' })).toHaveTextContent('Click here to grant permission for Speaker: Screen & System Audio Recording');
-    expect(screen.getByRole('button', { name: 'Permissions required: Microphone' })).toHaveTextContent('Click here to grant permission for Microphone: Microphone access');
-
-    await user.click(screen.getByRole('checkbox', { name: 'Speaker' }));
-
-    expect(screen.queryByRole('button', { name: 'Permissions required: Screen & System Audio Recording' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Permissions required: Microphone' })).toHaveTextContent('Click here to grant permission for Microphone: Microphone access');
+    await user.click(screen.getByRole('button', { name: 'Grant Microphone' }));
+    expect(bridge.requestedPermissions).toEqual(['microphone']);
   });
 
-  it('does not show permission actions when selected listening sources have permission', async () => {
+  it('does not show Grant buttons for granted permissions in Settings', async () => {
     const user = userEvent.setup();
     installTestBridge({
       permissions: [
@@ -605,10 +950,11 @@ describe('App', () => {
 
     await openSettings(user);
 
-    expect(screen.queryByRole('button', { name: /Permissions required/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Grant Screen & System Audio Recording' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Grant Microphone' })).toBeInTheDocument();
   });
 
-  it('blocks Start Listening and shows top bar permission action when a selected source is missing permission', async () => {
+  it('replaces Start Listening with Grant Permissions when a selected source is missing permission', async () => {
     const user = userEvent.setup();
     const bridge = installTestBridge({
       permissions: [
@@ -629,22 +975,21 @@ describe('App', () => {
 
     render(<App />);
 
-    const permissionButton = await screen.findByRole('button', { name: 'Open Settings for permissions required' });
+    const permissionButton = await screen.findByRole('button', { name: 'Grant Permissions' });
 
     expect(permissionButton).toBeInTheDocument();
-    expect(permissionButton).toHaveTextContent('!');
-    expect(permissionButton).toHaveClass('whitespace-normal');
-    expect(permissionButton).toHaveClass('size-9');
+    expect(permissionButton).toHaveTextContent('Grant Permissions');
+    expect(permissionButton).toHaveClass('text-destructive');
     expect(screen.queryByRole('button', { name: 'Start Listening' })).not.toBeInTheDocument();
     await user.click(permissionButton);
 
     expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Permissions required: Screen & System Audio Recording' })).toHaveTextContent('Click here to grant permission for Speaker: Screen & System Audio Recording');
+    expect(screen.getByRole('button', { name: 'Grant Screen & System Audio Recording' })).toBeInTheDocument();
     expect(bridge.requestedPermissions).toEqual([]);
     expect(bridge.starts).toEqual([]);
   });
 
-  it('places the generic permission action before Auto Send in the horizontal home toolbar', async () => {
+  it('places Grant Permissions before source indicators and Auto Send in the horizontal home toolbar', async () => {
     installTestBridge({
       permissions: [
         {
@@ -676,19 +1021,23 @@ describe('App', () => {
 
     const toolbarQueries = within(transcriptSection as HTMLElement);
     const permissionButton = await waitFor(() => toolbarQueries.getByRole('button', {
-      name: 'Open Settings for permissions required'
+      name: 'Grant Permissions'
     }));
+    const speakerButton = await waitFor(() => toolbarQueries.getByRole('button', { name: 'Speaker on' }));
     const autoSendButton = await waitFor(() => {
       return toolbarQueries.getByRole('button', { name: 'Auto Send' });
     });
 
-    expect(permissionButton).toHaveTextContent('Permissions required');
+    expect(permissionButton).toHaveTextContent('Grant Permissions');
+    expect(
+      permissionButton.compareDocumentPosition(speakerButton) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
     expect(
       permissionButton.compareDocumentPosition(autoSendButton) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
   });
 
-  it('keeps transcript actions before AI template controls in the horizontal home toolbar', async () => {
+  it('keeps global transcript and AI response actions in the horizontal bottom toolbar', async () => {
     installTestBridge({
       privateOverlayState: testPrivateOverlayStateForEdge('top')
     });
@@ -700,32 +1049,48 @@ describe('App', () => {
     });
 
     const toolbar = await screen.findByLabelText('Home actions');
+    const bottomToolbar = await screen.findByLabelText('Bottom transcript actions');
     const transcriptSection = toolbar.querySelector('[data-toolbar-section="transcript"]');
     const aiSection = toolbar.querySelector('[data-toolbar-section="ai"]');
+    const transcriptBottomSection = bottomToolbar.querySelector('[data-toolbar-section="transcript-bottom"]');
+    const aiBottomSection = bottomToolbar.querySelector('[data-toolbar-section="ai-bottom"]');
 
     expect(transcriptSection).toBeInTheDocument();
     expect(aiSection).toBeInTheDocument();
+    expect(transcriptBottomSection).toBeInTheDocument();
+    expect(aiBottomSection).toBeInTheDocument();
     expect(toolbar).toHaveClass('grid');
     expect(toolbar).toHaveClass('divide-x');
+    expect(bottomToolbar).toHaveClass('border-t');
     expect(aiSection).not.toHaveClass('border-l');
     expect(aiSection).not.toHaveClass('justify-end');
-    expect(aiSection).toHaveClass('justify-center');
+    expect(aiSection).toHaveClass('justify-between');
 
     const transcriptQueries = within(transcriptSection as HTMLElement);
     const aiQueries = within(aiSection as HTMLElement);
-    const copyButton = transcriptQueries.getByRole('button', { name: 'Copy full transcript' });
-    const downloadButton = transcriptQueries.getByRole('button', { name: 'Download full transcript' });
-    const sendButton = transcriptQueries.getByRole('button', { name: 'Send full transcript to AI' });
+    const transcriptBottomQueries = within(transcriptBottomSection as HTMLElement);
+    const aiBottomQueries = within(aiBottomSection as HTMLElement);
+    const copyButton = transcriptBottomQueries.getByRole('button', { name: 'Copy full transcript' });
+    const downloadButton = transcriptBottomQueries.getByRole('button', { name: 'Download full transcript' });
+    const sendButton = transcriptBottomQueries.getByRole('button', { name: 'Send full transcript to AI' });
     const templateButton = aiQueries.getByRole('button', { name: 'Prompt template' });
     const settingsButton = aiQueries.getByRole('button', { name: 'Manage prompt templates' });
+    const copyAiButton = aiBottomQueries.getByRole('button', { name: 'Copy all AI responses' });
+    const downloadAiButton = aiBottomQueries.getByRole('button', { name: 'Download all AI responses' });
 
-    expect(copyButton.parentElement?.parentElement).toHaveClass('ml-auto');
-    expect(templateButton.parentElement).toHaveClass('w-auto');
-    expect(templateButton.parentElement).toHaveClass('justify-center');
-    expect(settingsButton).not.toHaveClass('ml-auto');
+    expect(transcriptBottomSection).toHaveClass('justify-between');
+    expect(aiBottomSection).toHaveClass('justify-between');
+    expect(copyButton.closest('.min-w-0')).toBeInTheDocument();
+    expect(copyAiButton.closest('.min-w-0')).toBeInTheDocument();
+    expect(templateButton.parentElement).toHaveClass('flex-1');
+    expect(templateButton.parentElement).toHaveClass('justify-between');
+    expect(settingsButton.parentElement).toHaveClass('ml-auto');
     expect(copyButton.compareDocumentPosition(downloadButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(downloadButton.compareDocumentPosition(sendButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(templateButton.compareDocumentPosition(settingsButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(copyAiButton.compareDocumentPosition(downloadAiButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(copyAiButton).toBeDisabled();
+    expect(downloadAiButton).toBeDisabled();
   });
 
   it('requests fresh macOS permissions once for a brand new user', async () => {
@@ -763,7 +1128,7 @@ describe('App', () => {
     expect(screen.getByLabelText('Transcription output')).toHaveTextContent('Live transcription is unavailable in this environment.');
   });
 
-  it('passes selected sources exactly to native transcription', async () => {
+  it('passes the default system source to native transcription', async () => {
     const user = userEvent.setup();
     const bridge = installTestBridge();
 
@@ -771,39 +1136,86 @@ describe('App', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
     expect(bridge.starts.at(-1)).toEqual({ sources: ['system'] });
-    await user.click(await screen.findByRole('button', { name: 'Stop Listening' }));
-
-    await openSettings(user);
-    await user.click(screen.getByRole('checkbox', { name: 'Microphone' }));
-    await user.click(screen.getByRole('checkbox', { name: 'Speaker' }));
-    await openHome(user);
-    await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
-    expect(bridge.starts.at(-1)).toEqual({ sources: ['microphone'] });
   });
 
-  it('prepares selected transcription sources while idle', async () => {
-    const user = userEvent.setup();
+  it('prepares the default transcription source while idle', async () => {
     const bridge = installTestBridge();
 
     render(<App />);
 
     expect(bridge.prepares.at(-1)).toEqual({ sources: ['system'] });
-
-    await openSettings(user);
-    await user.click(screen.getByRole('checkbox', { name: 'Microphone' }));
-
-    expect(bridge.prepares.at(-1)).toEqual({ sources: ['system', 'microphone'] });
   });
 
-  it('prefixes transcript chunks by source when speaker and microphone are both selected', async () => {
+  it('shows the speaker source indicator on by default', async () => {
     const user = userEvent.setup();
     const bridge = installTestBridge();
 
     render(<App />);
 
-    await openSettings(user);
-    await user.click(screen.getByRole('checkbox', { name: 'Microphone' }));
-    await openHome(user);
+    const speaker = await screen.findByRole('button', { name: 'Speaker on' });
+    expect(speaker).toHaveAttribute('aria-pressed', 'true');
+    expect(speaker).toHaveClass('text-emerald-600');
+    expect(screen.getByRole('button', { name: 'Microphone off' })).toHaveAttribute('aria-pressed', 'false');
+
+    await user.click(screen.getByRole('button', { name: 'Microphone off' }));
+    expect(screen.getByRole('button', { name: 'Microphone on' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Microphone on' })).toHaveClass('text-emerald-600');
+    expect((await screen.findAllByText('Will listen to your sound input.')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Captures what you say into your microphone.')).length).toBeGreaterThan(0);
+    expect(bridge.prepares.at(-1)).toEqual({ sources: ['system', 'microphone'] });
+
+    await user.click(screen.getByRole('button', { name: 'Speaker on' }));
+    expect(screen.getByRole('button', { name: 'Speaker off' })).toHaveAttribute('aria-pressed', 'false');
+    expect((await screen.findAllByText('Will not listen to your sound output.')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Captures what you hear on your speakers or headphones.')).length).toBeGreaterThan(0);
+    expect(bridge.prepares.at(-1)).toEqual({ sources: ['microphone'] });
+
+    await user.click(screen.getByRole('button', { name: 'Start Listening' }));
+    expect(bridge.starts.at(-1)).toEqual({ sources: ['microphone'] });
+  });
+
+  it('explains that an audio source is required before listening', async () => {
+    const user = userEvent.setup();
+    installTestBridge();
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Speaker on' }));
+    const startListening = screen.getByRole('button', { name: 'Start Listening' });
+
+    expect(screen.getByRole('button', { name: 'Speaker off' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'Microphone off' })).toHaveAttribute('aria-pressed', 'false');
+    expect(startListening).toHaveAttribute('aria-disabled', 'true');
+    expect(startListening).toHaveAttribute(
+      'title',
+      'Select a sound input or output source to listen to using the source buttons.'
+    );
+  });
+
+  it('uses green icon styling for Auto Send when it is on', async () => {
+    const user = userEvent.setup();
+    installTestBridge();
+
+    render(<App />);
+
+    const autoSend = screen.getByRole('button', { name: 'Auto Send' });
+    expect(autoSend).toHaveAttribute('aria-pressed', 'true');
+    expect(autoSend).toHaveClass('text-emerald-600');
+
+    await user.click(autoSend);
+    expect(autoSend).toHaveAttribute('aria-pressed', 'false');
+    expect(autoSend).not.toHaveClass('text-emerald-600');
+    expect((await screen.findAllByText('Auto Send is off. Send transcripts to AI manually.'))
+      .find((element) => element.getAttribute('data-slot') === 'tooltip-content'))
+      .toBeInTheDocument();
+  });
+
+  it('keeps transcript timestamps readable for default speaker chunks', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge();
+
+    render(<App />);
+
     await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
 
     act(() => {
@@ -811,44 +1223,12 @@ describe('App', () => {
         type: 'completed',
         source: 'system',
         utteranceId: 1,
-        text: 'What is the timeline?'
-      });
-      bridge.emit({
-        type: 'completed',
-        source: 'microphone',
-        utteranceId: 1,
-        text: 'I can answer that.'
-      });
-    });
-
-    const output = screen.getByLabelText('Transcription output').textContent ?? '';
-    expect(output).not.toContain('Transcript started:');
-    expect(output).toContain('[Speaker]: What is the timeline?');
-    expect(output).toContain('[Microphone]: I can answer that.');
-  });
-
-  it('shows source labels immediately after transcript timestamps', async () => {
-    const user = userEvent.setup();
-    const bridge = installTestBridge();
-
-    render(<App />);
-
-    await openSettings(user);
-    await user.click(screen.getByRole('checkbox', { name: 'Microphone' }));
-    await openHome(user);
-    await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
-
-    act(() => {
-      bridge.emit({
-        type: 'completed',
-        source: 'microphone',
-        utteranceId: 1,
         text: 'Hello, hello, hello.'
       });
     });
 
     const output = screen.getByLabelText('Transcription output').textContent ?? '';
-    expect(output).toMatch(/\[\d{2}:\d{2}:\d{2}(?:\s?[AP]M)?\]\s*\[Microphone\]: Hello, hello, hello\./);
+    expect(output).toMatch(/\[\d{2}:\d{2}:\d{2}(?:\s?[AP]M)?\]: Hello, hello, hello\./);
   });
 
   it('timestamps transcript chunks from their start time', async () => {
@@ -935,15 +1315,12 @@ describe('App', () => {
     expect(output).not.toHaveTextContent('This book sold for two point two million dollars.');
   });
 
-  it('keeps simultaneous live partial transcript chunks independent per source', async () => {
+  it('keeps live partial transcript chunks replaceable by final chunks', async () => {
     const user = userEvent.setup();
     const bridge = installTestBridge();
 
     render(<App />);
 
-    await openSettings(user);
-    await user.click(screen.getByRole('checkbox', { name: 'Microphone' }));
-    await openHome(user);
     await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
 
     act(() => {
@@ -954,18 +1331,10 @@ describe('App', () => {
         utteranceId: 1,
         text: 'Speaker partial'
       });
-      bridge.emit({
-        type: 'partial',
-        source: 'microphone',
-        startMs: 1_500,
-        utteranceId: 1,
-        text: 'Microphone partial'
-      });
     });
 
     const output = screen.getByLabelText('Transcription output');
-    expect(output).toHaveTextContent('[Speaker]: Speaker partial');
-    expect(output).toHaveTextContent('[Microphone]: Microphone partial');
+    expect(output).toHaveTextContent('Speaker partial');
 
     act(() => {
       bridge.emit({
@@ -977,31 +1346,26 @@ describe('App', () => {
       });
     });
 
-    expect(output).toHaveTextContent('[Speaker]: Speaker final');
+    expect(output).toHaveTextContent('Speaker final');
     expect(output).not.toHaveTextContent('Speaker partial');
-    expect(output).toHaveTextContent('[Microphone]: Microphone partial');
   });
 
-  it('locks audio source selection while listening', async () => {
+  it('does not show audio source selection in Settings while listening', async () => {
     const user = userEvent.setup();
     installTestBridge();
 
     render(<App />);
 
     await openSettings(user);
-
-    const microphone = screen.getByRole('checkbox', { name: 'Microphone' });
-    const systemAudio = screen.getByRole('checkbox', { name: 'Speaker' });
-
-    expect(microphone).not.toBeDisabled();
-    expect(systemAudio).not.toBeDisabled();
+    expect(screen.queryByRole('checkbox', { name: 'Microphone' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: 'Speaker' })).not.toBeInTheDocument();
 
     await openHome(user);
     await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
     await openSettings(user);
 
-    expect(screen.getByRole('checkbox', { name: 'Microphone' })).toBeDisabled();
-    expect(screen.getByRole('checkbox', { name: 'Speaker' })).toBeDisabled();
+    expect(screen.queryByRole('checkbox', { name: 'Microphone' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: 'Speaker' })).not.toBeInTheDocument();
   });
 
   it('does not expose auto controls or parameters', async () => {
@@ -1261,7 +1625,17 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(screen.getByRole('button', { name: 'Copy full transcript' })).toBeDisabled();
+    const disabledCopyButton = screen.getByRole('button', { name: 'Copy full transcript' });
+    const disabledSendButton = screen.getByRole('button', { name: 'Send full transcript to AI' });
+    expect(disabledCopyButton).toBeDisabled();
+    expect(disabledCopyButton).not.toHaveAttribute('title');
+    expect(disabledSendButton).toBeDisabled();
+    expect(disabledSendButton).not.toHaveAttribute('title');
+
+    await user.hover(disabledCopyButton);
+    expect(screen.queryByText('Copy full transcript to clipboard')).not.toBeInTheDocument();
+    await user.hover(disabledSendButton);
+    expect(screen.queryByText('Send full transcript to AI now')).not.toBeInTheDocument();
 
     await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
 
@@ -1504,9 +1878,10 @@ describe('App', () => {
     render(<App />);
 
     await openSettings(user);
-    expect(screen.getByText(/This deletes saved prompt templates\./)).toBeInTheDocument();
-    await user.click(screen.getByRole('checkbox', { name: 'Microphone' }));
-    await user.click(screen.getByRole('checkbox', { name: 'Speaker' }));
+    expect(screen.getByRole('group', { name: 'System' })).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Setup' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open Onboarding' })).not.toBeInTheDocument();
+    expect(screen.getByText(/Resetting deletes saved prompt templates and restores Auto-collapse\./)).toBeInTheDocument();
     await selectSetting(user, 'Model', '5.5');
     await selectSetting(user, 'Reasoning', 'Low');
 
@@ -1519,8 +1894,8 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Reset Settings' }));
 
     expect(bridge.settingsResets).toBe(1);
-    expect(screen.getByRole('checkbox', { name: 'Microphone' })).not.toBeChecked();
-    expect(screen.getByRole('checkbox', { name: 'Speaker' })).toBeChecked();
+    expect(screen.queryByRole('checkbox', { name: 'Microphone' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: 'Speaker' })).not.toBeInTheDocument();
     expect(bridge.promptTemplateState.selectedTemplateId).toBeNull();
     expect(bridge.promptTemplateState.templates).toEqual([
       expect.objectContaining({ id: 'starter-summarise-phone-call' }),
@@ -1592,6 +1967,263 @@ describe('App', () => {
     act(() => {
       resolveRequest?.({ ok: true, text: 'Refunds take 30 days.' });
     });
+  });
+
+  it('collapses prior transcript sections when a new session starts', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge();
+    const { container } = render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
+    act(() => {
+      bridge.emit({
+        type: 'completed',
+        utteranceId: 1,
+        text: 'First transcript body.'
+      });
+    });
+    await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
+
+    await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
+    act(() => {
+      bridge.emit({
+        type: 'completed',
+        utteranceId: 2,
+        text: 'Second transcript body.'
+      });
+    });
+
+    const transcriptArticles = container.querySelectorAll('#transcript-output [data-transcript-session-id]');
+    const firstTranscriptArticle = transcriptArticles[0] as HTMLElement;
+    const secondTranscriptArticle = transcriptArticles[1] as HTMLElement;
+
+    expect(transcriptArticles).toHaveLength(2);
+    expect(within(firstTranscriptArticle).getByRole('button', { name: 'Expand transcript section' })).toBeInTheDocument();
+    expect(firstTranscriptArticle).not.toHaveTextContent('First transcript body.');
+    expect(within(firstTranscriptArticle).getByRole('button', { name: 'Copy this transcript' })).toBeEnabled();
+    expect(within(firstTranscriptArticle).getByRole('button', { name: 'Download this transcript' })).toBeEnabled();
+    expect(within(firstTranscriptArticle).getByRole('button', { name: 'Send this transcript to AI' })).toBeEnabled();
+    expect(firstTranscriptArticle.querySelector('.transcript-section-header')).not.toHaveClass('sticky');
+    expect(secondTranscriptArticle).toHaveAttribute('data-transcript-session-active', 'true');
+    expect(secondTranscriptArticle).not.toHaveClass('min-h-full');
+    expect(secondTranscriptArticle.querySelector('.transcript-section-header')).toHaveClass('sticky');
+    expect(within(secondTranscriptArticle).getByRole('button', { name: 'Collapse transcript section' })).toBeInTheDocument();
+    expect(secondTranscriptArticle).toHaveTextContent('Second transcript body.');
+  });
+
+  it('keeps manually expanded older transcript sections expanded after later sessions', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge();
+    const { container } = render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
+    act(() => {
+      bridge.emit({ type: 'completed', utteranceId: 1, text: 'Manually expanded transcript.' });
+    });
+    await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
+
+    await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
+    act(() => {
+      bridge.emit({ type: 'completed', utteranceId: 2, text: 'Middle transcript.' });
+    });
+    await user.click(within(container.querySelectorAll('#transcript-output [data-transcript-session-id]')[0] as HTMLElement).getByRole('button', { name: 'Expand transcript section' }));
+    await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
+
+    await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
+    act(() => {
+      bridge.emit({ type: 'completed', utteranceId: 3, text: 'Newest transcript.' });
+    });
+
+    const firstTranscriptArticle = container.querySelectorAll('#transcript-output [data-transcript-session-id]')[0] as HTMLElement;
+
+    expect(firstTranscriptArticle).toHaveTextContent('Manually expanded transcript.');
+    expect(within(firstTranscriptArticle).getByRole('button', { name: 'Collapse transcript section' })).toBeInTheDocument();
+  });
+
+  it('collapses prior AI responses when a new request starts', async () => {
+    const user = userEvent.setup();
+    let requestCount = 0;
+    const bridge = installTestBridge({
+      requestLlm: async () => {
+        requestCount += 1;
+
+        if (requestCount === 1) {
+          return { ok: true, text: 'First AI answer.' };
+        }
+
+        return { ok: true, text: 'Second AI answer.' };
+      }
+    });
+
+    const { container } = render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
+    act(() => {
+      bridge.emit({
+        type: 'completed',
+        utteranceId: 1,
+        text: 'First transcript.'
+      });
+    });
+    await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
+    expect(await screen.findByText('First AI answer.')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Start Listening' }));
+    act(() => {
+      bridge.emit({
+        type: 'completed',
+        utteranceId: 2,
+        text: 'Second transcript.'
+      });
+    });
+    await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
+    expect(await screen.findByText('Second AI answer.')).toBeInTheDocument();
+
+    const aiArticles = container.querySelectorAll('#llm-output [data-ai-response-id]');
+    const firstAiArticle = aiArticles[0] as HTMLElement;
+    const activeAiArticle = container.querySelector('#llm-output [data-ai-response-active="true"]') as HTMLElement;
+
+    expect(aiArticles).toHaveLength(2);
+    expect(firstAiArticle).not.toHaveTextContent('First AI answer.');
+    expect(within(firstAiArticle).getByRole('button', { name: 'Expand AI response' })).toBeInTheDocument();
+    expect(within(firstAiArticle).getByRole('button', { name: 'Copy this AI response' })).toBeEnabled();
+    expect(within(firstAiArticle).getByRole('button', { name: 'Download this AI response' })).toBeEnabled();
+    expect(firstAiArticle.querySelector('.transcript-section-header')).not.toHaveClass('sticky');
+    expect(activeAiArticle).toHaveTextContent('Second AI answer.');
+    expect(activeAiArticle).not.toHaveClass('min-h-full');
+    expect(activeAiArticle.querySelector('.transcript-section-header')).toHaveClass('sticky');
+    expect(within(activeAiArticle).getByRole('button', { name: 'Collapse AI response' })).toBeInTheDocument();
+    expect(activeAiArticle).toHaveAttribute('data-ai-response-id', expect.stringMatching(/^ai-response-/));
+    expect(activeAiArticle).not.toHaveAttribute('data-ai-response-id', 'live-ai-response');
+  });
+
+  it('keeps manually expanded older AI responses expanded after later requests', async () => {
+    const user = userEvent.setup();
+    let requestCount = 0;
+    const bridge = installTestBridge({
+      requestLlm: async () => {
+        requestCount += 1;
+
+        return { ok: true, text: `AI answer ${requestCount}.` };
+      }
+    });
+    const { container } = render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
+    act(() => {
+      bridge.emit({ type: 'completed', utteranceId: 1, text: 'First transcript.' });
+    });
+    await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
+    expect(await screen.findByText('AI answer 1.')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Start Listening' }));
+    act(() => {
+      bridge.emit({ type: 'completed', utteranceId: 2, text: 'Second transcript.' });
+    });
+    await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
+    expect(await screen.findByText('AI answer 2.')).toBeInTheDocument();
+    await user.click(within(container.querySelectorAll('#llm-output [data-ai-response-id]')[0] as HTMLElement).getByRole('button', { name: 'Expand AI response' }));
+
+    await user.click(screen.getByRole('button', { name: 'Start Listening' }));
+    act(() => {
+      bridge.emit({ type: 'completed', utteranceId: 3, text: 'Third transcript.' });
+    });
+    await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
+    expect(await screen.findByText('AI answer 3.')).toBeInTheDocument();
+
+    const firstAiArticle = container.querySelectorAll('#llm-output [data-ai-response-id]')[0] as HTMLElement;
+
+    expect(firstAiArticle).toHaveTextContent('AI answer 1.');
+    expect(within(firstAiArticle).getByRole('button', { name: 'Collapse AI response' })).toBeInTheDocument();
+  });
+
+  it('leaves older sections expanded when Auto-collapse is off', async () => {
+    const user = userEvent.setup();
+    let requestCount = 0;
+    const bridge = installTestBridge({
+      requestLlm: async () => {
+        requestCount += 1;
+
+        return { ok: true, text: `Expanded AI answer ${requestCount}.` };
+      }
+    });
+
+    render(<App />);
+
+    await openSettings(user);
+    await user.click(screen.getByRole('checkbox', { name: 'Auto-collapse' }));
+    expect(screen.getByRole('checkbox', { name: 'Auto-collapse' })).not.toBeChecked();
+    await openHome(user);
+
+    await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
+    act(() => {
+      bridge.emit({ type: 'completed', utteranceId: 1, text: 'Expanded first transcript.' });
+    });
+    await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
+    expect(await screen.findByText('Expanded AI answer 1.')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Start Listening' }));
+    act(() => {
+      bridge.emit({ type: 'completed', utteranceId: 2, text: 'Expanded second transcript.' });
+    });
+    await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
+    expect(await screen.findByText('Expanded AI answer 2.')).toBeInTheDocument();
+
+    expect(screen.getByLabelText('Transcription output')).toHaveTextContent('Expanded first transcript.');
+    expect(screen.getByLabelText('Transcription output')).toHaveTextContent('Expanded second transcript.');
+    expect(screen.getByLabelText('AI response')).toHaveTextContent('Expanded AI answer 1.');
+    expect(screen.getByLabelText('AI response')).toHaveTextContent('Expanded AI answer 2.');
+  });
+
+  it('defaults Auto-collapse on and restores it when settings reset', async () => {
+    const user = userEvent.setup();
+    installTestBridge();
+
+    render(<App />);
+
+    await openSettings(user);
+    expect(screen.getByRole('checkbox', { name: 'Auto-collapse' })).toBeChecked();
+
+    await user.click(screen.getByRole('checkbox', { name: 'Auto-collapse' }));
+    expect(screen.getByRole('checkbox', { name: 'Auto-collapse' })).not.toBeChecked();
+    expect(window.localStorage.getItem('susura.auto-collapse')).toBe('0');
+
+    await user.click(screen.getByRole('button', { name: 'Reset Settings' }));
+    await user.click(screen.getByRole('button', { name: 'Reset Settings' }));
+
+    expect(screen.getByRole('checkbox', { name: 'Auto-collapse' })).toBeChecked();
+    expect(window.localStorage.getItem('susura.auto-collapse')).toBeNull();
+  });
+
+  it('clears transcript and AI response feeds from the global action toolbar', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge();
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
+    act(() => {
+      bridge.emit({
+        type: 'completed',
+        utteranceId: 1,
+        text: 'Clear this transcript.'
+      });
+    });
+    await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
+
+    expect(await screen.findByText('manual llm answer')).toBeInTheDocument();
+    expect(screen.getByLabelText('Transcription output')).toHaveTextContent('Clear this transcript.');
+
+    await user.click(screen.getByRole('button', { name: 'Clear transcript feed' }));
+    expect(screen.getByLabelText('Transcription output')).toHaveTextContent(
+      'Your live transcript will appear here once you start listening.'
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Clear AI response feed' }));
+    expect(screen.getByLabelText('AI response')).toHaveTextContent(
+      'Auto Send is on.\nStop listening to send to AI.',
+      { normalizeWhitespace: false }
+    );
   });
 
   it('renders AI response markdown formatting', async () => {
@@ -1971,17 +2603,6 @@ describe('App', () => {
     expect(screen.getByLabelText('Transcription output')).toHaveTextContent('more stable first phrase');
   });
 
-  it('shows when listening has no selected audio source', async () => {
-    const user = userEvent.setup();
-    render(<App />);
-
-    await openSettings(user);
-    await user.click(screen.getByRole('checkbox', { name: 'Speaker' }));
-    await openHome(user);
-
-    expect(await screen.findByRole('button', { name: 'Start Listening' })).toBeDisabled();
-  });
-
   it('keeps start disabled until LLM prewarming completes', async () => {
     let emitLlmStatus: ((status: { ok: boolean; ready: boolean; status: 'warming' | 'ready' | 'error' | 'disabled' }) => void) | null = null;
 
@@ -2075,7 +2696,7 @@ describe('App', () => {
 
   it('falls back to a normal LLM request when speculative transcript is stale', async () => {
     vi.stubEnv('VITE_SUSURA_SPECULATIVE_LLM', '1');
-    vi.stubEnv('VITE_SUSURA_SPECULATIVE_LLM_DELAY_MS', '20');
+    vi.stubEnv('VITE_SUSURA_SPECULATIVE_LLM_DELAY_MS', '200');
     const user = userEvent.setup();
     const bridge = installTestBridge();
 
@@ -2092,7 +2713,7 @@ describe('App', () => {
     });
 
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      await new Promise((resolve) => setTimeout(resolve, 225));
     });
 
     const speculativeRequest = bridge.llmRequests.at(-1);
@@ -2121,7 +2742,7 @@ describe('App', () => {
 
 async function openSettings(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('button', { name: 'Susura Settings' }));
-  await screen.findByText('Listen to your:');
+  await screen.findByText('Permissions');
 }
 
 async function openHome(user: ReturnType<typeof userEvent.setup>) {
@@ -2156,8 +2777,10 @@ function installTestBridge(overrides: {
   parakeetStatus?: ParakeetStatus;
   permissions?: PermissionItem[];
   piStatus?: PiStatus;
+  selectedLocalTranscriptionModel?: LocalTranscriptionModelId | null;
   privateOverlayState?: PrivateOverlayState;
   promptTemplateState?: PromptTemplateState;
+  openChatGptLogin?: () => Promise<{ ok: boolean; message?: string }>;
   requestLlm?: (options: {
     attachments?: PromptTemplateAttachment[];
     model: string;
@@ -2188,8 +2811,15 @@ function installTestBridge(overrides: {
   let promptTemplateState = overrides.promptTemplateState ?? testPromptTemplateState();
   let settingsResets = 0;
   const savedPiModels: string[] = [];
+  const selectedLocalTranscriptionModels: string[] = [];
+  let chatGptLoginOpens = 0;
+  let onboardingCompletes = 0;
+  let parakeetDownloads = 0;
   let parakeetStatus = overrides.parakeetStatus ?? testParakeetStatus();
   let piStatus = overrides.piStatus ?? testPiStatus();
+  let selectedLocalTranscriptionModel: LocalTranscriptionModelId | null = Object.hasOwn(overrides, 'selectedLocalTranscriptionModel')
+    ? overrides.selectedLocalTranscriptionModel ?? null
+    : overrides.onboardingStatus?.selectedLocalTranscriptionModel ?? parakeetStatus.modelId ?? null;
   let privateOverlayHandleDragStarts = 0;
   let privateOverlayHandleDragMoves = 0;
   let privateOverlayHandleDragEnds = 0;
@@ -2197,6 +2827,9 @@ function installTestBridge(overrides: {
   let privateOverlayWindowDragStarts = 0;
   let privateOverlayWindowDragMoves = 0;
   let privateOverlayWindowDragEnds = 0;
+  let privateOverlayWindowResizeStarts = 0;
+  let privateOverlayWindowResizeMoves = 0;
+  let privateOverlayWindowResizeEnds = 0;
   let privateOverlayToggles = 0;
   let privateOverlayShowMainCalls = 0;
   let privateOverlayPanicHides = 0;
@@ -2215,6 +2848,13 @@ function installTestBridge(overrides: {
 
     return privateOverlayState;
   }
+
+  const getCurrentOnboardingStatus = async () => overrides.onboardingStatus ?? testOnboardingStatus({
+    parakeet: parakeetStatus,
+    permissions: await window.susura!.permissions!.status(),
+    pi: piStatus,
+    selectedLocalTranscriptionModel
+  });
 
   window.susura = {
     capture: {
@@ -2293,6 +2933,19 @@ function installTestBridge(overrides: {
 
         return privateOverlayState;
       },
+      resizeWindowEnd: async () => {
+        privateOverlayWindowResizeEnds += 1;
+
+        return privateOverlayState;
+      },
+      resizeWindowMove: async () => {
+        privateOverlayWindowResizeMoves += 1;
+      },
+      resizeWindowStart: async () => {
+        privateOverlayWindowResizeStarts += 1;
+
+        return privateOverlayState;
+      },
       showHandleMenu: async () => {
         privateOverlayHandleMenuShows += 1;
 
@@ -2348,6 +3001,13 @@ function installTestBridge(overrides: {
         ...state,
         clickThrough: enabled
       })),
+      setHandleSize: async (size) => updatePrivateOverlayState((state) => ({
+        ...state,
+        handle: {
+          ...state.handle,
+          size
+        }
+      })),
       showMain: async () => {
         privateOverlayShowMainCalls += 1;
 
@@ -2373,6 +3033,13 @@ function installTestBridge(overrides: {
           piStatus = testPiStatus({ connected: false, selectedModel: null, status: 'disconnected' });
           return piStatus;
         },
+        openChatGptLogin: async () => {
+          chatGptLoginOpens += 1;
+          if (overrides.openChatGptLogin) {
+            return overrides.openChatGptLogin();
+          }
+          return { ok: true };
+        },
         openLogin: async () => ({ ok: true }),
         openModel: async () => ({ ok: true }),
         saveModel: async (model) => {
@@ -2383,32 +3050,40 @@ function installTestBridge(overrides: {
         status: async () => piStatus
       },
       onboarding: {
-        complete: async () => overrides.onboardingStatus ?? testOnboardingStatus({
-          parakeet: parakeetStatus,
-          permissions: await window.susura!.permissions!.status(),
-          pi: piStatus
-        }),
-        open: async () => overrides.onboardingStatus ?? testOnboardingStatus({
-          parakeet: parakeetStatus,
-          permissions: await window.susura!.permissions!.status(),
-          pi: piStatus
-        }),
-        status: async () => overrides.onboardingStatus ?? testOnboardingStatus({
-          parakeet: parakeetStatus,
-          permissions: await window.susura!.permissions!.status(),
-          pi: piStatus
-        })
+        complete: async () => {
+          onboardingCompletes += 1;
+          return getCurrentOnboardingStatus();
+        },
+        open: async () => getCurrentOnboardingStatus(),
+        status: async () => getCurrentOnboardingStatus()
       },
       parakeet: {
         cancelDownload: async () => {
           parakeetStatus = testParakeetStatus({ installed: false, status: 'missing' });
           return parakeetStatus;
         },
-        download: async () => {
-          parakeetStatus = testParakeetStatus({ installed: true, status: 'installed' });
+        download: async (modelId) => {
+          parakeetDownloads += 1;
+          selectedLocalTranscriptionModel = modelId ?? 'parakeet';
+          selectedLocalTranscriptionModels.push(selectedLocalTranscriptionModel);
+          parakeetStatus = testParakeetStatus({
+            installed: true,
+            modelId: selectedLocalTranscriptionModel,
+            modelName: modelId === 'moonshine-tiny' ? 'Moonshine tiny' : 'Parakeet v3',
+            status: 'installed'
+          });
           return parakeetStatus;
         },
         onStatus: () => () => undefined,
+        setModel: async (modelId) => {
+          selectedLocalTranscriptionModel = modelId;
+          selectedLocalTranscriptionModels.push(modelId);
+          parakeetStatus = testParakeetStatus({
+            modelId,
+            modelName: modelId === 'moonshine-tiny' ? 'Moonshine tiny' : 'Parakeet v3'
+          });
+          return parakeetStatus;
+        },
         status: async () => parakeetStatus
       },
       promptTemplates: {
@@ -2551,9 +3226,13 @@ function installTestBridge(overrides: {
   return {
     llmRequests,
     openedPermissions,
+    get parakeetDownloads() {
+      return parakeetDownloads;
+    },
     prepares,
     requestedPermissions,
     savedPiModels,
+    selectedLocalTranscriptionModels,
     starts,
     get privateOverlayHandleDragEnds() {
       return privateOverlayHandleDragEnds;
@@ -2576,6 +3255,15 @@ function installTestBridge(overrides: {
     get privateOverlayWindowDragStarts() {
       return privateOverlayWindowDragStarts;
     },
+    get privateOverlayWindowResizeEnds() {
+      return privateOverlayWindowResizeEnds;
+    },
+    get privateOverlayWindowResizeMoves() {
+      return privateOverlayWindowResizeMoves;
+    },
+    get privateOverlayWindowResizeStarts() {
+      return privateOverlayWindowResizeStarts;
+    },
     get privateOverlayPanicHides() {
       return privateOverlayPanicHides;
     },
@@ -2597,6 +3285,12 @@ function installTestBridge(overrides: {
     },
     get promptTemplateState() {
       return promptTemplateState;
+    },
+    get chatGptLoginOpens() {
+      return chatGptLoginOpens;
+    },
+    get onboardingCompletes() {
+      return onboardingCompletes;
     },
     get settingsResets() {
       return settingsResets;
@@ -2660,6 +3354,8 @@ function testParakeetStatus(overrides: Partial<ParakeetStatus> = {}): ParakeetSt
   return {
     installed: overrides.installed ?? true,
     modelDir: overrides.modelDir ?? '/tmp/susura/models/parakeet-tdt-0.6b-v3-int8',
+    modelId: overrides.modelId ?? 'parakeet',
+    modelName: overrides.modelName ?? 'Parakeet v3',
     ok: overrides.ok ?? true,
     progress: overrides.progress,
     status: overrides.status ?? 'installed'
@@ -2674,6 +3370,35 @@ function testPiStatus(overrides: Partial<PiStatus> = {}): PiStatus {
     ok: overrides.ok ?? true,
     selectedModel: overrides.selectedModel ?? null,
     status: overrides.status ?? 'disconnected'
+  };
+}
+
+function testTranscriptionRecommendation(overrides: Partial<OnboardingStatus['transcription']> = {}): OnboardingStatus['transcription'] {
+  return {
+    autoDownloadModel: overrides.autoDownloadModel ?? true,
+    autoDownloadParakeet: overrides.autoDownloadParakeet ?? true,
+    ok: overrides.ok ?? true,
+    recommended: overrides.recommended ?? 'local-parakeet',
+    recommendedModel: overrides.recommendedModel ?? {
+      id: 'parakeet',
+      name: 'Parakeet v3',
+      reason: 'Best local quality for this computer.'
+    },
+    resources: overrides.resources ?? {
+      accelerator: 'apple-silicon',
+      arch: 'arm64',
+      cpuCores: 10,
+      freeMemoryGb: 12,
+      platform: 'darwin',
+      totalMemoryGb: 32
+    },
+    score: overrides.score ?? {
+      machineProbeIterationsPerMs: 50000,
+      parakeet: 220,
+      moonshineTiny: 180
+    },
+    status: overrides.status ?? 'ready',
+    summary: overrides.summary ?? 'Recommended: local transcription'
   };
 }
 
@@ -2698,9 +3423,13 @@ function testOnboardingStatus(overrides: Partial<OnboardingStatus> = {}): Onboar
   };
   const parakeet = overrides.parakeet ?? testParakeetStatus();
   const pi = overrides.pi ?? testPiStatus();
+  const selectedLocalTranscriptionModel = Object.hasOwn(overrides, 'selectedLocalTranscriptionModel')
+    ? overrides.selectedLocalTranscriptionModel ?? null
+    : parakeet.modelId ?? null;
   const complete = overrides.complete ?? (
     permissions.permissions.every((permission) => permission.status === 'granted')
     && parakeet.installed
+    && selectedLocalTranscriptionModel === parakeet.modelId
     && pi.connected
   );
 
@@ -2711,13 +3440,17 @@ function testOnboardingStatus(overrides: Partial<OnboardingStatus> = {}): Onboar
     parakeet,
     permissions,
     pi,
-    required: overrides.required ?? !complete
+    required: overrides.required ?? !complete,
+    selectedLocalTranscriptionModel,
+    transcription: overrides.transcription ?? testTranscriptionRecommendation()
   };
 }
 
 function testRuntimeContext(overrides: Partial<RuntimeContext> = {}): RuntimeContext {
   return {
     arch: overrides.arch ?? 'arm64',
+    appChannel: overrides.appChannel ?? 'stable',
+    appName: overrides.appName ?? 'Susura',
     isMac: overrides.isMac ?? true,
     platform: overrides.platform ?? 'darwin',
     vmTestingTarget: overrides.vmTestingTarget ?? 'test'
@@ -2729,6 +3462,7 @@ function testPrivateOverlayState(overrides: Partial<PrivateOverlayState> = {}): 
     clickThrough: overrides.clickThrough ?? false,
     handle: overrides.handle ?? {
       opacity: 0.82,
+      size: 'medium',
       visible: true,
       x: 100,
       y: 100
@@ -2747,7 +3481,7 @@ function testPrivateOverlayState(overrides: Partial<PrivateOverlayState> = {}): 
 }
 
 function testPrivateOverlayStateForEdge(edge: 'bottom' | 'left' | 'right' | 'top'): PrivateOverlayState {
-  const handleSize = 32;
+  const handleSize = 48;
   const overlay = {
     height: 300,
     visible: true,
@@ -2765,6 +3499,7 @@ function testPrivateOverlayStateForEdge(edge: 'bottom' | 'left' | 'right' | 'top
   return testPrivateOverlayState({
     handle: {
       opacity: 0.82,
+      size: 'medium',
       visible: true,
       ...handleByEdge[edge]
     },
