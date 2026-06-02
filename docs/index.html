@@ -288,28 +288,12 @@
         background: var(--code-bg);
       }
 
-      .platform-note {
-        color: var(--text-muted);
-        display: none;
-        font-size: 0.78rem;
-        line-height: 1.45;
-        max-width: 420px;
-      }
-
       .extra-download-links {
         display: none;
         flex-wrap: wrap;
         gap: 0.65rem;
         justify-content: center;
         max-width: 520px;
-      }
-
-      .linux-format-note {
-        color: var(--text-muted);
-        display: none;
-        font-size: 0.78rem;
-        line-height: 1.45;
-        max-width: 420px;
       }
 
       .extra-download-links a {
@@ -516,8 +500,6 @@
           </a>
         </div>
         <div id="extra-download-links" class="extra-download-links"></div>
-        <p id="linux-format-note" class="linux-format-note"></p>
-        <p id="platform-note" class="platform-note"></p>
         <div id="homebrew-section" class="homebrew-section">
           <div id="homebrew-box" class="command-box" role="button" tabindex="0" aria-label="Copy Homebrew install command">
             <span class="command-content">
@@ -777,8 +759,6 @@
         const secondaryDownload = document.getElementById("secondary-download-btn");
         const secondaryDownloadLabel = document.getElementById("secondary-download-label");
         const extraDownloadLinks = document.getElementById("extra-download-links");
-        const linuxFormatNote = document.getElementById("linux-format-note");
-        const platformNote = document.getElementById("platform-note");
         const comingSoon = document.getElementById("coming-soon");
         const comingSoonLabel = document.getElementById("coming-soon-label");
         const channelDownloads = downloads[state.channel];
@@ -796,8 +776,6 @@
         secondaryDownload.style.display = "none";
         extraDownloadLinks.style.display = "none";
         extraDownloadLinks.innerHTML = "";
-        linuxFormatNote.style.display = "none";
-        platformNote.style.display = "none";
         archToggle.style.display = state.platform === "mac" ? "none" : "flex";
         formatToggle.style.display = state.platform === "linux" ? "flex" : "none";
 
@@ -822,8 +800,6 @@
           downloadLabel.textContent = labelWithSize(label, windowsDownload);
           download.removeAttribute("aria-disabled");
           download.removeAttribute("tabindex");
-          platformNote.textContent = "Windows builds are available for Windows 11 ARM64 and Windows x64.";
-          platformNote.style.display = "block";
           queueConnectorUpdate();
           return;
         }
@@ -854,12 +830,6 @@
           downloadLabel.textContent = labelWithSize(label, selectedDownload);
           download.removeAttribute("aria-disabled");
           download.removeAttribute("tabindex");
-          linuxFormatNote.textContent = state.linuxFormat === "deb"
-            ? "Use .deb for Ubuntu and Debian-based distributions."
-            : "Use AppImage for the most portable Linux install.";
-          linuxFormatNote.style.display = "block";
-          platformNote.textContent = "Linux builds are available for ARM64 and x64.";
-          platformNote.style.display = "block";
           queueConnectorUpdate();
           return;
         }
