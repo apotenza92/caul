@@ -310,16 +310,14 @@
         border-radius: 8px;
         color: var(--text);
         cursor: pointer;
-        display: flex;
+        display: inline-flex;
+        flex-direction: column;
         gap: var(--space-sm);
-        justify-content: space-between;
-        padding: 0.75rem 0.85rem;
+        justify-content: center;
+        min-width: 220px;
+        overflow: hidden;
+        padding: 0;
         transition: border-color 0.2s ease, transform 0.2s ease;
-      }
-
-      .command-content {
-        min-width: 0;
-        text-align: left;
       }
 
       .command-box:hover {
@@ -327,21 +325,34 @@
         transform: translateY(-1px);
       }
 
-      .command-box code {
-        color: var(--text);
-        display: block;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-        font-size: 0.78rem;
-        line-height: 1.4;
-        overflow-wrap: anywhere;
-        text-align: left;
+      .format-command {
+        align-items: center;
+        display: flex;
+        justify-content: center;
+        padding: 0.35rem 1rem 0.65rem;
       }
 
-      .copy-label {
+      .format-command code {
+        display: none;
+      }
+
+      .copy-btn {
+        align-items: center;
+        background: none;
+        border: none;
         color: var(--accent);
-        flex: 0 0 auto;
+        cursor: pointer;
+        display: flex;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        gap: var(--space-xs);
         font-size: 0.72rem;
         font-weight: 600;
+        padding: 0;
+      }
+
+      .copy-btn svg {
+        height: 15px;
+        width: 15px;
       }
 
       .coming-soon {
@@ -488,11 +499,16 @@
         <div id="extra-download-links" class="extra-download-links"></div>
         <div id="homebrew-section" class="homebrew-section">
           <div id="homebrew-box" class="command-box" role="button" tabindex="0" aria-label="Copy Homebrew install command">
-            <span class="command-content">
-              <span id="homebrew-label" class="command-label">Or install via Homebrew:</span>
+            <div id="homebrew-label" class="command-label">Or install via Homebrew:</div>
+            <div class="format-command">
               <code id="homebrew-code">brew tap apotenza92/tap && brew install --cask susura</code>
-            </span>
-            <span id="homebrew-copy" class="copy-label">Copy</span>
+              <button id="homebrew-copy" class="copy-btn" type="button" title="Copy command">
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1Zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2Zm0 16H8V7h11v14Z"/>
+                </svg>
+                <span>Copy</span>
+              </button>
+            </div>
           </div>
         </div>
         </section>
@@ -674,7 +690,7 @@
         setActive(".arch-btn", `arch-${state.arch}`);
         setActive(".format-btn", `format-${state.linuxFormat}`);
 
-        homebrewCopy.textContent = "Copy";
+        homebrewCopy.querySelector("span").textContent = "Copy";
         secondaryDownload.style.display = "none";
         extraDownloadLinks.style.display = "none";
         extraDownloadLinks.innerHTML = "";
@@ -787,11 +803,12 @@
       document.getElementById("homebrew-box").addEventListener("click", async () => {
         const command = document.getElementById("homebrew-code").textContent;
         const copyLabel = document.getElementById("homebrew-copy");
+        const copyText = copyLabel.querySelector("span");
         try {
           await navigator.clipboard.writeText(command);
-          copyLabel.textContent = "Copied";
+          copyText.textContent = "Copied";
         } catch {
-          copyLabel.textContent = "Select";
+          copyText.textContent = "Select";
         }
       });
       document.getElementById("homebrew-box").addEventListener("keydown", (event) => {
