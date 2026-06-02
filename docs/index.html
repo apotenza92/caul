@@ -490,7 +490,7 @@
           <div id="homebrew-box" class="command-box" role="button" tabindex="0" aria-label="Copy Homebrew install command">
             <span class="command-content">
               <span id="homebrew-label" class="command-label">Or install via Homebrew:</span>
-              <code id="homebrew-code">brew install --cask apotenza92/tap/susura</code>
+              <code id="homebrew-code">brew tap apotenza92/tap && brew install --cask susura</code>
             </span>
             <span id="homebrew-copy" class="copy-label">Copy</span>
           </div>
@@ -737,8 +737,8 @@
         homebrewSection.style.display = "block";
         comingSoon.style.display = "none";
         homebrewCode.textContent = state.channel === "beta"
-          ? "brew install --cask apotenza92/tap/susura@beta"
-          : "brew install --cask apotenza92/tap/susura";
+          ? "brew tap apotenza92/tap && brew install --cask susura@beta"
+          : "brew tap apotenza92/tap && brew install --cask susura";
         homebrewLabel.textContent = state.channel === "beta"
           ? "Or install via Homebrew (Beta):"
           : "Or install via Homebrew:";
