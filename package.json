@@ -1,6 +1,6 @@
 {
   "name": "susura",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "description": "A private AI overlay for live calls and screen work.",
   "main": "electron/main.cjs",
@@ -37,7 +37,7 @@
     "dist:win:dir:arm64": "npm run package:prepare:win && node scripts/clean-package-output.mjs win arm64 && cross-env SUSURA_PACKAGE_PLATFORM=win SUSURA_PACKAGE_ARCH=arm64 electron-builder --config electron-builder.config.cjs --win dir --arm64 --publish=never",
     "dist:win:dir:x64": "npm run package:prepare:win && node scripts/clean-package-output.mjs win x64 && cross-env SUSURA_PACKAGE_PLATFORM=win SUSURA_PACKAGE_ARCH=x64 electron-builder --config electron-builder.config.cjs --win dir --x64 --publish=never",
     "dist:linux": "npm run dist:linux:arm64",
-    "dist:linux:arm64": "npm run package:prepare:linux && node scripts/clean-package-output.mjs linux arm64 && cross-env SUSURA_PACKAGE_PLATFORM=linux SUSURA_PACKAGE_ARCH=arm64 electron-builder --config electron-builder.config.cjs --linux AppImage rpm --arm64 --publish=never && node scripts/build-linux-deb.mjs arm64",
+    "dist:linux:arm64": "npm run package:prepare:linux && node scripts/clean-package-output.mjs linux arm64 && cross-env SUSURA_PACKAGE_PLATFORM=linux SUSURA_PACKAGE_ARCH=arm64 electron-builder --config electron-builder.config.cjs --linux AppImage --arm64 --publish=never && node scripts/build-linux-deb.mjs arm64",
     "dist:linux:x64": "npm run package:prepare:linux && node scripts/clean-package-output.mjs linux x64 && cross-env SUSURA_PACKAGE_PLATFORM=linux SUSURA_PACKAGE_ARCH=x64 electron-builder --config electron-builder.config.cjs --linux AppImage rpm --x64 --publish=never && node scripts/build-linux-deb.mjs x64",
     "smoke:electron": "npm run desktop-backend:build && npm run electron:sign-dev && concurrently -k --success first \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 SUSURA_SMOKE_EXIT_MS=250 electron .\"",
     "smoke:electron:built": "npm run desktop-backend:build && npm run build && npm run electron:sign-dev && cross-env SUSURA_SMOKE_EXIT_MS=250 electron .",

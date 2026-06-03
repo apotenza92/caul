@@ -29,7 +29,7 @@ EOF
 
 cat > /tmp/susura-rpmbuild/SPECS/susura.spec <<'EOF'
 Name: susura
-Version: 0.1.7
+Version: 0.1.8
 Release: 1%{?dist}
 Summary: A private AI overlay for live calls and screen work.
 License: MIT OR Apache-2.0
@@ -78,7 +78,7 @@ done
 /usr/share/icons/hicolor/*/apps/susura.png
 
 %changelog
-* Wed Jun 03 2026 Alex Potenza <apotenza92@users.noreply.github.com> - 0.1.7-1
+* Wed Jun 03 2026 Alex Potenza <apotenza92@users.noreply.github.com> - 0.1.8-1
 - Local release smoke build.
 EOF
 
@@ -88,5 +88,5 @@ rpmbuild \
   --define "_topdir /tmp/susura-rpmbuild" \
   /tmp/susura-rpmbuild/SPECS/susura.spec
 
-cp /tmp/susura-rpmbuild/RPMS/aarch64/susura-0.1.7-1*.aarch64.rpm /root/susura-rpm-build/release/susura-arm64.rpm
+cp /tmp/susura-rpmbuild/RPMS/aarch64/susura-0.1.8-1*.aarch64.rpm /root/susura-rpm-build/release/susura-arm64.rpm
 ls -lh /root/susura-rpm-build/release/susura-arm64.rpm
