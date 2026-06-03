@@ -64,6 +64,21 @@ html[data-susura-surface='handle'] body {
   -webkit-app-region: drag;
 }
 
+.susura-start-here-nudge,
+.susura-prompt-template-nudge {
+  animation: susura-start-here-nudge 2.6s ease-in-out infinite;
+}
+
+@keyframes susura-start-here-nudge {
+  0%, 100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
 button,
 input,
 label,
@@ -184,11 +199,40 @@ textarea,
 
   .susura-settings-dialog {
     grid-template-rows: auto minmax(0, 1fr);
+    height: 85vh;
     left: 50%;
-    max-height: calc(100% - 2rem);
+    max-height: 85vh;
     top: 50%;
     transform: translate(-50%, -50%);
-    width: min(42rem, calc(100% - 2rem));
+  }
+
+  .susura-preview-tooltip {
+    overscroll-behavior: contain;
+    scrollbar-color: color-mix(in oklch, currentColor 34%, transparent) transparent;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+  }
+
+  .susura-preview-tooltip::-webkit-scrollbar {
+    height: 10px;
+    width: 10px;
+  }
+
+  .susura-preview-tooltip::-webkit-scrollbar-track {
+    background: transparent;
+    margin-block: 10px;
+  }
+
+  .susura-preview-tooltip::-webkit-scrollbar-thumb {
+    background: color-mix(in oklch, currentColor 26%, transparent);
+    border: 3px solid transparent;
+    border-radius: 9999px;
+    background-clip: padding-box;
+  }
+
+  .susura-preview-tooltip::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklch, currentColor 42%, transparent);
+    background-clip: padding-box;
   }
 
   .susura-mac-close-button::before,
@@ -227,15 +271,15 @@ textarea,
 
   .susura-handle-button {
     --handle-surface: oklch(1 0 0 / 100%);
-    --handle-surface-closed: oklch(1 0 0 / 62%);
+    --handle-surface-closed: oklch(1 0 0 / 42%);
     --handle-surface-hover: oklch(1 0 0 / 84%);
-    --handle-border: oklch(0.12 0 0 / 32%);
+    --handle-border: oklch(0.12 0 0 / 18%);
     --handle-icon: oklch(0.12 0 0 / 96%);
     --handle-icon-hover: oklch(0.08 0 0 / 100%);
     align-items: center;
     appearance: none;
     background: var(--handle-surface);
-    border: 1px solid var(--handle-border);
+    border: 0.5px solid var(--handle-border);
     border-radius: 9999px;
     box-shadow: none;
     color: var(--handle-icon);
@@ -260,9 +304,9 @@ textarea,
 
   .dark .susura-handle-button {
     --handle-surface: oklch(0.035 0 0 / 100%);
-    --handle-surface-closed: oklch(0.035 0 0 / 68%);
+    --handle-surface-closed: oklch(0.035 0 0 / 44%);
     --handle-surface-hover: oklch(0.035 0 0 / 86%);
-    --handle-border: oklch(1 0 0 / 34%);
+    --handle-border: oklch(1 0 0 / 20%);
     --handle-icon: oklch(0.985 0 0 / 96%);
     --handle-icon-hover: oklch(1 0 0 / 100%);
   }
@@ -328,6 +372,10 @@ textarea,
     display: none;
   }
 
+  .prompt-template-trigger-icon {
+    display: none;
+  }
+
   @media (max-width: 959px) {
     .section-title-full {
       display: none;
@@ -337,28 +385,46 @@ textarea,
       display: inline;
     }
 
-    .compact-toolbar-button {
-      box-sizing: border-box;
-      flex-basis: 2.25rem;
-      height: 2.25rem !important;
-      justify-content: center;
-      min-height: 2.25rem;
-      min-width: 2.25rem !important;
-      width: 2.25rem !important;
-      padding-inline: 0;
-    }
-
     .compact-toolbar-button-label {
       display: none;
     }
 
-    .compact-prompt-template-trigger {
-      gap: 0.125rem;
-      justify-content: center;
-      min-width: 4rem !important;
-      width: 4rem !important;
-      padding-inline: 0.25rem;
+    .compact-toolbar-button {
+      width: 2.25rem !important;
+      min-width: 2.25rem !important;
+      padding-left: 0 !important;
+      padding-right: 0 !important;
+      justify-content: center !important;
     }
+
+    .prompt-template-trigger {
+      gap: 0.375rem;
+      width: 3.75rem !important;
+      min-width: 3.75rem !important;
+      padding-left: 0.5rem !important;
+      padding-right: 0.5rem !important;
+      justify-content: center !important;
+    }
+
+    .prompt-template-selector-root,
+    .prompt-template-selector-picker {
+      flex: 0 0 auto !important;
+    }
+
+    .prompt-template-trigger-icon {
+      display: block !important;
+    }
+
+    .prompt-template-trigger-label {
+      display: none !important;
+    }
+
+    .prompt-template-trigger-chevron {
+      display: block !important;
+      width: 0.875rem;
+      height: 0.875rem;
+    }
+
   }
 
   .markdown-output :where(h1, h2, h3, h4) {

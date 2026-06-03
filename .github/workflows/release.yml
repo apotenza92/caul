@@ -184,7 +184,7 @@ jobs:
           npm run dist:linux:${{ matrix.arch }}
 
           if [[ "$GITHUB_REF_NAME" != *alpha* && "$GITHUB_REF_NAME" != *beta* && "$GITHUB_REF_NAME" != *rc* ]]; then
-            FORCE_BETA_BUILD=true SUSURA_PACKAGE_PLATFORM=linux SUSURA_PACKAGE_ARCH=${{ matrix.arch }} npx electron-builder --config electron-builder.config.cjs --linux AppImage --${{ matrix.arch }} --publish=never
+            FORCE_BETA_BUILD=true SUSURA_PACKAGE_PLATFORM=linux SUSURA_PACKAGE_ARCH=${{ matrix.arch }} npx electron-builder --config electron-builder.config.cjs --linux AppImage rpm --${{ matrix.arch }} --publish=never
             FORCE_BETA_BUILD=true node scripts/build-linux-deb.mjs ${{ matrix.arch }}
           fi
         timeout-minutes: 75
@@ -196,6 +196,7 @@ jobs:
           path: |
             release/*-${{ matrix.arch }}.AppImage
             release/*-${{ matrix.arch }}.deb
+            release/*-${{ matrix.arch }}.rpm
           if-no-files-found: error
 
   publish-release:

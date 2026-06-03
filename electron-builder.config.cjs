@@ -10,15 +10,21 @@ const buildChannel = isDevBuild ? 'DEV' : isBeta ? 'BETA' : 'STABLE';
 const appDisplayName = isDevBuild ? 'Susura Dev' : isBeta ? 'Susura Beta' : 'Susura';
 const appId = isDevBuild ? 'dev.susura.app.dev' : isBeta ? 'dev.susura.app.beta' : 'dev.susura.app';
 const artifactPrefix = isDevBuild ? 'Susura-Dev' : isBeta ? 'Susura-Beta' : 'Susura';
+const devCodeSignIdentity = process.env.SUSURA_DEV_CODESIGN_IDENTITY
+  ?? '0A2CD8B7803C6E7A4907B7CA517538115CA1A660';
 const packagePlatform = process.env.SUSURA_PACKAGE_PLATFORM ?? process.platform;
 const packageArch = process.env.SUSURA_PACKAGE_ARCH;
 const winArchitectures = packageArch ? [packageArch] : ['arm64'];
 const linuxArchitectures = packageArch ? [packageArch] : ['arm64'];
+const linuxArtifactArch = packageArch ?? '${arch}';
 
 console.log(`\nSusura build configuration for v${version}`);
 console.log(`  Type: ${buildChannel}`);
 console.log(`  App ID: ${appId}`);
 console.log(`  Product Name: ${appDisplayName}\n`);
+if (isDevBuild) {
+  console.log(`  Dev Code Signing Identity: ${devCodeSignIdentity || 'ad-hoc'}\n`);
+}
 
 const iconPaths = {
   stable: {
@@ -49,7 +55,8 @@ const macConfig = {
   hardenedRuntime: !isDevBuild,
   icon: icons.icns,
   ...(isDevBuild ? {
-    identity: null
+    identity: devCodeSignIdentity || null,
+    timestamp: 'none'
   } : {
     notarize: {
       teamId: '27JL2VERNC'
@@ -143,7 +150,15 @@ module.exports = {
       {
         target: 'deb',
         arch: linuxArchitectures
+      },
+      {
+        target: 'rpm',
+        arch: linuxArchitectures
       }
     ]
+  },
+  rpm: {
+    packageName: `susura${isBeta ? '-beta' : ''}`,
+    artifactName: `susura${isBeta ? '-beta' : ''}-${linuxArtifactArch}.\${ext}`
   }
 };

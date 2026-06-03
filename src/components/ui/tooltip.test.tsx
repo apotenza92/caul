@@ -23,4 +23,19 @@ describe('Tooltip', () => {
     expect(tooltipContent).toHaveClass('z-[2147483647]');
     expect(tooltipContent).toHaveStyle({ zIndex: '2147483647' });
   });
+
+  it('keeps tooltip content from intercepting adjacent trigger hovers', () => {
+    render(
+      <TooltipProvider delayDuration={0}>
+        <Tooltip open>
+          <TooltipTrigger>Trigger</TooltipTrigger>
+          <TooltipContent>Tooltip body</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+
+    const tooltipContent = document.querySelector('[data-slot="tooltip-content"]');
+
+    expect(tooltipContent).toHaveClass('pointer-events-none');
+  });
 });

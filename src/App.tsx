@@ -1,6 +1,6 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode, type RefObject } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode, type RefObject, type WheelEvent } from 'react';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
+import { Checkbox, CheckboxDisplay } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogClose,
@@ -38,7 +38,7 @@ import {
   TooltipTrigger
 } from '@/components/ui/tooltip';
 import { Textarea } from '@/components/ui/textarea';
-import { CheckCircle2Icon, ChevronDownIcon, ChevronRightIcon, CircleAlertIcon, CopyIcon, DownloadIcon, FileIcon, FileTextIcon, ImageIcon, LoaderCircleIcon, LogOutIcon, MicIcon, PaperclipIcon, PencilIcon, PlayIcon, SearchIcon, SendHorizontalIcon, SendIcon, SettingsIcon, SquareIcon, Trash2Icon, Volume2Icon, XCircleIcon, XIcon } from 'lucide-react';
+import { ArrowUpIcon, CheckCircle2Icon, ChevronDownIcon, ChevronRightIcon, CircleAlertIcon, CopyIcon, DownloadIcon, FastForwardIcon, FileIcon, FileInputIcon, FileTextIcon, ImageIcon, InfoIcon, ListChecksIcon, LoaderCircleIcon, LogOutIcon, MicIcon, MicOffIcon, PaperclipIcon, PencilIcon, PlayIcon, SearchIcon, SendIcon, SettingsIcon, SquareIcon, Trash2Icon, Volume2Icon, VolumeXIcon, XCircleIcon, XIcon } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import susuraAppIconUrl from '../assets/icons/icon-rounded.png?url';
 import susuraBetaAppIconUrl from '../assets/icons/beta/icon-rounded.png?url';
@@ -90,37 +90,46 @@ const layout = {
   windowTitleBarMacCloseButton: 'susura-mac-close-button absolute left-3 top-1/2 z-10 size-[14px] -translate-y-1/2 cursor-default rounded-full border-[0.5px] border-[#FB1626] bg-[#FF5C60] p-0 shadow-none hover:bg-[#FF5C60] active:bg-[#D94D4F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF5C60]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
   page: 'h-full min-h-0 overflow-hidden',
   form: 'h-full w-full',
-  contentTopToolbar: 'grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto]',
+  contentTopToolbar: 'grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto]',
   contentRightToolbar: 'grid h-full min-h-0 grid-cols-[minmax(0,1fr)_auto]',
-  contentBottomToolbar: 'grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto]',
+  contentBottomToolbar: 'grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto]',
   contentLeftToolbar: 'grid h-full min-h-0 grid-cols-[auto_minmax(0,1fr)]',
   panelGrid: 'grid h-full min-h-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] divide-x divide-border',
   panelGridStacked: 'grid h-full min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] divide-y divide-border',
+  panelTitleBars: 'z-20 grid h-8 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] divide-x divide-border border-b border-border/70 bg-background/95 text-muted-foreground',
+  panelTitleBar: 'flex min-w-0 select-none items-center justify-center px-3',
+  panelTitleBarTitle: 'truncate text-sm font-medium text-foreground',
   panel: 'panel-background grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden',
   panelPlain: 'panel-background h-full min-h-0 overflow-hidden',
   panelWithBottomActions: 'panel-background grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] overflow-hidden',
+  aiPanelWithManualPrompt: 'panel-background grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto_auto] overflow-hidden',
+  aiManualPromptBar: 'z-10 flex min-h-12 items-end gap-2 border-t border-border bg-background px-3 py-1.5',
+  aiManualPromptInput: 'max-h-[50%] min-h-9 flex-1 resize-none overflow-hidden rounded-md py-2 text-sm leading-5',
   homeToolbar: 'z-10 overflow-hidden bg-background',
   homeToolbarTop: 'grid h-12 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center divide-x divide-border border-b border-border',
   homeToolbarRight: 'grid h-full w-12 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] items-stretch divide-y divide-border border-l border-border p-0',
   homeToolbarBottom: 'grid h-12 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center divide-x divide-border border-t border-border',
   homeToolbarLeft: 'grid h-full w-12 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] items-stretch divide-y divide-border border-r border-border p-0',
   homeToolbarHorizontalSection: 'flex min-w-0 items-center gap-2 px-3 py-1.5',
-  homeToolbarHorizontalSectionAi: 'justify-between',
+  homeToolbarHorizontalSectionAi: 'justify-center',
   homeToolbarBottomActions: 'z-10 grid h-12 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center divide-x divide-border border-t border-border bg-background',
-  homeToolbarBottomActionSection: 'flex min-w-0 items-center justify-between gap-2 px-3 py-1.5',
+  homeToolbarBottomActionSection: 'flex min-w-0 items-center justify-center gap-2 px-3 py-1.5',
   homeToolbarBottomActionGroup: 'flex min-w-0 items-center gap-2',
   expandedToolbarButtonLabel: 'compact-toolbar-button-label min-w-0 truncate',
-  panelBottomActions: 'z-10 flex h-12 items-center justify-between gap-2 border-t border-border bg-background px-3 py-1.5',
+  panelBottomActions: 'z-10 flex h-12 items-center justify-center gap-2 border-t border-border bg-background px-3 py-1.5',
   homeToolbarVerticalSection: 'flex min-h-0 flex-col items-center justify-between gap-2 overflow-hidden px-1.5 py-3',
   homeToolbarVerticalSectionTop: '',
   homeToolbarVerticalSectionBottom: '',
   panelScroller: 'panel-background relative -mt-px box-border h-full min-h-0 overflow-y-auto [overflow-anchor:none]',
   settingsBackdrop: 'absolute inset-0 z-40 cursor-default bg-black/10 supports-backdrop-filter:backdrop-blur-xs',
-  settingsDialog: 'susura-settings-dialog absolute z-50 grid overflow-hidden rounded-xl bg-popover text-sm text-popover-foreground ring-1 ring-foreground/10',
+  modalBlurBackdrop: 'fixed inset-0 z-40 pointer-events-none bg-black/10 supports-backdrop-filter:backdrop-blur-xs',
+  settingsDialog: 'susura-settings-dialog absolute z-50 grid w-[59.765625vw] max-w-[59.765625vw] min-w-[min(32rem,calc(100vw-2rem))] overflow-hidden rounded-xl bg-popover text-sm text-popover-foreground ring-1 ring-foreground/10',
   modalHeaderTitle: 'font-heading text-sm leading-none font-medium text-center',
   settingsHeader: 'flex h-12 items-center justify-center border-b border-border px-12',
   settingsHeaderMac: '',
-  settingsContent: 'min-h-0 overflow-y-auto p-4',
+  settingsContent: 'grid min-h-0 grid-cols-[9rem_minmax(0,1fr)] overflow-hidden',
+  settingsSidebar: 'flex min-h-0 flex-col border-r border-border p-4',
+  settingsPanel: 'min-h-0 overflow-y-auto p-4',
   modalCloseButton: 'absolute top-6 z-20 -translate-y-1/2',
   modalCloseButtonDesktop: 'right-3 size-8 rounded-md',
   modalCloseButtonMac: 'susura-mac-close-button left-3 size-[14px] cursor-default rounded-full border-[0.5px] border-[#FB1626] bg-[#FF5C60] p-0 text-[#802F31] shadow-none hover:bg-[#FF5C60] active:bg-[#D94D4F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF5C60]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-popover',
@@ -128,19 +137,19 @@ const layout = {
   settingsDescription: 'text-sm text-muted-foreground',
   settingsPermissionActions: 'flex flex-wrap items-center gap-2',
   transcriptPrimaryActions: 'flex min-w-0 flex-1 items-center justify-between gap-2',
-  transcriptSourceActions: 'flex min-w-0 items-center gap-2',
+  transcriptSourceActions: 'flex min-w-0 flex-1 items-center justify-center gap-2',
   transcriptPrimaryActionsVertical: 'flex min-h-0 min-w-0 flex-1 flex-col items-center justify-between gap-2',
   listeningSourceIndicators: 'flex shrink-0 items-center justify-center gap-2',
   listeningSourceIndicatorsVertical: 'flex shrink-0 flex-col items-center gap-1',
   listeningSourceIndicatorActive: 'border-emerald-600/50 bg-emerald-600/10 text-emerald-600 hover:bg-emerald-600/15 dark:border-emerald-500/50 dark:bg-emerald-500/10 dark:text-emerald-500 dark:hover:bg-emerald-500/15',
-  aiToolbarActions: 'flex w-full min-w-0 flex-1 items-center justify-between gap-2',
+  aiToolbarActions: 'flex w-full min-w-0 flex-1 items-center justify-start',
   aiResponseActions: 'ml-auto flex items-center gap-2',
   aiResponseActionsVertical: 'flex flex-col items-center gap-2',
   aiToolbarActionsVertical: 'flex min-h-0 min-w-0 flex-1 flex-col items-center justify-between gap-2',
   transcriptActions: 'ml-auto flex items-center gap-2',
   transcriptActionsVertical: 'flex flex-col items-center gap-2',
   sectionCollapseButton: 'size-8 shrink-0 rounded-md text-muted-foreground',
-  sectionPreviewTooltip: 'max-h-[min(28rem,70vh)] w-[clamp(18rem,25vw,36rem)] max-w-[calc(100vw-2rem)] overflow-y-auto overflow-x-hidden break-words p-4 text-left text-sm leading-6 [overflow-wrap:anywhere]',
+  sectionPreviewTooltip: 'susura-preview-tooltip pointer-events-auto max-h-[min(28rem,70vh)] w-[clamp(18rem,25vw,36rem)] max-w-[calc(100vw-2rem)] overflow-y-auto overflow-x-hidden break-words p-4 pr-3 text-left text-sm leading-6 [overflow-wrap:anywhere]',
   listeningButton: 'w-[140px]',
   listeningButtonVertical: 'w-full',
   sideToolbarRow: 'flex w-full items-center justify-center',
@@ -165,19 +174,33 @@ const layout = {
   sectionTitleCompact: 'section-title-compact',
   transcriptSectionBody: 'whitespace-pre-wrap px-3 py-3 text-sm leading-6',
   aiSectionBody: 'markdown-output px-3 py-3 text-sm leading-6',
-  promptTemplateTrigger: 'w-[256px] max-w-[256px] justify-between',
+  promptTemplateTrigger: 'prompt-template-trigger min-w-0 w-full justify-between',
+  promptTemplateSelectorRoot: 'prompt-template-selector-root flex min-w-0 flex-[0_1_50%] items-center gap-2',
+  promptTemplateSelectorPicker: 'prompt-template-selector-picker flex min-w-0 flex-1 items-center',
+  promptTemplateSelectorEdit: '',
+  promptTemplateSelectorRootVertical: 'flex min-h-0 min-w-0 flex-col items-center gap-2',
+  promptTemplateSelectorPickerVertical: 'flex flex-col items-center gap-2',
+  promptTemplateSelectorEditVertical: '',
   promptTemplateTriggerVertical: 'size-9 min-h-9 min-w-9 justify-center rounded-md px-0',
-  compactPromptTemplateTrigger: 'compact-prompt-template-trigger',
+  promptTemplateCompactIcon: 'prompt-template-trigger-icon',
   promptTemplateSearch: 'relative',
   promptTemplateSearchIcon: 'pointer-events-none absolute left-2 top-1/2 size-4 -translate-y-1/2 text-muted-foreground',
   promptTemplateSearchInput: 'pl-8',
-  promptTemplateList: 'max-h-64 overflow-y-auto',
-  promptTemplateItem: 'flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted aria-current:bg-muted aria-current:text-foreground',
+  pickerList: 'flex flex-col',
+  pickerListScrollable: 'max-h-64 overflow-y-auto',
+  pickerItem: 'flex h-8 w-full min-w-0 items-center gap-2 overflow-hidden rounded-md px-2 text-left text-sm text-muted-foreground outline-hidden hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground [&>span:last-child]:truncate',
+  pickerItemLabel: 'min-w-0 flex-1 truncate',
+  pickerCheckboxItem: 'justify-start',
+  pickerRow: 'group/picker-row relative min-w-0',
+  pickerRowButton: 'pr-8',
+  pickerRowDelete: 'absolute right-1 top-1/2 size-6 -translate-y-1/2 rounded-md text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/picker-row:opacity-100',
+  generalInstructionsDialog: 'susura-titlebar-centred-dialog grid h-[min(28rem,85vh)] w-[min(34rem,92vw)] max-w-[92vw] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-[34rem]',
+  generalInstructionsEditor: 'grid min-h-0 p-4',
   promptTemplateDialog: 'susura-titlebar-centred-dialog grid h-[85vh] w-[85vw] max-w-[85vw] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-[85vw]',
   promptTemplateHeader: 'flex h-12 items-center justify-center border-b border-border px-12',
   promptTemplateHeaderMac: '',
   promptTemplateEditor: 'grid min-h-0 flex-1 gap-0 md:grid-cols-[220px_minmax(0,1fr)]',
-  promptTemplateSidebar: 'flex flex-col gap-2 border-b border-border p-4 md:border-b-0 md:border-r',
+  promptTemplateSidebar: 'flex flex-col gap-3 border-b border-border p-4 md:border-b-0 md:border-r',
   promptTemplateEditorForm: 'grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3 p-4',
   promptTemplateBody: 'grid min-h-0 gap-4 md:grid-cols-2',
   promptTemplateAttachmentPane: 'grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-3',
@@ -189,13 +212,16 @@ const layout = {
   handleRoot: 'grid h-screen w-screen overflow-hidden place-items-center bg-transparent text-foreground',
   handleButton: 'susura-handle-button',
   handleButtonOpen: '',
-  placeholder: 'box-border flex h-full min-h-0 items-center justify-center overflow-y-auto whitespace-pre-wrap px-6 py-6 text-center text-sm text-muted-foreground'
+  placeholder: 'box-border flex h-full min-h-0 items-center justify-center overflow-y-auto whitespace-pre-wrap px-6 py-6 text-center text-sm text-muted-foreground',
+  startHereHint: 'susura-start-here-nudge pointer-events-none absolute left-2 top-4 z-20 flex w-[74%] max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-md border border-emerald-600/35 bg-background/95 px-3 py-2 text-left shadow-lg shadow-emerald-600/15 ring-1 ring-emerald-600/10 backdrop-blur',
+  startHereArrow: 'size-5 shrink-0 text-emerald-600 dark:text-emerald-500',
+  startHereDescription: 'min-w-0 max-w-full text-sm leading-5 text-foreground'
 };
 
 const transcriptPlaceholder = 'Your live transcript will appear here once you start listening.';
 const legacyAiResponsePlaceholder = 'The AI response will appear here after you stop listening with transcript text.';
-const shortAiResponsePlaceholder = 'Stop listening to send to AI.';
-const aiResponsePlaceholder = 'Auto Send is on.\nStop listening to send to AI.';
+const shortAiResponsePlaceholder = 'Stop listening to send transcript to AI';
+const aiResponsePlaceholder = 'Auto Send is on.\nStop listening to send transcript to AI';
 const aiResponseDisabledPlaceholder = 'Auto Send is off.\nManually send a transcript.';
 const defaultListenToMicrophone = false;
 const defaultListenToSystemAudio = true;
@@ -203,8 +229,9 @@ const defaultSendToAiWhenListeningStops = true;
 const defaultAutoCollapse = true;
 const defaultLlmModel: LlmModel = 'openai-codex/gpt-5.4-mini';
 const defaultLlmReasoning: LlmReasoning = 'off';
-const initialPermissionRequestKey = 'susura.initial-permission-requested';
 const autoCollapsePreferenceKey = 'susura.auto-collapse';
+const generalInstructionsPreferenceKey = 'susura.general-instructions';
+const defaultGeneralInstructions = 'Always answer in British English.';
 const handleDragThresholdPx = 6;
 const handleSnapVisualDurationMs = 280;
 const overlayOpenTooltipSuppressionMs = 700;
@@ -223,25 +250,27 @@ const handleIconStyle = {
 } as React.CSSProperties;
 
 type OverlayEdge = 'bottom' | 'left' | 'right' | 'top';
+type SettingsSection = 'general' | 'ai' | 'permissions';
 type TooltipSide = NonNullable<React.ComponentProps<typeof TooltipContent>['side']>;
 
 const starterPromptTemplates: PromptTemplate[] = [
   createPromptTemplate({
-    id: 'starter-summarise-phone-call',
-    name: 'Summarise this phone call',
-    prompt: 'Summarise this phone call clearly. Include the main points, decisions, open questions and follow-up actions.'
+    id: 'starter-answer-with-star',
+    name: 'STAR',
+    prompt: 'When the call transcript contains an interview question or a request for an example, help answer it using the STAR method. STAR means Situation, Task, Action and Result. Start with a concise direct answer, then structure the response as Situation: the context, Task: the responsibility or goal, Action: the specific steps taken, and Result: the measurable outcome or learning. Keep the answer natural enough to say aloud on a live call.'
   }),
   createPromptTemplate({
-    id: 'starter-extract-action-items',
-    name: 'Extract action items',
-    prompt: 'Extract action items from this transcript. Include owner, task and due date when available.'
+    id: 'starter-use-my-cv',
+    name: 'CV',
+    prompt: 'Use the attached or pasted CV as background context. When answering questions, prefer relevant experience, projects, achievements, tools and metrics from the CV. Do not invent roles, dates, qualifications or employers that are not present. If the CV is missing, say what CV detail would help answer better.'
   }),
   createPromptTemplate({
-    id: 'starter-draft-follow-up-email',
-    name: 'Draft follow-up email',
-    prompt: 'Draft a concise follow-up email based on this transcript. Include decisions, action items and next steps.'
+    id: 'starter-job-description',
+    name: 'PD',
+    prompt: 'Use the attached or pasted position description as role context. Prioritise the duties, selection criteria, required skills, seniority signals and organisation language in that position description when suggesting answers. Connect the live call question to the role requirements where useful. If the position description is missing, ask for the relevant role details.'
   })
 ];
+const defaultSelectedPromptTemplateIds = ['starter-use-my-cv', 'starter-job-description'];
 
 const llmModels: Array<{ label: string; value: LlmModel }> = [
   { label: '5.4 mini (Default)', value: 'openai-codex/gpt-5.4-mini' },
@@ -271,6 +300,7 @@ type TranscriptDownloadFormat = 'txt' | 'docx';
 type AiResponseSectionData = {
   id: string;
   isWaiting?: boolean;
+  request?: string;
   requestedAt: string | null;
   response: string;
 };
@@ -382,8 +412,12 @@ export function App() {
   const [permissionsStatus, setPermissionsStatus] = useState<PermissionsStatus | null>(null);
   const [parakeetStatus, setParakeetStatus] = useState<ParakeetStatus | null>(null);
   const [promptTemplates, setPromptTemplates] = useState<PromptTemplate[]>(starterPromptTemplates);
-  const [selectedPromptTemplateId, setSelectedPromptTemplateId] = useState<string | null>(null);
+  const [selectedPromptTemplateIds, setSelectedPromptTemplateIds] = useState<string[]>([]);
   const [isPromptTemplateDialogOpen, setIsPromptTemplateDialogOpen] = useState(false);
+  const [generalInstructions, setGeneralInstructions] = useState(() => (
+    window.localStorage.getItem(generalInstructionsPreferenceKey) ?? defaultGeneralInstructions
+  ));
+  const [isGeneralInstructionsDialogOpen, setIsGeneralInstructionsDialogOpen] = useState(false);
   const privateOverlayStatus = usePrivateOverlayStatus();
   const overlayEdge = getPrivateOverlayHandleEdge(privateOverlayStatus);
   const outputRef = useRef<HTMLDivElement>(null);
@@ -404,7 +438,13 @@ export function App() {
     || transcription.llmOutput === shortAiResponsePlaceholder;
   const aiResponseText = getAiResponseText(transcription.llmResponses);
   const hasAiResponse = aiResponseText.length > 0;
-  const selectedPromptTemplate = promptTemplates.find((template) => template.id === selectedPromptTemplateId) ?? null;
+  const selectedPromptTemplates = selectedPromptTemplateIds
+    .map((id) => promptTemplates.find((template) => template.id === id))
+    .filter((template): template is PromptTemplate => Boolean(template))
+    .slice()
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const selectedPromptTemplatePrompt = selectedPromptTemplates.map((template) => template.prompt).join('\n\n');
+  const selectedPromptTemplateAttachments = selectedPromptTemplates.flatMap((template) => template.attachments ?? []);
 
   useSuppressTooltipsAfterOverlayOpen(Boolean(privateOverlayStatus?.overlay.visible || privateOverlayStatus?.overlayWindowVisible));
 
@@ -469,25 +509,6 @@ export function App() {
     void loadPromptTemplates();
   }, []);
 
-  useEffect(() => {
-    if (!permissionsStatus || window.localStorage.getItem(initialPermissionRequestKey) === '1') {
-      return;
-    }
-
-    const initialPermissions = permissionsStatus.permissions.filter((permission) => {
-      return permission.status === 'not-determined';
-    });
-
-    if (initialPermissions.length === 0) {
-      return;
-    }
-
-    window.localStorage.setItem(initialPermissionRequestKey, '1');
-
-    void Promise.all(initialPermissions.map((permission) => requestPermission(permission.id)))
-      .then(() => refreshPermissionsStatus());
-  }, [permissionsStatus]);
-
   async function refreshPermissionsStatus() {
     const bridge = getPermissionsBridge();
 
@@ -505,6 +526,12 @@ export function App() {
             description: 'Required when listening to speaker audio output.',
             id: 'screen-recording',
             label: 'Screen & System Audio Recording',
+            status: 'unknown'
+          },
+          {
+            description: 'Required when listening to audio from other apps.',
+            id: 'system-audio',
+            label: 'System Audio',
             status: 'unknown'
           }
         ],
@@ -539,14 +566,15 @@ export function App() {
     const state = await getSettingsBridge()?.promptTemplates?.list();
     applyPromptTemplateState(state ?? {
       ok: true,
-      selectedTemplateId: null,
+      selectedTemplateIds: defaultSelectedPromptTemplateIds,
       templates: starterPromptTemplates
     });
   }
 
   function applyPromptTemplateState(state: PromptTemplateState) {
-    setPromptTemplates(state.templates.length > 0 ? state.templates : starterPromptTemplates);
-    setSelectedPromptTemplateId(state.selectedTemplateId);
+    const templates = mergeStarterPromptTemplates(state.templates);
+    setPromptTemplates(templates);
+    setSelectedPromptTemplateIds(getSelectedPromptTemplateIds(state, templates));
   }
 
   async function savePromptTemplate(template: PromptTemplate) {
@@ -568,7 +596,7 @@ export function App() {
 
     if (!bridge) {
       setPromptTemplates((templates) => templates.filter((template) => template.id !== id));
-      setSelectedPromptTemplateId((selectedId) => (selectedId === id ? null : selectedId));
+      setSelectedPromptTemplateIds((selectedIds) => selectedIds.filter((selectedId) => selectedId !== id));
       return;
     }
 
@@ -587,26 +615,25 @@ export function App() {
     return response.ok ? response.attachments : [];
   }
 
-  async function selectPromptTemplate(id: string | null) {
+  async function selectPromptTemplates(ids: string[]) {
     const bridge = getSettingsBridge()?.promptTemplates;
+    const nextIds = ids.filter((id, index) => (
+      ids.indexOf(id) === index
+      && promptTemplates.some((template) => template.id === id)
+    ));
 
-    setSelectedPromptTemplateId(id);
+    setSelectedPromptTemplateIds(nextIds);
 
     if (!bridge) {
       return;
     }
 
-    const state = await bridge.setSelected(id);
-    const templates = state.templates.length > 0 ? state.templates : starterPromptTemplates;
-    const selectedTemplateId = id && (
-      promptTemplates.some((template) => template.id === id)
-      || templates.some((template) => template.id === id)
-    )
-      ? id
-      : state.selectedTemplateId;
+    const state = await bridge.setSelected(nextIds);
+    const templates = mergeStarterPromptTemplates(state.templates);
+    const selectedTemplateIds = nextIds.filter((id) => templates.some((template) => template.id === id));
 
     setPromptTemplates(templates);
-    setSelectedPromptTemplateId(selectedTemplateId);
+    setSelectedPromptTemplateIds(selectedTemplateIds.length > 0 ? selectedTemplateIds : getSelectedPromptTemplateIds(state, templates));
   }
 
   async function copyTranscript() {
@@ -654,32 +681,52 @@ export function App() {
     window.localStorage.setItem(autoCollapsePreferenceKey, autoCollapse ? '1' : '0');
   }
 
+  function saveGeneralInstructions(instructions: string) {
+    const nextInstructions = instructions.trim() || defaultGeneralInstructions;
+    setGeneralInstructions(nextInstructions);
+    window.localStorage.setItem(generalInstructionsPreferenceKey, nextInstructions);
+  }
+
   function askAiFromTranscript() {
     void transcription.ask({
+      generalInstructionsText: generalInstructions,
       llmModel,
       llmReasoning,
-      promptTemplateAttachments: selectedPromptTemplate?.attachments,
-      promptTemplateText: selectedPromptTemplate?.prompt
+      promptTemplateAttachments: selectedPromptTemplateAttachments,
+      promptTemplateText: selectedPromptTemplatePrompt
     });
   }
 
   function askAiFromSpecificTranscript(transcript: string) {
     void transcription.ask({
+      generalInstructionsText: generalInstructions,
       llmModel,
       llmReasoning,
-      promptTemplateAttachments: selectedPromptTemplate?.attachments,
-      promptTemplateText: selectedPromptTemplate?.prompt,
+      promptTemplateAttachments: selectedPromptTemplateAttachments,
+      promptTemplateText: selectedPromptTemplatePrompt,
       transcript
+    });
+  }
+
+  function askAiFromManualPrompt(prompt: string) {
+    void transcription.ask({
+      generalInstructionsText: generalInstructions,
+      llmModel,
+      llmReasoning,
+      promptTemplateAttachments: selectedPromptTemplateAttachments,
+      promptTemplateText: selectedPromptTemplatePrompt,
+      transcript: prompt
     });
   }
 
   function toggleListening() {
     if (isListening) {
       void transcription.stop({
+        generalInstructionsText: generalInstructions,
         llmModel,
         llmReasoning,
-        promptTemplateAttachments: selectedPromptTemplate?.attachments,
-        promptTemplateText: selectedPromptTemplate?.prompt,
+        promptTemplateAttachments: selectedPromptTemplateAttachments,
+        promptTemplateText: selectedPromptTemplatePrompt,
         sendToLlm: sendToAiWhenListeningStops
       });
       return;
@@ -704,7 +751,8 @@ export function App() {
     setLlmModel(defaultLlmModel);
     setLlmReasoning(defaultLlmReasoning);
     setPromptTemplates(starterPromptTemplates);
-    setSelectedPromptTemplateId(null);
+    setSelectedPromptTemplateIds(defaultSelectedPromptTemplateIds);
+    setGeneralInstructions(defaultGeneralInstructions);
     await getSettingsBridge()?.reset();
   }
 
@@ -742,6 +790,7 @@ export function App() {
               llmOutputRef={llmOutputRef}
               missingSelectedPermissions={missingSelectedPermissions}
               onAskAiFromTranscript={askAiFromTranscript}
+              onAskAiFromManualPrompt={askAiFromManualPrompt}
               onAskAiFromSpecificTranscript={askAiFromSpecificTranscript}
               onClearAiResponses={clearAiResponses}
               onClearTranscript={clearTranscript}
@@ -749,15 +798,16 @@ export function App() {
               onCopyTranscript={copyTranscript}
               onDownloadAiResponse={downloadAiResponse}
               onDownloadTranscript={downloadTranscript}
+              onOpenGeneralInstructions={() => setIsGeneralInstructionsDialogOpen(true)}
               onOpenPromptTemplateSettings={() => setIsPromptTemplateDialogOpen(true)}
               onOpenPermissionSettings={() => setIsSettingsOpen(true)}
-              onSelectPromptTemplate={(id) => void selectPromptTemplate(id)}
+              onSelectPromptTemplates={(ids) => void selectPromptTemplates(ids)}
               onSetListenToMicrophone={setListenToMicrophone}
               onSetListenToSystemAudio={setListenToSystemAudio}
               outputRef={outputRef}
               promptTemplates={promptTemplates}
               sendToAiWhenListeningStops={sendToAiWhenListeningStops}
-              selectedPromptTemplateId={selectedPromptTemplateId}
+              selectedPromptTemplateIds={selectedPromptTemplateIds}
               setSendToAiWhenListeningStops={setSendToAiWhenListeningStops}
               toggleListening={toggleListening}
               transcription={transcription}
@@ -794,6 +844,13 @@ export function App() {
           open={isPromptTemplateDialogOpen}
           templates={promptTemplates}
         />
+        <GeneralInstructionsDialog
+          instructions={generalInstructions}
+          isMac={isMac}
+          onOpenChange={setIsGeneralInstructionsDialogOpen}
+          onSave={saveGeneralInstructions}
+          open={isGeneralInstructionsDialogOpen}
+        />
         </TooltipProvider>
       </main>
       <TooltipProvider>
@@ -825,6 +882,9 @@ function OnboardingSurface() {
   const parakeetRef = useRef<HTMLElement | null>(null);
   const aiRef = useRef<HTMLElement | null>(null);
   const hasInitialisedTranscriptionModelRef = useRef(false);
+  const hasAutoStartedParakeetDownloadRef = useRef(false);
+  const autoSelectingReadyModelRef = useRef<LocalTranscriptionModelId | null>(null);
+  const autoStartedLocalModelRef = useRef<LocalTranscriptionModelId | null>(null);
   const runtimeContext = useRuntimeContext();
   const appName = runtimeContext?.appName ?? 'Susura';
   const appIconUrl = runtimeContext?.appChannel === 'beta' || runtimeContext?.appChannel === 'dev'
@@ -916,6 +976,10 @@ function OnboardingSurface() {
     }
   }
 
+  function selectTranscriptionModel(modelId: LocalTranscriptionModelId) {
+    setSelectedTranscriptionModelId(modelId);
+  }
+
   async function signInWithChatGpt() {
     setIsChatGptSigningIn(true);
 
@@ -929,12 +993,69 @@ function OnboardingSurface() {
   }
 
   async function finish() {
+    const autoStartedModelId = autoStartedLocalModelRef.current;
+
+    if (autoStartedModelId && autoStartedModelId !== selectedTranscriptionModelId) {
+      autoStartedLocalModelRef.current = null;
+
+      try {
+        await getSettingsBridge()?.parakeet?.remove(autoStartedModelId);
+      } catch (error) {
+        console.error('Failed to remove unused auto-downloaded transcription model:', error);
+      }
+    }
+
     await getSettingsBridge()?.onboarding?.complete();
   }
 
   const missingItems = getMissingOnboardingItems(status);
   const piReady = Boolean(status?.pi.connected);
+  const visiblePermissions = getVisiblePermissionItems(status?.permissions);
   const contentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const recommendedModelId = status?.transcription.recommendedModel?.id;
+
+    if (
+      hasAutoStartedParakeetDownloadRef.current
+      || !status
+      || status.transcription.recommended === 'cloud'
+      || !recommendedModelId
+      || status.transcription.autoDownloadModel === false
+      || status.transcription.autoDownloadParakeet === false
+      || status.parakeet.status !== 'missing'
+    ) {
+      return;
+    }
+
+    hasAutoStartedParakeetDownloadRef.current = true;
+    autoStartedLocalModelRef.current = recommendedModelId;
+    setSelectedTranscriptionModelId(recommendedModelId);
+    void downloadParakeet(recommendedModelId);
+  }, [status]);
+
+  useEffect(() => {
+    if (
+      !status
+      || status.parakeet.status !== 'installed'
+      || status.parakeet.modelId !== selectedTranscriptionModelId
+      || status.selectedLocalTranscriptionModel === selectedTranscriptionModelId
+      || autoSelectingReadyModelRef.current === selectedTranscriptionModelId
+    ) {
+      return;
+    }
+
+    autoSelectingReadyModelRef.current = selectedTranscriptionModelId;
+
+    void getSettingsBridge()?.parakeet?.setModel(selectedTranscriptionModelId)
+      .then(() => refresh())
+      .catch((error) => {
+        console.error('Failed to use ready transcription model:', error);
+      })
+      .finally(() => {
+        autoSelectingReadyModelRef.current = null;
+      });
+  }, [selectedTranscriptionModelId, status]);
 
   useEffect(() => {
     const element = contentRef.current;
@@ -977,23 +1098,25 @@ function OnboardingSurface() {
           <h1 className="text-lg font-semibold">Welcome to {appName}</h1>
         </header>
 
-        <OnboardingPanel sectionRef={permissionsRef} title="Permissions">
-          <div className="grid">
-            {status?.permissions.permissions.map((permission) => (
-              <PermissionSetupRow
-                key={permission.id}
-                onChange={() => void requestOnboardingPermission(permission.id)}
-                permission={permission}
-              />
-            ))}
-          </div>
-        </OnboardingPanel>
+        {visiblePermissions.length > 0 ? (
+          <OnboardingPanel sectionRef={permissionsRef} title="Permissions">
+            <div className="grid">
+              {visiblePermissions.map((permission) => (
+                <PermissionSetupRow
+                  key={permission.id}
+                  onChange={() => void requestOnboardingPermission(permission.id)}
+                  permission={permission}
+                />
+              ))}
+            </div>
+          </OnboardingPanel>
+        ) : null}
 
         <OnboardingPanel sectionRef={parakeetRef} title="Transcription Model">
 	          <TranscriptionModelRow
 	            onCancel={() => void getSettingsBridge()?.parakeet?.cancelDownload()}
 	            onDownload={(modelId) => void downloadParakeet(modelId)}
-	            onSelectModel={setSelectedTranscriptionModelId}
+	            onSelectModel={selectTranscriptionModel}
 	            selectedModelId={selectedTranscriptionModelId}
 	            status={status}
 	          />
@@ -1072,7 +1195,7 @@ function getMissingOnboardingItems(status: OnboardingStatus | null) {
   }
 
   const missing = [];
-  const missingPermissions = status.permissions.permissions.filter((permission) => (
+  const missingPermissions = getVisiblePermissionItems(status.permissions).filter((permission) => (
     permission.status !== 'granted' && permission.status !== 'unsupported'
   ));
 
@@ -1173,21 +1296,22 @@ function TranscriptionModelRow({
   const isSelectedModelReady = status?.parakeet.status === 'installed' && status.parakeet.modelId === selectedModelId;
   const isSelectedModelInUse = isSelectedModelReady && status?.selectedLocalTranscriptionModel === selectedModelId;
   const canDownload = Boolean(status && !isDownloading && status.transcription.recommended !== 'cloud');
-  const canUse = canDownload && !isSelectedModelInUse;
+  const canUse = canDownload && !isSelectedModelReady && !isSelectedModelInUse;
   const recommendedModelId = status?.transcription.recommendedModel?.id;
   const showRecommendedBadge = selectedModelId === recommendedModelId;
   const recommendedTooltip = getRecommendedTranscriptionModelTooltip(status);
   const selectedModelLabel = getLocalTranscriptionModelLabel(selectedModelId);
+  const downloadProgress = getLocalModelDownloadProgressLabel(status?.parakeet.progress);
 
   return (
-    <div className="grid min-h-10 grid-cols-[minmax(0,1fr)_11.5rem] items-center gap-2">
+    <div className="grid min-h-10 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
       <div className="flex min-w-0 items-center gap-2">
         <Select
           name="transcription-model"
           value={selectedModelId}
           onValueChange={(value) => onSelectModel(value as LocalTranscriptionModelId)}
         >
-          <SelectTrigger aria-label="Transcription model" className="w-44 min-w-0" title={selectedModelLabel}>
+          <SelectTrigger aria-label="Transcription model" className="w-[9.5rem] min-w-0" title={selectedModelLabel}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent className="min-w-56">
@@ -1203,7 +1327,7 @@ function TranscriptionModelRow({
         {showRecommendedBadge ? (
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="shrink-0 rounded-full border border-emerald-600/30 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+              <span className="shrink-0 rounded-full border border-amber-500/35 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 shadow-sm dark:border-amber-400/35 dark:bg-amber-400/10 dark:text-amber-300">
                 Recommended
               </span>
             </TooltipTrigger>
@@ -1213,10 +1337,10 @@ function TranscriptionModelRow({
           </Tooltip>
         ) : null}
       </div>
-      <div className="flex w-[11.5rem] items-center justify-end gap-2">
+      <div className="flex min-w-0 items-center justify-end gap-2">
         {isDownloading ? (
-          <span aria-live="polite" className="w-20 text-right text-xs tabular-nums text-muted-foreground">
-            Downloading {status?.parakeet.progress?.percent ?? 0}%
+          <span aria-label={downloadProgress.accessibleLabel} aria-live="polite" className="min-w-0 flex-1 truncate text-right text-xs tabular-nums text-muted-foreground" title={downloadProgress.accessibleLabel}>
+            {downloadProgress.label}
           </span>
         ) : isSelectedModelReady ? (
           <span aria-live="polite" className="inline-flex w-20 items-center justify-end gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">
@@ -1226,7 +1350,7 @@ function TranscriptionModelRow({
         ) : null}
         {isDownloading ? (
           <Button onClick={onCancel} size="sm" type="button" variant="outline">Cancel</Button>
-        ) : (
+        ) : isSelectedModelReady ? null : (
           <Button disabled={!canUse} onClick={() => onDownload(selectedModelId)} size="sm" type="button">
             Use
           </Button>
@@ -1234,6 +1358,34 @@ function TranscriptionModelRow({
       </div>
     </div>
   );
+}
+
+function getLocalModelDownloadProgressLabel(progress: ParakeetStatus['progress']) {
+  const percent = progress?.percent ?? 0;
+
+  if (!progress) {
+    return {
+      accessibleLabel: `Downloading ${percent}%`,
+      label: `${percent}%`
+    };
+  }
+
+  if (typeof progress.totalBytes === 'number' && progress.totalBytes > 0) {
+    const downloaded = formatBytes(progress.downloadedBytes);
+    const total = formatBytes(progress.totalBytes);
+
+    return {
+      accessibleLabel: `Downloading ${percent}% · ${downloaded} of ${total}`,
+      label: `${percent}% · ${downloaded}/${total}`
+    };
+  }
+
+  const downloaded = formatBytes(progress.downloadedBytes);
+
+  return {
+    accessibleLabel: `Downloading ${percent}% · ${downloaded}`,
+    label: `${percent}% · ${downloaded}`
+  };
 }
 
 function getRecommendedTranscriptionModelTooltip(status: OnboardingStatus | null) {
@@ -1277,12 +1429,29 @@ function PermissionSetupRow({
 }) {
   const ready = permission.status === 'granted' || permission.status === 'unsupported';
   const statusLabel = getPermissionStatusLabel(permission.status);
+  const macosPermissionName = getMacosPermissionName(permission.id);
 
   return (
     <div className={`${showDivider ? 'border-b border-border/70 last:border-b-0' : ''} text-sm`.trim()}>
       <div className="grid min-h-10 grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
-        <div className="min-w-0">
-          <h3 className="text-sm font-medium">{permission.label}</h3>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <h3 className="truncate text-sm font-medium">{permission.label}</h3>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                aria-label={`${permission.label} permission info`}
+                className="inline-flex size-6 shrink-0 cursor-default items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                type="button"
+              >
+                <InfoIcon className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <span className="block max-w-72">
+                {permission.description} macOS permission: {macosPermissionName}.
+              </span>
+            </TooltipContent>
+          </Tooltip>
         </div>
         <div className="flex items-center gap-1.5">
           <span className={`rounded-full border px-2 py-1 text-xs font-medium ${ready ? 'border-emerald-600/35 text-emerald-700 dark:text-emerald-400' : 'border-destructive/35 text-destructive'}`}>
@@ -1297,6 +1466,18 @@ function PermissionSetupRow({
       </div>
     </div>
   );
+}
+
+function getMacosPermissionName(permissionId: PermissionItem['id']) {
+  if (permissionId === 'screen-recording') {
+    return 'ScreenCapture';
+  }
+
+  if (permissionId === 'system-audio') {
+    return 'AudioCapture';
+  }
+
+  return 'Microphone';
 }
 
 function getPermissionStatusLabel(status: PermissionItem['status']) {
@@ -1869,6 +2050,7 @@ function HomePage({
   llmOutputRef,
   missingSelectedPermissions,
   onAskAiFromTranscript,
+  onAskAiFromManualPrompt,
   onAskAiFromSpecificTranscript,
   onClearAiResponses,
   onClearTranscript,
@@ -1876,15 +2058,16 @@ function HomePage({
   onCopyTranscript,
   onDownloadAiResponse,
   onDownloadTranscript,
+  onOpenGeneralInstructions,
   onOpenPermissionSettings,
   onOpenPromptTemplateSettings,
-  onSelectPromptTemplate,
+  onSelectPromptTemplates,
   onSetListenToMicrophone,
   onSetListenToSystemAudio,
   outputRef,
   promptTemplates,
   sendToAiWhenListeningStops,
-  selectedPromptTemplateId,
+  selectedPromptTemplateIds,
   setSendToAiWhenListeningStops,
   toggleListening,
   transcription
@@ -1902,6 +2085,7 @@ function HomePage({
   llmOutputRef: RefObject<HTMLDivElement | null>;
   missingSelectedPermissions: PermissionItem[];
   onAskAiFromTranscript: () => void;
+  onAskAiFromManualPrompt: (prompt: string) => void;
   onAskAiFromSpecificTranscript: (transcript: string) => void;
   onClearAiResponses: () => void;
   onClearTranscript: () => void;
@@ -1909,15 +2093,16 @@ function HomePage({
   onCopyTranscript: () => void;
   onDownloadAiResponse: (format: TranscriptDownloadFormat) => void;
   onDownloadTranscript: (format: TranscriptDownloadFormat) => void;
+  onOpenGeneralInstructions: () => void;
   onOpenPermissionSettings: () => void;
   onOpenPromptTemplateSettings: () => void;
-  onSelectPromptTemplate: (id: string | null) => void;
+  onSelectPromptTemplates: (ids: string[]) => void;
   onSetListenToMicrophone: (listen: boolean) => void;
   onSetListenToSystemAudio: (listen: boolean) => void;
   outputRef: RefObject<HTMLDivElement | null>;
   promptTemplates: PromptTemplate[];
   sendToAiWhenListeningStops: boolean;
-  selectedPromptTemplateId: string | null;
+  selectedPromptTemplateIds: string[];
   setSendToAiWhenListeningStops: (sendToAi: boolean) => void;
   toggleListening: () => void;
   transcription: ReturnType<typeof useLiveTranscription>;
@@ -1928,6 +2113,9 @@ function HomePage({
   const [collapsedAiResponseIds, setCollapsedAiResponseIds] = useState<Set<string>>(() => new Set());
   const [transcriptCollapseOverrides, setTranscriptCollapseOverrides] = useState<CollapseOverrides>({});
   const [aiResponseCollapseOverrides, setAiResponseCollapseOverrides] = useState<CollapseOverrides>({});
+  const [manualAiPrompt, setManualAiPrompt] = useState('');
+  const [manualAiPromptMaxHeight, setManualAiPromptMaxHeight] = useState<number | null>(null);
+  const manualAiPromptRef = useRef<HTMLTextAreaElement | null>(null);
   const visibleTranscriptSessions = showScrollFixture
     ? scrollFixtureTranscriptSessions
     : transcription.sessions;
@@ -1954,9 +2142,7 @@ function HomePage({
         ? 'Start Listening'
         : 'Preparing...';
   const autoSendLabel = 'Auto Send';
-  const autoSendTooltip = sendToAiWhenListeningStops
-    ? 'Auto Send is on. Susura will send the transcript to AI when listening stops.'
-    : 'Auto Send is off. Send transcripts to AI manually.';
+  const autoSendTooltip = 'Sends the transcript to AI when listening stops.';
   const hasTranscriptSessions = visibleTranscriptSessions.length > 0;
   const isVerticalToolbar = isVerticalToolbarEdge(edge);
   const bottomActionTooltipSide = getButtonTooltipSideForEdge(edge);
@@ -1964,6 +2150,53 @@ function HomePage({
   const activeAiResponseId = visibleAiResponses.at(-1)?.id ?? null;
   const lastScrolledTranscriptSessionIdRef = useRef<string | null>(null);
   const lastScrolledAiResponseIdRef = useRef<string | null>(null);
+  const aiResponsePanelRef = useRef<HTMLElement | null>(null);
+  const promptTemplateEditAnchorRef = useRef<HTMLDivElement | null>(null);
+  const setAiResponsePanelRef = (node: HTMLElement | null) => {
+    aiResponsePanelRef.current = node;
+  };
+  const setPromptTemplateEditAnchorRef = (node: HTMLDivElement | null) => {
+    promptTemplateEditAnchorRef.current = node;
+  };
+
+  useLayoutEffect(() => {
+    const panel = aiResponsePanelRef.current;
+
+    if (!panel) {
+      setManualAiPromptMaxHeight(null);
+      return;
+    }
+
+    const updateManualPromptMaxHeight = () => {
+      setManualAiPromptMaxHeight(Math.max(44, Math.floor(panel.getBoundingClientRect().height / 2)));
+    };
+    const resizeObserver = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(updateManualPromptMaxHeight);
+
+    updateManualPromptMaxHeight();
+    resizeObserver?.observe(panel);
+    window.addEventListener('resize', updateManualPromptMaxHeight);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', updateManualPromptMaxHeight);
+    };
+  }, [edge]);
+
+  useLayoutEffect(() => {
+    const input = manualAiPromptRef.current;
+
+    if (!input) {
+      return;
+    }
+
+    input.style.height = 'auto';
+    const maxHeight = manualAiPromptMaxHeight ?? Number.POSITIVE_INFINITY;
+    const nextHeight = Math.min(input.scrollHeight, maxHeight);
+    input.style.height = `${nextHeight}px`;
+    input.style.overflowY = input.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  }, [manualAiPrompt, manualAiPromptMaxHeight]);
 
   useLayoutEffect(() => {
     setCollapsedTranscriptIds((current) => reconcileCollapsedSectionIds({
@@ -2059,6 +2292,26 @@ function HomePage({
     updateHistoryVirtualGeometry(event.currentTarget, activeAiResponseId, 'data-ai-response-id');
   }
 
+  function sendManualAiPrompt() {
+    const prompt = manualAiPrompt.trim();
+
+    if (!prompt || transcription.isAsking) {
+      return;
+    }
+
+    onAskAiFromManualPrompt(prompt);
+    setManualAiPrompt('');
+  }
+
+  function handleManualAiPromptKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== 'Enter' || event.shiftKey) {
+      return;
+    }
+
+    event.preventDefault();
+    sendManualAiPrompt();
+  }
+
   return (
     <div className={layout.form}>
       <div
@@ -2066,6 +2319,8 @@ function HomePage({
         className={getHomeContentClassName(edge)}
         data-home-toolbar-edge={edge}
       >
+        <HomePanelTitleBars />
+
         {!isVerticalToolbar || isLeadingToolbarEdge(edge) ? (
           <HomeActionToolbar
             autoSendLabel={autoSendLabel}
@@ -2078,13 +2333,15 @@ function HomePage({
             listenToMicrophone={listenToMicrophone}
             listenToSystemAudio={listenToSystemAudio}
             onOpenPermissionSettings={onOpenPermissionSettings}
+            onOpenGeneralInstructions={onOpenGeneralInstructions}
             onOpenPromptTemplateSettings={onOpenPromptTemplateSettings}
-            onSelectPromptTemplate={onSelectPromptTemplate}
+            onSelectPromptTemplates={onSelectPromptTemplates}
             onSetListenToMicrophone={onSetListenToMicrophone}
             onSetListenToSystemAudio={onSetListenToSystemAudio}
+            promptTemplateEditAnchorRef={setPromptTemplateEditAnchorRef}
             promptTemplates={promptTemplates}
             sendToAiWhenListeningStops={sendToAiWhenListeningStops}
-            selectedPromptTemplateId={selectedPromptTemplateId}
+            selectedPromptTemplateIds={selectedPromptTemplateIds}
             setSendToAiWhenListeningStops={setSendToAiWhenListeningStops}
             startButtonLabel={startButtonLabel}
             toggleListening={toggleListening}
@@ -2112,7 +2369,13 @@ function HomePage({
             onScroll={handleTranscriptPanelScroll}
           >
             {isTranscriptPanelPlaceholder ? (
-              transcriptPlaceholder
+              <>
+                {transcriptPlaceholder}
+                <StartHereHint
+                  listenToMicrophone={listenToMicrophone}
+                  listenToSystemAudio={listenToSystemAudio}
+                />
+              </>
             ) : !hasTranscriptSessions ? (
               transcription.output
             ) : (
@@ -2142,7 +2405,11 @@ function HomePage({
           ) : null}
         </section>
 
-        <section className={isVerticalToolbar ? layout.panelWithBottomActions : layout.panelPlain} aria-label="AI response panel">
+        <section
+          ref={setAiResponsePanelRef}
+          className={layout.aiPanelWithManualPrompt}
+          aria-label="AI response panel"
+        >
           <div
             ref={llmOutputRef}
             id="llm-output"
@@ -2160,6 +2427,32 @@ function HomePage({
                 responses={visibleAiResponses}
               />
             ) : null}
+          </div>
+          <div className={layout.aiManualPromptBar}>
+            <Textarea
+              ref={manualAiPromptRef}
+              aria-label="Ask AI"
+              className={layout.aiManualPromptInput}
+              disabled={transcription.isAsking}
+              onChange={(event) => setManualAiPrompt(event.target.value)}
+              onKeyDown={handleManualAiPromptKeyDown}
+              placeholder="Ask anything"
+              rows={1}
+              style={manualAiPromptMaxHeight === null ? undefined : { maxHeight: `${manualAiPromptMaxHeight}px` }}
+              value={manualAiPrompt}
+            />
+            <TooltipButton
+              aria-label="Send manual prompt to AI"
+              disabled={!manualAiPrompt.trim() || transcription.isAsking}
+              onClick={sendManualAiPrompt}
+              size="icon-lg"
+              tooltip="Send manual prompt to AI"
+              tooltipSide={bottomActionTooltipSide}
+              type="button"
+              variant="outline"
+            >
+              <SendIcon />
+            </TooltipButton>
           </div>
           {isVerticalToolbar ? (
             <div className={layout.panelBottomActions} data-toolbar-section="ai-bottom">
@@ -2204,18 +2497,139 @@ function HomePage({
             listenToMicrophone={listenToMicrophone}
             listenToSystemAudio={listenToSystemAudio}
             onOpenPermissionSettings={onOpenPermissionSettings}
+            onOpenGeneralInstructions={onOpenGeneralInstructions}
             onOpenPromptTemplateSettings={onOpenPromptTemplateSettings}
-            onSelectPromptTemplate={onSelectPromptTemplate}
+            onSelectPromptTemplates={onSelectPromptTemplates}
             onSetListenToMicrophone={onSetListenToMicrophone}
             onSetListenToSystemAudio={onSetListenToSystemAudio}
+            promptTemplateEditAnchorRef={setPromptTemplateEditAnchorRef}
             promptTemplates={promptTemplates}
             sendToAiWhenListeningStops={sendToAiWhenListeningStops}
-            selectedPromptTemplateId={selectedPromptTemplateId}
+            selectedPromptTemplateIds={selectedPromptTemplateIds}
             setSendToAiWhenListeningStops={setSendToAiWhenListeningStops}
             startButtonLabel={startButtonLabel}
             toggleListening={toggleListening}
           />
         ) : null}
+      </div>
+    </div>
+  );
+}
+
+function getStartListeningSourceDescription({
+  listenToMicrophone,
+  listenToSystemAudio
+}: {
+  listenToMicrophone: boolean;
+  listenToSystemAudio: boolean;
+}) {
+  if (listenToMicrophone && listenToSystemAudio) {
+    return 'Click Start Listening while playing something through your speakers, headphones, or speaking into your microphone.';
+  }
+
+  if (listenToMicrophone) {
+    return 'Click Start Listening while speaking into your microphone.';
+  }
+
+  if (listenToSystemAudio) {
+    return 'Click Start Listening while playing something through your speakers or headphones.';
+  }
+
+  return 'Select Input, Output or both before starting.';
+}
+
+function StartHereHint({
+  listenToMicrophone,
+  listenToSystemAudio
+}: {
+  listenToMicrophone: boolean;
+  listenToSystemAudio: boolean;
+}) {
+  return (
+    <div className={layout.startHereHint} aria-label="Start Listening hint">
+      <ArrowUpIcon className={layout.startHereArrow} aria-hidden="true" />
+      <div className={layout.startHereDescription}>
+        {getStartListeningSourceDescription({ listenToMicrophone, listenToSystemAudio })}
+      </div>
+    </div>
+  );
+}
+
+function GeneralInstructionsDialog({
+  instructions,
+  isMac,
+  onOpenChange,
+  onSave,
+  open
+}: {
+  instructions: string;
+  isMac: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSave: (instructions: string) => void;
+  open: boolean;
+}) {
+  const [draft, setDraft] = useState(instructions);
+
+  useEffect(() => {
+    if (open) {
+      setDraft(instructions);
+    }
+  }, [instructions, open]);
+
+  function saveDraft() {
+    onSave(draft);
+    onOpenChange(false);
+  }
+
+  return (
+    <Dialog modal={false} open={open} onOpenChange={onOpenChange}>
+      {open ? <div aria-hidden="true" className={layout.modalBlurBackdrop} /> : null}
+      <DialogContent
+        className={layout.generalInstructionsDialog}
+        showCloseButton={false}
+      >
+        <PlatformDialogCloseButton isMac={isMac} label="Close general instructions" />
+        <DialogHeader className={`${layout.promptTemplateHeader} ${isMac ? layout.promptTemplateHeaderMac : ''}`}>
+          <DialogTitle className={layout.modalHeaderTitle}>Instructions</DialogTitle>
+          <DialogDescription className="sr-only">
+            Add preferences you want every AI reply to follow, like spelling, tone, format or how concise to be.
+          </DialogDescription>
+        </DialogHeader>
+        <div className={layout.generalInstructionsEditor}>
+          <Field className="min-h-0">
+            <p className={layout.settingsDescription}>
+              Add preferences you want every AI reply to follow, like spelling, tone, format or how concise to be.
+            </p>
+            <Textarea
+              aria-label="Instructions"
+              className="min-h-0 flex-1 resize-none"
+              id="general-instructions"
+              onChange={(event) => setDraft(event.target.value)}
+              value={draft}
+            />
+          </Field>
+        </div>
+        <DialogFooter className={layout.promptTemplateFooter}>
+          <Button onClick={() => setDraft(defaultGeneralInstructions)} type="button" variant="outline">
+            Restore default
+          </Button>
+          <Button onClick={saveDraft} type="button">
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function HomePanelTitleBars() {
+  return (
+    <div className={layout.panelTitleBars} aria-label="Panel titles">
+      <div className={layout.panelTitleBar}>
+        <span className={layout.panelTitleBarTitle}>Transcript</span>
+      </div>
+      <div className={layout.panelTitleBar}>
+        <span className={layout.panelTitleBarTitle}>AI Chat</span>
       </div>
     </div>
   );
@@ -2231,14 +2645,16 @@ function HomeActionToolbar({
   isListening,
   listenToMicrophone,
   listenToSystemAudio,
+  onOpenGeneralInstructions,
   onOpenPermissionSettings,
   onOpenPromptTemplateSettings,
-  onSelectPromptTemplate,
+  onSelectPromptTemplates,
   onSetListenToMicrophone,
   onSetListenToSystemAudio,
+  promptTemplateEditAnchorRef,
   promptTemplates,
   sendToAiWhenListeningStops,
-  selectedPromptTemplateId,
+  selectedPromptTemplateIds,
   setSendToAiWhenListeningStops,
   startButtonLabel,
   toggleListening
@@ -2252,14 +2668,16 @@ function HomeActionToolbar({
   isListening: boolean;
   listenToMicrophone: boolean;
   listenToSystemAudio: boolean;
+  onOpenGeneralInstructions: () => void;
   onOpenPermissionSettings: () => void;
   onOpenPromptTemplateSettings: () => void;
-  onSelectPromptTemplate: (id: string | null) => void;
+  onSelectPromptTemplates: (ids: string[]) => void;
   onSetListenToMicrophone: (listen: boolean) => void;
   onSetListenToSystemAudio: (listen: boolean) => void;
+  promptTemplateEditAnchorRef: (node: HTMLDivElement | null) => void;
   promptTemplates: PromptTemplate[];
   sendToAiWhenListeningStops: boolean;
-  selectedPromptTemplateId: string | null;
+  selectedPromptTemplateIds: string[];
   setSendToAiWhenListeningStops: (sendToAi: boolean) => void;
   startButtonLabel: string;
   toggleListening: () => void;
@@ -2271,15 +2689,42 @@ function HomeActionToolbar({
   const startListeningTooltip = isListening
     ? 'Stop listening and finish the transcript'
     : hasAudioSource
-      ? 'Start listening to the selected sound input and output sources'
+      ? getStartListeningSourceDescription({ listenToMicrophone, listenToSystemAudio })
       : 'Select a sound input or output source to listen to using the source buttons.';
+  const autoSendControl = (
+    <div className={isVertical ? layout.sideToolbarRow : undefined}>
+      <TooltipButton
+        aria-label={autoSendLabel}
+        aria-pressed={sendToAiWhenListeningStops}
+        className={`${isVertical ? layout.sideToolbarButton : layout.compactToolbarButton} ${sendToAiWhenListeningStops ? layout.listeningSourceIndicatorActive : 'text-muted-foreground'}`.trim()}
+        flashTooltipOnClick
+        onClick={() => setSendToAiWhenListeningStops(!sendToAiWhenListeningStops)}
+        size={isVertical ? 'icon-lg' : 'lg'}
+        tooltip={autoSendTooltip}
+        tooltipSide={tooltipSide}
+        type="button"
+        variant="outline"
+      >
+        <span className="relative inline-flex size-4 items-center justify-center">
+          <FastForwardIcon className="size-4" />
+          {!sendToAiWhenListeningStops && (
+            <span
+              aria-hidden="true"
+              className="susura-auto-send-off-slash absolute left-1/2 top-1/2 h-0.5 w-[1.1rem] -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-full bg-current"
+            />
+          )}
+        </span>
+        <span className={isVertical ? 'sr-only' : layout.expandedToolbarButtonLabel}>{autoSendLabel}</span>
+      </TooltipButton>
+    </div>
+  );
   const primaryControls = (
     <div className={isVertical ? layout.transcriptPrimaryActionsVertical : layout.transcriptPrimaryActions}>
       <div className={isVertical ? layout.sideToolbarRow : undefined}>
         {isBlockedByPermissions ? (
           <TooltipButton
             aria-label="Grant Permissions"
-            className={`${isVertical ? layout.sideToolbarButton : layout.grantPermissionsButton} ${layout.compactToolbarButton}`.trim()}
+            className={isVertical ? layout.sideToolbarButton : `${layout.grantPermissionsButton} ${layout.compactToolbarButton}`}
             onClick={onOpenPermissionSettings}
             size="lg"
             tooltip="Open settings to grant required permissions"
@@ -2294,7 +2739,7 @@ function HomeActionToolbar({
           <TooltipButton
             aria-label={startButtonLabel}
             aria-disabled={!hasAudioSource || undefined}
-            className={`${isVertical ? layout.sideToolbarButton : layout.listeningButton} ${isListening ? '' : layout.startButton} ${layout.compactToolbarButton} ${!hasAudioSource ? 'cursor-not-allowed opacity-50' : ''}`.trim()}
+            className={`${isVertical ? layout.sideToolbarButton : `${layout.listeningButton} ${layout.compactToolbarButton}`} ${isListening ? '' : layout.startButton} ${!hasAudioSource ? 'cursor-not-allowed opacity-50' : ''}`.trim()}
             disabled={startButtonDisabled}
             onClick={!hasAudioSource ? undefined : toggleListening}
             size="lg"
@@ -2328,24 +2773,9 @@ function HomeActionToolbar({
           showLabels={!isVertical}
           tooltipSide={tooltipSide}
         />
-        <div className={isVertical ? layout.sideToolbarRow : undefined}>
-          <TooltipButton
-            aria-label={autoSendLabel}
-            aria-pressed={sendToAiWhenListeningStops}
-            className={`${isVertical ? layout.sideToolbarButton : layout.compactToolbarButton} ${sendToAiWhenListeningStops ? layout.listeningSourceIndicatorActive : 'text-muted-foreground'}`.trim()}
-            flashTooltipOnClick
-            onClick={() => setSendToAiWhenListeningStops(!sendToAiWhenListeningStops)}
-            size={isVertical ? 'icon-lg' : 'lg'}
-            tooltip={autoSendTooltip}
-            tooltipSide={tooltipSide}
-            type="button"
-            variant="outline"
-          >
-            <SendHorizontalIcon />
-            <span className={isVertical ? 'sr-only' : layout.expandedToolbarButtonLabel}>{autoSendLabel}</span>
-          </TooltipButton>
-        </div>
+        {isVertical ? autoSendControl : null}
       </div>
+      {!isVertical ? autoSendControl : null}
     </div>
   );
   const aiControls = (
@@ -2353,11 +2783,27 @@ function HomeActionToolbar({
       <PromptTemplateSelector
         isCompact={isVertical}
         onOpenSettings={onOpenPromptTemplateSettings}
-        onSelect={onSelectPromptTemplate}
-        selectedTemplateId={selectedPromptTemplateId}
+        onSelect={onSelectPromptTemplates}
+        editAnchorRef={promptTemplateEditAnchorRef}
+        selectedTemplateIds={selectedPromptTemplateIds}
         templates={promptTemplates}
         tooltipSide={tooltipSide}
       />
+      <div className={isVertical ? layout.sideToolbarRow : layout.aiResponseActions}>
+        <TooltipButton
+          aria-label="Instructions"
+          className={isVertical ? layout.sideToolbarButton : layout.compactToolbarButton}
+          onClick={onOpenGeneralInstructions}
+          size={isVertical ? 'icon-lg' : 'lg'}
+          tooltip="Edit general AI instructions, such as spelling or grammar preferences"
+          tooltipSide={tooltipSide}
+          type="button"
+          variant="outline"
+        >
+          <FileTextIcon />
+          <span className={isVertical ? 'sr-only' : layout.expandedToolbarButtonLabel}>Instructions</span>
+        </TooltipButton>
+      </div>
     </div>
   );
 
@@ -2606,6 +3052,7 @@ function AiResponseSectionList({
             isActive={response.id === activeResponseId}
             onToggleCollapsed={onToggleCollapsed}
             isWaiting={response.isWaiting}
+            request={response.request}
             requestedAt={response.requestedAt}
             response={response.response}
           />
@@ -2641,7 +3088,7 @@ function ListeningSourceIndicators({
     >
       <ListeningSourceIndicator
         active={listenToSystemAudio}
-        icon={<Volume2Icon />}
+        icon={listenToSystemAudio ? <Volume2Icon /> : <VolumeXIcon />}
         label="Speaker"
         onToggle={() => onSetListenToSystemAudio(!listenToSystemAudio)}
         showLabel={showLabels}
@@ -2660,7 +3107,7 @@ function ListeningSourceIndicators({
       />
       <ListeningSourceIndicator
         active={listenToMicrophone}
-        icon={<MicIcon />}
+        icon={listenToMicrophone ? <MicIcon /> : <MicOffIcon />}
         label="Microphone"
         onToggle={() => onSetListenToMicrophone(!listenToMicrophone)}
         showLabel={showLabels}
@@ -2725,8 +3172,6 @@ function ListeningSourceIndicator({
 }
 
 function getListeningSourceTooltip({
-  active,
-  isListening,
   label
 }: {
   active: boolean;
@@ -2742,23 +3187,15 @@ function getListeningSourceTooltip({
       detail: 'Captures what you say into your microphone.',
       name: 'sound input'
     };
-  const action = active && isListening
-    ? 'Listening to'
-    : active
-      ? 'Will listen to'
-      : 'Will not listen to';
 
   return (
     <span className="block">
-      <span className="block">{action} your {source.name}.</span>
       <span className="block">{source.detail}</span>
     </span>
   );
 }
 
 function getListeningSourceTitle({
-  active,
-  isListening,
   label
 }: {
   active: boolean;
@@ -2775,15 +3212,7 @@ function getListeningSourceTitle({
       name: 'sound input'
     };
 
-  if (active && isListening) {
-    return `Listening to your ${source.name}. ${source.detail}`;
-  }
-
-  if (active) {
-    return `Will listen to your ${source.name}. ${source.detail}`;
-  }
-
-  return `Will not listen to your ${source.name}. ${source.detail}`;
+  return source.detail;
 }
 
 function AiResponseSection({
@@ -2792,6 +3221,7 @@ function AiResponseSection({
   isCollapsed,
   isWaiting = false,
   onToggleCollapsed,
+  request = '',
   requestedAt,
   response = ''
 }: {
@@ -2800,10 +3230,12 @@ function AiResponseSection({
   isCollapsed: boolean;
   isWaiting?: boolean;
   onToggleCollapsed: (id: string) => void;
+  request?: string;
   requestedAt: string | null;
   response?: string;
 }) {
   const hasResponse = response.trim().length > 0;
+  const hasRequest = request.trim().length > 0;
   const headerClassName = `${layout.transcriptSectionHeader} ${isActive ? layout.transcriptSectionHeaderActive : ''}`.trim();
   const collapsedPreview = isCollapsed ? response || 'Waiting for response' : null;
 
@@ -2824,13 +3256,29 @@ function AiResponseSection({
         </div>
         <div className={layout.transcriptActions}>
           <TooltipButton
+            aria-label="Show AI input"
+            disabled={!hasRequest}
+            size="icon"
+            tooltip={getAiInputTooltip(request)}
+            tooltipClassName={layout.sectionPreviewTooltip}
+            tooltipInteractive
+            tooltipSide="bottom"
+            onWheel={scrollOpenPreviewTooltip}
+            type="button"
+            variant="outline"
+          >
+            <FileInputIcon />
+          </TooltipButton>
+          <TooltipButton
             aria-label="Copy this AI response"
             disabled={!hasResponse}
             onClick={() => void navigator.clipboard?.writeText(response)}
             size="icon"
             tooltip={getActionTooltipWithPreview('Copy this AI response to clipboard', collapsedPreview)}
             tooltipClassName={collapsedPreview ? layout.sectionPreviewTooltip : undefined}
+            tooltipInteractive={collapsedPreview !== null}
             tooltipSide="bottom"
+            onWheel={collapsedPreview ? scrollOpenPreviewTooltip : undefined}
             type="button"
             variant="outline"
           >
@@ -2893,6 +3341,7 @@ function getVisibleAiResponses({
     return [{
       id: 'live-ai-response',
       requestedAt: llmRequestedAt,
+      request: '',
       response: llmOutput
     }];
   }
@@ -2902,6 +3351,7 @@ function getVisibleAiResponses({
       id: 'live-ai-response-waiting',
       isWaiting: true,
       requestedAt: llmRequestedAt,
+      request: '',
       response: ''
     }];
   }
@@ -2910,6 +3360,7 @@ function getVisibleAiResponses({
     return [{
       id: 'live-ai-response',
       requestedAt: llmRequestedAt,
+      request: '',
       response: llmOutput
     }];
   }
@@ -3235,7 +3686,9 @@ function TranscriptSessionSection({
                 size="icon"
                 tooltip={getActionTooltipWithPreview('Copy this transcript to clipboard', collapsedPreview)}
                 tooltipClassName={collapsedPreview ? layout.sectionPreviewTooltip : undefined}
+                tooltipInteractive={collapsedPreview !== null}
                 tooltipSide="bottom"
+                onWheel={collapsedPreview ? scrollOpenPreviewTooltip : undefined}
                 type="button"
                 variant="outline"
               >
@@ -3256,7 +3709,9 @@ function TranscriptSessionSection({
                 size="icon"
                 tooltip={getActionTooltipWithPreview('Send this transcript to AI now', collapsedPreview)}
                 tooltipClassName={collapsedPreview ? layout.sectionPreviewTooltip : undefined}
+                tooltipInteractive={collapsedPreview !== null}
                 tooltipSide="bottom"
+                onWheel={collapsedPreview ? scrollOpenPreviewTooltip : undefined}
                 type="button"
                 variant="outline"
               >
@@ -3321,6 +3776,7 @@ function SectionCollapseButton({
       aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${label}`}
       className={layout.sectionCollapseButton}
       onClick={onToggle}
+      onWheel={preview ? scrollOpenPreviewTooltip : undefined}
       size="icon"
       type="button"
       variant="ghost"
@@ -3334,7 +3790,7 @@ function SectionCollapseButton({
   }
 
   return (
-    <Tooltip>
+    <Tooltip disableHoverableContent={false}>
       <TooltipTrigger asChild>
         {button}
       </TooltipTrigger>
@@ -3366,6 +3822,38 @@ function getActionTooltipWithPreview(label: string, preview: string | null) {
   );
 }
 
+function getAiInputTooltip(request: string) {
+  return (
+    <div>
+      <div className="mb-3 font-medium">AI input</div>
+      <div className="markdown-output border-t border-primary-foreground/20 pt-3">
+        <ReactMarkdown>{formatPreviewMarkdown(request)}</ReactMarkdown>
+      </div>
+    </div>
+  );
+}
+
+function scrollOpenPreviewTooltip(event: WheelEvent<HTMLElement>) {
+  const tooltip = document.querySelector<HTMLElement>('[data-slot="tooltip-content"].susura-preview-tooltip');
+
+  if (!tooltip) {
+    return;
+  }
+
+  const canScrollVertically = tooltip.scrollHeight > tooltip.clientHeight;
+  const canScrollHorizontally = tooltip.scrollWidth > tooltip.clientWidth;
+
+  if (!canScrollVertically && !canScrollHorizontally) {
+    return;
+  }
+
+  event.preventDefault();
+  tooltip.scrollBy({
+    left: canScrollHorizontally ? event.deltaX : 0,
+    top: canScrollVertically ? event.deltaY : 0
+  });
+}
+
 function getTranscriptSectionBody(transcript: string) {
   const lines = transcript.split('\n');
 
@@ -3377,92 +3865,80 @@ function getTranscriptSectionBody(transcript: string) {
 }
 
 function PromptTemplateSelector({
+  editAnchorRef,
   isCompact = false,
   onOpenSettings,
   onSelect,
-  selectedTemplateId,
+  selectedTemplateIds,
   templates,
   tooltipSide
 }: {
+  editAnchorRef: (node: HTMLDivElement | null) => void;
   isCompact?: boolean;
   onOpenSettings: () => void;
-  onSelect: (id: string | null) => void;
-  selectedTemplateId: string | null;
+  onSelect: (ids: string[]) => void;
+  selectedTemplateIds: string[];
   templates: PromptTemplate[];
   tooltipSide?: TooltipSide;
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [isTooltipOpen, setIsTooltipOpen] = useState(false);
-  const [isTooltipSuppressed, setIsTooltipSuppressed] = useState(false);
+  const [isEditTooltipActive, setIsEditTooltipActive] = useState(false);
   const [search, setSearch] = useState('');
-  const selectedTemplate = templates.find((template) => template.id === selectedTemplateId) ?? null;
-  const selectedTemplateName = selectedTemplate?.name ?? 'No template';
+  const selectedTemplates = selectedTemplateIds
+    .map((id) => templates.find((template) => template.id === id))
+    .filter((template): template is PromptTemplate => Boolean(template));
+  const selectedTemplateName = selectedTemplates.length === 0
+    ? 'No template'
+    : selectedTemplates.length === 1
+      ? selectedTemplates[0].name
+      : selectedTemplates.map((template) => template.name).join(', ');
+  const selectedTemplateTooltip = selectedTemplates.length === 0
+    ? 'Selected prompt templates:\nNo template'
+    : `Selected prompt templates:\n${selectedTemplates.map((template) => template.name).join('\n')}`;
   const filteredTemplates = templates.filter((template) => (
     template.name.toLocaleLowerCase().includes(search.toLocaleLowerCase())
   ));
 
-  function suppressTooltip() {
-    setIsTooltipOpen(false);
-    setIsTooltipSuppressed(true);
+  function clearTemplates() {
+    onSelect([]);
+    setSearch('');
   }
 
-  function selectTemplate(id: string | null) {
-    onSelect(id);
-    setSearch('');
-    suppressTooltip();
-    setIsOpen(false);
+  function toggleTemplate(id: string) {
+    onSelect(selectedTemplateIds.includes(id)
+      ? selectedTemplateIds.filter((selectedId) => selectedId !== id)
+      : [...selectedTemplateIds, id]);
   }
 
   return (
-    <>
+    <div className={isCompact ? layout.promptTemplateSelectorRootVertical : layout.promptTemplateSelectorRoot}>
+      <div className={isCompact ? layout.promptTemplateSelectorPickerVertical : layout.promptTemplateSelectorPicker}>
       <Popover
         open={isOpen}
         onOpenChange={(open) => {
           setIsOpen(open);
-          suppressTooltip();
         }}
       >
-        <Tooltip
-          open={isTooltipOpen && !isOpen && !isTooltipSuppressed}
-          onOpenChange={(open) => setIsTooltipOpen(open && !isOpen && !isTooltipSuppressed)}
-        >
+        <Tooltip open={isOpen || isEditTooltipActive ? false : undefined}>
           <TooltipTrigger asChild>
             <PopoverTrigger asChild>
               <Button
                 aria-label="Prompt template"
-                className={isCompact ? layout.promptTemplateTriggerVertical : `${layout.promptTemplateTrigger} ${layout.compactPromptTemplateTrigger}`}
-                onPointerEnter={() => {
-                  setIsTooltipSuppressed(false);
-
-                  if (!isOpen) {
-                    setIsTooltipOpen(true);
-                  }
-                }}
-                onPointerMove={() => {
-                  setIsTooltipSuppressed(false);
-
-                  if (!isOpen) {
-                    setIsTooltipOpen(true);
-                  }
-                }}
-                onPointerLeave={() => {
-                  setIsTooltipOpen(false);
-                  setIsTooltipSuppressed(false);
-                }}
+                className={isCompact ? layout.promptTemplateTriggerVertical : layout.promptTemplateTrigger}
                 size={isCompact ? 'icon-lg' : 'lg'}
                 type="button"
                 variant="outline"
               >
-                <FileTextIcon />
-                <span className={`${isCompact ? layout.sideToolbarButtonLabel : 'min-w-0 flex-1 truncate text-left'} ${layout.compactToolbarButtonLabel}`}>
+                <ListChecksIcon className={layout.promptTemplateCompactIcon} />
+                <span className={isCompact ? 'sr-only' : 'prompt-template-trigger-label min-w-0 flex-1 truncate text-left'}>
                   {selectedTemplateName}
                 </span>
-                {!isCompact ? <ChevronDownIcon /> : null}
+                <ChevronDownIcon className="prompt-template-trigger-chevron" />
               </Button>
             </PopoverTrigger>
           </TooltipTrigger>
-          <TooltipContent className="max-w-64 whitespace-normal break-words leading-4" collisionPadding={8} side={tooltipSide}>
-            Prompt template: {selectedTemplateName}
+          <TooltipContent className="max-w-64 whitespace-pre-line break-words leading-4" collisionPadding={8} side={tooltipSide}>
+            {selectedTemplateTooltip}
           </TooltipContent>
         </Tooltip>
         <PopoverContent align="start" className="w-80">
@@ -3476,56 +3952,64 @@ function PromptTemplateSelector({
               value={search}
             />
           </div>
-          <div className={layout.promptTemplateList}>
+          <div className={`${layout.pickerList} ${layout.pickerListScrollable}`}>
             <button
-              aria-current={selectedTemplateId === null ? 'true' : undefined}
-              className={layout.promptTemplateItem}
-              onClick={() => selectTemplate(null)}
-              onPointerDown={(event) => {
-                event.preventDefault();
-                selectTemplate(null);
-              }}
+              aria-current={selectedTemplateIds.length === 0 ? 'true' : undefined}
+              className={layout.pickerItem}
+              data-active={selectedTemplateIds.length === 0}
+              onClick={clearTemplates}
               type="button"
             >
-              <span>No template</span>
+              <span className={layout.pickerItemLabel}>No template</span>
             </button>
-            {filteredTemplates.map((template) => (
-              <button
-                key={template.id}
-                aria-current={selectedTemplateId === template.id ? 'true' : undefined}
-                className={layout.promptTemplateItem}
-                onClick={() => selectTemplate(template.id)}
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                  selectTemplate(template.id);
-                }}
-                type="button"
-              >
-                <span className="truncate">{template.name}</span>
-              </button>
-            ))}
+            {filteredTemplates.map((template) => {
+              const isSelected = selectedTemplateIds.includes(template.id);
+
+              return (
+                <button
+                  key={template.id}
+                  aria-current={isSelected ? 'true' : undefined}
+                  aria-pressed={isSelected}
+                  className={`${layout.pickerItem} ${layout.pickerCheckboxItem}`}
+                  data-active={isSelected}
+                  onClick={() => toggleTemplate(template.id)}
+                  type="button"
+                >
+                  <CheckboxDisplay aria-hidden="true" checked={isSelected} />
+                  <span className={layout.pickerItemLabel}>{template.name}</span>
+                </button>
+              );
+            })}
             {filteredTemplates.length === 0 ? (
               <p className="px-2 py-4 text-sm text-muted-foreground">No templates found.</p>
             ) : null}
           </div>
         </PopoverContent>
       </Popover>
-      <div className={isCompact ? undefined : 'ml-auto'}>
+      </div>
+      <div
+        ref={editAnchorRef}
+        className={isCompact ? layout.promptTemplateSelectorEditVertical : layout.promptTemplateSelectorEdit}
+        onFocus={() => setIsEditTooltipActive(true)}
+        onMouseEnter={() => setIsEditTooltipActive(true)}
+        onMouseLeave={() => setIsEditTooltipActive(false)}
+      >
         <TooltipButton
           aria-label="Manage prompt templates"
-          className={isCompact ? layout.sideToolbarIconButton : layout.compactToolbarButton}
+          className={isCompact ? layout.sideToolbarIconButton : undefined}
+          onBlur={() => setIsEditTooltipActive(false)}
           onClick={onOpenSettings}
-          size={isCompact ? 'icon-lg' : 'lg'}
+          size="icon-lg"
           tooltip="Manage prompt templates"
           tooltipSide={tooltipSide}
           type="button"
           variant="outline"
         >
           <PencilIcon />
-          <span className={isCompact ? 'sr-only' : layout.expandedToolbarButtonLabel}>Edit</span>
+          <span className="sr-only">Edit</span>
         </TooltipButton>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -3548,15 +4032,20 @@ function PromptTemplateDialog({
   open: boolean;
   templates: PromptTemplate[];
 }) {
+  const [visibleTemplates, setVisibleTemplates] = useState<PromptTemplate[]>(templates);
   const [activeId, setActiveId] = useState<string | null>(templates[0]?.id ?? null);
-  const activeTemplate = templates.find((template) => template.id === activeId) ?? templates[0] ?? null;
+  const activeTemplate = visibleTemplates.find((template) => template.id === activeId) ?? visibleTemplates[0] ?? null;
   const [draft, setDraft] = useState<PromptTemplate>(() => activeTemplate ?? createPromptTemplate({ name: '', prompt: '' }));
   const [deleteConfirmationId, setDeleteConfirmationId] = useState<string | null>(null);
-  const isDeleteConfirming = Boolean(activeId && deleteConfirmationId === activeId);
-  const canSave = draft.name.trim().length > 0 && draft.prompt.trim().length > 0;
   const draftAttachments = draft.attachments ?? [];
   const supportedAttachments = draftAttachments.filter((attachment) => attachment.support === 'supported');
   const modelAttachmentSupport = getLlmModelAttachmentSupport(currentModel);
+
+  useEffect(() => {
+    if (open) {
+      setVisibleTemplates(templates);
+    }
+  }, [open]);
 
   useEffect(() => {
     if (!open) {
@@ -3564,34 +4053,44 @@ function PromptTemplateDialog({
       return;
     }
 
-    if (activeId && !templates.some((template) => template.id === activeId)) {
+    if (activeId && !visibleTemplates.some((template) => template.id === activeId)) {
       return;
     }
 
-    const nextTemplate = templates.find((template) => template.id === activeId) ?? templates[0] ?? createPromptTemplate({ name: '', prompt: '' });
+    const nextTemplate = visibleTemplates.find((template) => template.id === activeId) ?? visibleTemplates[0] ?? createPromptTemplate({ name: '', prompt: '' });
     setActiveId(nextTemplate.id);
     setDraft(nextTemplate);
-    setDeleteConfirmationId((id) => (id && templates.some((template) => template.id === id) ? id : null));
-  }, [activeId, draft.id, open, templates]);
+    setDeleteConfirmationId((id) => (id && visibleTemplates.some((template) => template.id === id) ? id : null));
+  }, [activeId, draft.id, open, visibleTemplates]);
 
   function createNewTemplate() {
-    const template = createPromptTemplate({ name: '', prompt: '' });
+    const template = withPromptTemplateTimestamp(createPromptTemplate({ name: '', prompt: '' }));
+    setVisibleTemplates((items) => [...items, template]);
+    selectTemplate(template);
+    onSave(normalisePromptTemplateDraft(template));
+    setDeleteConfirmationId(null);
+  }
+
+  function selectTemplate(template: PromptTemplate) {
     setActiveId(template.id);
     setDraft(template);
     setDeleteConfirmationId(null);
   }
 
-  function saveDraft() {
-    if (!canSave) {
-      return;
-    }
+  function updateDraft(updates: Partial<PromptTemplate>) {
+    setDraft((template) => {
+      const nextTemplate = withPromptTemplateTimestamp({
+        ...template,
+        ...updates
+      });
 
-    onSave({
-      ...draft,
-      attachments: draftAttachments,
-      name: draft.name.trim(),
-      prompt: draft.prompt.trim(),
-      updatedAt: new Date().toISOString()
+      setVisibleTemplates((items) => (
+        items.some((item) => item.id === nextTemplate.id)
+          ? items.map((item) => (item.id === nextTemplate.id ? nextTemplate : item))
+          : [...items, nextTemplate]
+      ));
+      onSave(normalisePromptTemplateDraft(nextTemplate));
+      return nextTemplate;
     });
   }
 
@@ -3602,38 +4101,34 @@ function PromptTemplateDialog({
       return;
     }
 
-    setDraft((template) => ({
-      ...template,
-      attachments: mergePromptTemplateAttachments(template.attachments ?? [], attachments)
-    }));
+    updateDraft({
+      attachments: mergePromptTemplateAttachments(draftAttachments, attachments)
+    });
   }
 
   function removeAttachment(id: string) {
-    setDraft((template) => ({
-      ...template,
-      attachments: (template.attachments ?? []).filter((attachment) => attachment.id !== id)
-    }));
+    updateDraft({
+      attachments: draftAttachments.filter((attachment) => attachment.id !== id)
+    });
   }
 
-  function deleteActiveTemplate() {
-    if (!activeId) {
-      return;
-    }
-
-    if (deleteConfirmationId !== activeId) {
-      setDeleteConfirmationId(activeId);
-      return;
-    }
-
-    onDelete(activeId);
-    const nextTemplate = templates.find((template) => template.id !== activeId) ?? null;
+  function deleteTemplate(id: string) {
+    onDelete(id);
+    const nextTemplates = visibleTemplates.filter((template) => template.id !== id);
+    setVisibleTemplates(nextTemplates);
+    const nextTemplate = nextTemplates.find((template) => template.id !== activeId) ?? nextTemplates[0] ?? null;
     setActiveId(nextTemplate?.id ?? null);
+    setDraft(nextTemplate ?? createPromptTemplate({ name: '', prompt: '' }));
     setDeleteConfirmationId(null);
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={layout.promptTemplateDialog} showCloseButton={false}>
+    <Dialog modal={false} open={open} onOpenChange={onOpenChange}>
+      {open ? <div aria-hidden="true" className={layout.modalBlurBackdrop} /> : null}
+      <DialogContent
+        className={layout.promptTemplateDialog}
+        showCloseButton={false}
+      >
         <PlatformDialogCloseButton isMac={isMac} label="Close prompt templates" />
         <DialogHeader className={`${layout.promptTemplateHeader} ${isMac ? layout.promptTemplateHeaderMac : ''}`}>
           <DialogTitle className={layout.modalHeaderTitle}>Prompt templates</DialogTitle>
@@ -3646,21 +4141,51 @@ function PromptTemplateDialog({
             <Button onClick={createNewTemplate} type="button" variant="outline">
               New template
             </Button>
-            <div className={layout.promptTemplateList}>
-              {templates.map((template) => (
-                <button
-                  key={template.id}
-                  aria-current={activeId === template.id ? 'true' : undefined}
-                  className={layout.promptTemplateItem}
-                  onClick={() => {
-                    setActiveId(template.id);
-                    setDraft(template);
-                    setDeleteConfirmationId(null);
-                  }}
-                  type="button"
-                >
-                  <span className="truncate">{template.name}</span>
-                </button>
+            <div className={`${layout.pickerList} ${layout.pickerListScrollable}`}>
+              {visibleTemplates.map((template) => (
+                <div key={template.id} className={layout.pickerRow}>
+                  <button
+                    aria-current={activeId === template.id ? 'true' : undefined}
+                    className={`${layout.pickerItem} ${layout.pickerRowButton}`}
+                    data-active={activeId === template.id}
+                    onClick={() => selectTemplate(template)}
+                    type="button"
+                  >
+                    <span className={layout.pickerItemLabel}>{getPromptTemplateDisplayName(template)}</span>
+                  </button>
+                  <Popover
+                    open={deleteConfirmationId === template.id}
+                    onOpenChange={(nextOpen) => setDeleteConfirmationId(nextOpen ? template.id : null)}
+                  >
+                    <PopoverTrigger asChild>
+                      <Button
+                        aria-label={`Delete ${getPromptTemplateDisplayName(template)}`}
+                        className={layout.pickerRowDelete}
+                        size="icon-sm"
+                        type="button"
+                        variant="ghost"
+                      >
+                        <XIcon />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent align="end" className="w-64 gap-3" side="right">
+                      <div>
+                        <div className="text-sm font-medium">Delete this template?</div>
+                        <p className="text-sm text-muted-foreground">
+                          This removes it from your saved prompt templates.
+                        </p>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button onClick={() => setDeleteConfirmationId(null)} type="button" variant="outline">
+                          Cancel
+                        </Button>
+                        <Button onClick={() => deleteTemplate(template.id)} type="button" variant="destructive">
+                          Confirm delete
+                        </Button>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                </div>
               ))}
             </div>
           </div>
@@ -3669,7 +4194,7 @@ function PromptTemplateDialog({
               <FieldLabel htmlFor="prompt-template-name">Name</FieldLabel>
               <Input
                 id="prompt-template-name"
-                onChange={(event) => setDraft((template) => ({ ...template, name: event.target.value }))}
+                onChange={(event) => updateDraft({ name: event.target.value })}
                 placeholder="Summarise this phone call"
                 value={draft.name}
               />
@@ -3680,7 +4205,7 @@ function PromptTemplateDialog({
                 <Textarea
                   className="min-h-0 flex-1 resize-none"
                   id="prompt-template-prompt"
-                  onChange={(event) => setDraft((template) => ({ ...template, prompt: event.target.value }))}
+                  onChange={(event) => updateDraft({ prompt: event.target.value })}
                   placeholder="Summarise this transcript..."
                   value={draft.prompt}
                 />
@@ -3734,22 +4259,30 @@ function PromptTemplateDialog({
             </div>
           </div>
         </div>
-        <DialogFooter className={layout.promptTemplateFooter}>
-          {isDeleteConfirming && (
-            <Button onClick={() => setDeleteConfirmationId(null)} type="button" variant="outline">
-              Cancel
-            </Button>
-          )}
-          <Button disabled={!activeId} onClick={deleteActiveTemplate} type="button" variant="destructive">
-            {isDeleteConfirming ? 'Confirm delete' : 'Delete'}
-          </Button>
-          <Button disabled={!canSave} onClick={saveDraft} type="button">
-            Save
-          </Button>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
+}
+
+function getPromptTemplateDisplayName(template: PromptTemplate) {
+  return template.name.trim() || 'Untitled';
+}
+
+function normalisePromptTemplateDraft(template: PromptTemplate) {
+  return {
+    ...template,
+    attachments: template.attachments ?? [],
+    name: getPromptTemplateDisplayName(template),
+    updatedAt: template.updatedAt
+  };
+}
+
+function withPromptTemplateTimestamp(template: PromptTemplate) {
+  return {
+    ...template,
+    attachments: template.attachments ?? [],
+    updatedAt: new Date().toISOString()
+  };
 }
 
 function PlatformDialogCloseButton({
@@ -3866,13 +4399,14 @@ function DownloadTranscriptPopover({
 }) {
   return (
     <Popover>
-      <Tooltip>
+      <Tooltip disableHoverableContent={preview ? false : undefined}>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
             <Button
               aria-label={label}
               className={triggerClassName}
               disabled={disabled}
+              onWheel={preview ? scrollOpenPreviewTooltip : undefined}
               size={triggerSize}
               type="button"
               variant="outline"
@@ -3919,12 +4453,14 @@ function TooltipButton({
   onClick,
   tooltip,
   tooltipClassName,
+  tooltipInteractive = false,
   tooltipSide,
   ...props
 }: React.ComponentProps<typeof Button> & {
   flashTooltipOnClick?: boolean;
   tooltip: React.ReactNode;
   tooltipClassName?: string;
+  tooltipInteractive?: boolean;
   tooltipSide?: TooltipSide;
 }) {
   const [isTooltipFlashed, setIsTooltipFlashed] = useState(false);
@@ -3976,7 +4512,7 @@ function TooltipButton({
   }
 
   return (
-    <Tooltip {...tooltipProps}>
+    <Tooltip disableHoverableContent={tooltipInteractive ? false : undefined} {...tooltipProps}>
       <TooltipTrigger asChild>
         {button}
       </TooltipTrigger>
@@ -4185,6 +4721,24 @@ function createPromptTemplate({
   };
 }
 
+function mergeStarterPromptTemplates(templates: PromptTemplate[]) {
+  const existingIds = new Set(templates.map((template) => template.id));
+
+  return [
+    ...templates,
+    ...starterPromptTemplates.filter((template) => !existingIds.has(template.id))
+  ];
+}
+
+function getSelectedPromptTemplateIds(state: PromptTemplateState, templates: PromptTemplate[]) {
+  const requestedIds = state.selectedTemplateIds;
+
+  return requestedIds.filter((id, index) => (
+    requestedIds.indexOf(id) === index
+    && templates.some((template) => template.id === id)
+  ));
+}
+
 function getTranscriptDownloadTimestamp(transcript: string) {
   const headerDate = parseTranscriptStartedAt(transcript);
   const date = headerDate ?? new Date();
@@ -4248,6 +4802,78 @@ function SettingsPage({
   setLlmReasoning: (reasoning: LlmReasoning) => void;
 }) {
   const [isResetDialogOpen, setIsResetDialogOpen] = useState(false);
+  const [activeSection, setActiveSection] = useState<SettingsSection>('general');
+  const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatus | null>(null);
+  const [selectedTranscriptionModelId, setSelectedTranscriptionModelId] = useState<LocalTranscriptionModelId>('parakeet');
+  const hasInitialisedTranscriptionModelRef = useRef(false);
+  const autoSelectingReadyModelRef = useRef<LocalTranscriptionModelId | null>(null);
+  const settingsSections: Array<{ id: SettingsSection; label: string }> = [
+    { id: 'general', label: 'General' },
+    { id: 'ai', label: 'Models' },
+    { id: 'permissions', label: 'Permissions' }
+  ];
+
+  useEffect(() => {
+    void refreshOnboardingStatus();
+
+    const unsubscribe = getSettingsBridge()?.parakeet?.onStatus?.((nextStatus) => {
+      setOnboardingStatus((current) => current ? {
+        ...current,
+        parakeet: nextStatus
+      } : current);
+    });
+
+    return () => {
+      unsubscribe?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (
+      !onboardingStatus
+      || onboardingStatus.parakeet.status !== 'installed'
+      || onboardingStatus.parakeet.modelId !== selectedTranscriptionModelId
+      || onboardingStatus.selectedLocalTranscriptionModel === selectedTranscriptionModelId
+      || autoSelectingReadyModelRef.current === selectedTranscriptionModelId
+    ) {
+      return;
+    }
+
+    autoSelectingReadyModelRef.current = selectedTranscriptionModelId;
+
+    void getSettingsBridge()?.parakeet?.setModel(selectedTranscriptionModelId)
+      .then(() => refreshOnboardingStatus())
+      .catch((error) => {
+        console.error('Failed to use ready transcription model:', error);
+      })
+      .finally(() => {
+        autoSelectingReadyModelRef.current = null;
+      });
+  }, [selectedTranscriptionModelId, onboardingStatus]);
+
+  async function refreshOnboardingStatus() {
+    const nextStatus = await getSettingsBridge()?.onboarding?.status();
+
+    if (!nextStatus) {
+      return;
+    }
+
+    setOnboardingStatus(nextStatus);
+
+    if (!hasInitialisedTranscriptionModelRef.current) {
+      hasInitialisedTranscriptionModelRef.current = true;
+      setSelectedTranscriptionModelId(getInitialTranscriptionModelId(nextStatus));
+    }
+  }
+
+  async function downloadTranscriptionModel(modelId: LocalTranscriptionModelId) {
+    try {
+      await getSettingsBridge()?.parakeet?.download(modelId);
+      await refreshOnboardingStatus();
+    } catch (error) {
+      console.error('Failed to download transcription model:', error);
+    }
+  }
 
   function confirmResetSettings() {
     resetSettings();
@@ -4277,167 +4903,212 @@ function SettingsPage({
           </p>
         </div>
         <div className={layout.settingsContent}>
-        <FieldGroup>
-          <FieldSet>
-            <FieldLegend>Permissions</FieldLegend>
-            <FieldGroup>
-              <div className="grid w-full">
-                {permissionsStatus?.permissions.map((permission) => (
-                  <PermissionSetupRow
-                    key={permission.id}
-                    onChange={() => onRequestPermission(permission.id)}
-                    permission={permission}
-                    showDivider={false}
-                  />
-                )) ?? (
-                  <StatusRow
-                    label="Permissions"
-                    ready={false}
-                    value="Checking current permission status"
-                  />
-                )}
-              </div>
-            </FieldGroup>
-          </FieldSet>
+          <nav aria-label="Settings sections" className={layout.settingsSidebar}>
+            {settingsSections.map((section) => (
+              <button
+                key={section.id}
+                aria-current={activeSection === section.id ? 'page' : undefined}
+                className={layout.pickerItem}
+                data-active={activeSection === section.id}
+                onClick={() => setActiveSection(section.id)}
+                type="button"
+              >
+                <span className={layout.pickerItemLabel}>{section.label}</span>
+              </button>
+            ))}
+          </nav>
+          <div className={layout.settingsPanel}>
+            {activeSection === 'general' ? (
+              <FieldGroup>
+                <FieldSet>
+                  <FieldLegend>Floating button</FieldLegend>
+                  <FieldGroup className={layout.settingsInlineGroup}>
+                    <Field className="w-auto">
+                      <FieldLabel htmlFor="floating-button-size">Size</FieldLabel>
+                      <Select
+                        name="floating-button-size"
+                        value={privateOverlayStatus?.handle.size ?? 'medium'}
+                        onValueChange={(value) => onSetPrivateOverlayHandleSize(value as PrivateOverlayHandleSize)}
+                      >
+                        <div>
+                          <SelectTrigger id="floating-button-size">
+                            <SelectValue />
+                          </SelectTrigger>
+                        </div>
+                        <SelectContent>
+                          <SelectGroup>
+                            {privateOverlayHandleSizeOptions.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  </FieldGroup>
+                </FieldSet>
 
-          <FieldSet>
-            <FieldLegend>Floating button</FieldLegend>
-            <FieldGroup className={layout.settingsInlineGroup}>
-              <Field className="w-auto">
-                <FieldLabel htmlFor="floating-button-size">Size</FieldLabel>
-                <Select
-                  name="floating-button-size"
-                  value={privateOverlayStatus?.handle.size ?? 'medium'}
-                  onValueChange={(value) => onSetPrivateOverlayHandleSize(value as PrivateOverlayHandleSize)}
-                >
-                  <div>
-                    <SelectTrigger id="floating-button-size">
-                      <SelectValue />
-                    </SelectTrigger>
+                <FieldSet>
+                  <FieldLegend>History</FieldLegend>
+                  <FieldGroup>
+                    <Field className="w-auto self-start" orientation="horizontal">
+                      <Checkbox
+                        id="auto-collapse"
+                        checked={autoCollapse}
+                        onCheckedChange={(checked) => setAutoCollapse(checked === true)}
+                      />
+                      <FieldLabel htmlFor="auto-collapse">Auto-collapse</FieldLabel>
+                    </Field>
+                  </FieldGroup>
+                </FieldSet>
+
+                <FieldSet>
+                  <FieldLegend>System</FieldLegend>
+                  <FieldGroup>
+                    <div className="flex max-w-2xl flex-col items-start gap-3">
+                      <div className="flex flex-col items-start gap-2">
+                        <TooltipButton
+                          disabled={isListening || isBusy}
+                          onClick={() => setIsResetDialogOpen(true)}
+                          size="default"
+                          tooltip="Reset settings"
+                          type="button"
+                          variant="outline"
+                        >
+                          Reset Settings
+                        </TooltipButton>
+                        <div className={layout.settingsDescription}>
+                          <p>Resets:</p>
+                          <ul className="list-disc pl-5">
+                            <li>Window size and position</li>
+                            <li>Floating button position</li>
+                            <li>Model and listening sources</li>
+                            <li>Starter prompt templates</li>
+                          </ul>
+                        </div>
+                      </div>
+                      <div className="flex">
+                        <TooltipButton
+                          onClick={onQuit}
+                          size="default"
+                          tooltip="Quit Susura"
+                          type="button"
+                          variant="destructive"
+                        >
+                          <LogOutIcon />
+                          Quit Susura
+                        </TooltipButton>
+                      </div>
+                    </div>
+                  </FieldGroup>
+                </FieldSet>
+              </FieldGroup>
+            ) : null}
+
+            {activeSection === 'ai' ? (
+              <FieldGroup>
+                <FieldSet>
+                  <FieldLegend>Transcription model</FieldLegend>
+                  <FieldGroup>
+                    <TranscriptionModelRow
+                      onCancel={() => void getSettingsBridge()?.parakeet?.cancelDownload()}
+                      onDownload={(modelId) => void downloadTranscriptionModel(modelId)}
+                      onSelectModel={setSelectedTranscriptionModelId}
+                      selectedModelId={selectedTranscriptionModelId}
+                      status={onboardingStatus}
+                    />
+                  </FieldGroup>
+                </FieldSet>
+
+                <FieldSet>
+                  <FieldLegend>AI model</FieldLegend>
+                  <FieldGroup className={layout.settingsInlineGroup}>
+                    <Field className="w-auto">
+                      <FieldLabel htmlFor="llm-model">Model</FieldLabel>
+                      <Select
+                        disabled={isListening || isBusy}
+                        name="llm-model"
+                        value={llmModel}
+                        onValueChange={(value) => setLlmModel(value as LlmModel)}
+                      >
+                        <div>
+                          <SelectTrigger id="llm-model" className="w-[9.5rem]">
+                            <SelectValue />
+                          </SelectTrigger>
+                        </div>
+                        <SelectContent>
+                          <SelectGroup>
+                            {llmModels.map((model) => (
+                              <SelectItem key={model.value} value={model.value}>
+                                {model.label}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+
+                    <Field className="w-auto">
+                      <FieldLabel htmlFor="llm-reasoning">Reasoning</FieldLabel>
+                      <Select
+                        disabled={isListening || isBusy}
+                        name="llm-reasoning"
+                        value={llmReasoning}
+                        onValueChange={(value) => setLlmReasoning(value as LlmReasoning)}
+                      >
+                        <div>
+                          <SelectTrigger id="llm-reasoning">
+                            <SelectValue />
+                          </SelectTrigger>
+                        </div>
+                        <SelectContent>
+                          <SelectGroup>
+                            {llmReasoningLevels.map((reasoning) => (
+                              <SelectItem key={reasoning.value} value={reasoning.value}>
+                                {reasoning.label}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  </FieldGroup>
+                </FieldSet>
+              </FieldGroup>
+            ) : null}
+
+            {activeSection === 'permissions' ? (
+              <FieldSet>
+                <FieldLegend>Permissions</FieldLegend>
+                <FieldGroup>
+                  <div className="grid w-full">
+                    {permissionsStatus ? getVisiblePermissionItems(permissionsStatus).map((permission) => (
+                      <PermissionSetupRow
+                        key={permission.id}
+                        onChange={() => onRequestPermission(permission.id)}
+                        permission={permission}
+                        showDivider={false}
+                      />
+                    )) : (
+                      <StatusRow
+                        label="Permissions"
+                        ready={false}
+                        value="Checking current permission status"
+                      />
+                    )}
                   </div>
-                  <SelectContent>
-                    <SelectGroup>
-                      {privateOverlayHandleSizeOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </Field>
-            </FieldGroup>
-          </FieldSet>
-
-          <FieldSet>
-            <FieldLegend>AI settings</FieldLegend>
-            <FieldGroup className={layout.settingsInlineGroup}>
-              <Field className="w-auto">
-                <FieldLabel htmlFor="llm-model">Model</FieldLabel>
-                <Select
-                  disabled={isListening || isBusy}
-                  name="llm-model"
-                  value={llmModel}
-                  onValueChange={(value) => setLlmModel(value as LlmModel)}
-                >
-                  <div>
-                    <SelectTrigger id="llm-model">
-                      <SelectValue />
-                    </SelectTrigger>
-                  </div>
-                  <SelectContent>
-                    <SelectGroup>
-                      {llmModels.map((model) => (
-                        <SelectItem key={model.value} value={model.value}>
-                          {model.label}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </Field>
-
-              <Field className="w-auto">
-                <FieldLabel htmlFor="llm-reasoning">Reasoning</FieldLabel>
-                <Select
-                  disabled={isListening || isBusy}
-                  name="llm-reasoning"
-                  value={llmReasoning}
-                  onValueChange={(value) => setLlmReasoning(value as LlmReasoning)}
-                >
-                  <div>
-                    <SelectTrigger id="llm-reasoning">
-                      <SelectValue />
-                    </SelectTrigger>
-                  </div>
-                  <SelectContent>
-                    <SelectGroup>
-                      {llmReasoningLevels.map((reasoning) => (
-                        <SelectItem key={reasoning.value} value={reasoning.value}>
-                          {reasoning.label}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </Field>
-            </FieldGroup>
-          </FieldSet>
-
-          <FieldSet>
-            <FieldLegend>History</FieldLegend>
-            <FieldGroup>
-              <Field className="w-auto self-start" orientation="horizontal">
-                <Checkbox
-                  id="auto-collapse"
-                  checked={autoCollapse}
-                  onCheckedChange={(checked) => setAutoCollapse(checked === true)}
-                />
-                <FieldLabel htmlFor="auto-collapse">Auto-collapse</FieldLabel>
-              </Field>
-            </FieldGroup>
-          </FieldSet>
-
-          <FieldSet>
-            <FieldLegend>System</FieldLegend>
-            <FieldGroup>
-              <div className="flex max-w-2xl flex-col items-start gap-2">
-                <p className={layout.settingsDescription}>
-                  Reset local UI preferences or quit the app. Resetting deletes saved prompt templates and restores Auto-collapse.
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <TooltipButton
-                    disabled={isListening || isBusy}
-                    onClick={() => setIsResetDialogOpen(true)}
-                    size="default"
-                    tooltip="Reset settings"
-                    type="button"
-                    variant="outline"
-                  >
-                    Reset Settings
-                  </TooltipButton>
-                  <TooltipButton
-                    onClick={onQuit}
-                    size="default"
-                    tooltip="Quit Susura"
-                    type="button"
-                    variant="destructive"
-                  >
-                    <LogOutIcon />
-                    Quit Susura
-                  </TooltipButton>
-                </div>
-              </div>
-            </FieldGroup>
-          </FieldSet>
-        </FieldGroup>
+                </FieldGroup>
+              </FieldSet>
+            ) : null}
+          </div>
       </div>
       <Dialog open={isResetDialogOpen} onOpenChange={setIsResetDialogOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Reset settings?</DialogTitle>
             <DialogDescription>
-              This will restore the default window size, location, model, listening sources and starter prompt templates. Saved prompt templates will be deleted.
+              This will restore the default window size, location, floating button position, model, listening sources and starter prompt templates. Saved prompt templates will be deleted.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -4471,20 +5142,27 @@ function getMissingSelectedAudioPermissionItems(
 
   return audioSources
     .filter((source) => source.checked)
-    .map((source) => {
+    .flatMap((source) => {
       if (source.id === 'listen-to-system-audio') {
-        return permissionsById.get('screen-recording');
+        return [
+          permissionsById.get('screen-recording'),
+          permissionsById.get('system-audio')
+        ];
       }
 
       if (source.id === 'listen-to-microphone') {
-        return permissionsById.get('microphone');
+        return [permissionsById.get('microphone')];
       }
 
-      return undefined;
+      return [];
     })
     .filter((permission): permission is PermissionItem => {
-      return permission !== undefined && permission.status !== 'granted';
+      return permission !== undefined && permission.status !== 'granted' && permission.status !== 'unsupported';
     });
+}
+
+function getVisiblePermissionItems(permissionsStatus: PermissionsStatus | null | undefined) {
+  return permissionsStatus?.permissions.filter((permission) => permission.status !== 'unsupported') ?? [];
 }
 
 function getMissingSelectedPermissionItems({

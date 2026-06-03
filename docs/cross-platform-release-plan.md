@@ -10,7 +10,7 @@ Make Susura release-ready on Windows ARM64 and Linux ARM64 first, using the loca
 
 - macOS: keep Apple Silicon macOS as the reference implementation and preserve the existing Swift Core Audio helper path.
 - Windows: target `Windows 11 ARM` first for local smoke coverage, with Windows x64 built in CI, packaged as NSIS installers.
-- Linux: target `Ubuntu 24.04.3 ARM64` first for local smoke coverage, with Linux x64 built in CI, packaged as AppImage plus `.deb`.
+- Linux: target `Ubuntu 24.04.3 ARM64` first for local `.deb` smoke coverage and `Fedora 42 ARM64` for local `.rpm` smoke coverage, with Linux x64 built in CI. Linux is packaged as AppImage plus `.deb` and `.rpm`.
 - Defer x64 release-smoke claims until there is dedicated x64 VM, hardware or cloud runner coverage.
 
 ## Architecture Work
@@ -27,7 +27,7 @@ Make Susura release-ready on Windows ARM64 and Linux ARM64 first, using the loca
 
 ## Packaging Work
 
-- Replace the placeholder `dist:win` and `dist:linux` scripts with real platform packaging commands. The scripts now target Windows ARM64/x64 NSIS and Linux ARM64/x64 AppImage plus `.deb`.
+- Replace the placeholder `dist:win` and `dist:linux` scripts with real platform packaging commands. The scripts now target Windows ARM64/x64 NSIS and Linux ARM64/x64 AppImage, `.deb` and `.rpm`.
 - Make `electron-builder.config.cjs` platform-aware:
   - macOS bundles `susura-desktop-backend` and `SusuraAudioHelper`.
   - Windows/Linux bundle `susura-desktop-backend`, Pi resources, model resources and icons, but not the Swift helper.

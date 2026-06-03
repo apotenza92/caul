@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -8,7 +8,31 @@ const execFileAsync = promisify(execFile);
 const transcriptionExpectedPhrase = 'Susura release transcription smoke. Local transcription emits confirmed text.';
 
 const profiles = {
+  fedora: {
+    os: 'linux',
+    packageType: 'rpm',
+    defaultName: 'Fedora 42 ARM64',
+    envName: 'SUSURA_FEDORA_VM_NAME',
+    packageEnv: 'SUSURA_FEDORA_PACKAGE_PATH',
+    repoEnv: 'SUSURA_FEDORA_VM_REPO',
+    defaultRepo: '/root/susura-rpm-build',
+    defaultPackagePath: '/root/susura-rpm-build/release/susura-arm64.rpm',
+    userEnv: 'SUSURA_FEDORA_VM_SSH_USER',
+    defaultUser: 'alex',
+    hostEnv: 'SUSURA_FEDORA_VM_SSH_HOST',
+    defaultHost: '10.211.55.16',
+    knownHostsEnv: 'SUSURA_FEDORA_VM_KNOWN_HOSTS',
+    defaultKnownHosts: '/tmp/susura_fedora_known_hosts',
+    modelEnv: 'SUSURA_FEDORA_PARAKEET_MODEL_DIR',
+    defaultModelDir: '/home/alex/.local/share/com.pais.handy/models/parakeet-tdt-0.6b-v3-int8',
+    installEnv: 'SUSURA_FEDORA_INSTALL_COMMAND',
+    defaultInstallCommand: 'dnf install -y',
+    packageInstallOnly: true,
+    transport: 'prlctl'
+  },
   linux: {
+    os: 'linux',
+    packageType: 'deb',
     defaultName: 'Ubuntu 24.04.3 ARM64',
     envName: 'SUSURA_LINUX_VM_NAME',
     packageEnv: 'SUSURA_LINUX_PACKAGE_PATH',
@@ -40,7 +64,7 @@ const profileName = process.argv[2];
 const profile = profiles[profileName];
 
 if (!profile) {
-  console.error('Usage: node scripts/smoke-parallels-release-vm.mjs <win|linux>');
+  console.error('Usage: node scripts/smoke-parallels-release-vm.mjs <win|linux|fedora>');
   process.exit(1);
 }
 
@@ -93,7 +117,7 @@ const state = extractValue(info.text, 'State');
 const guestTools = extractValue(info.text, 'GuestTools');
 const ipAddresses = extractValue(info.text, 'IP Addresses');
 const guestToolsReady = /\bstate=(?:installed|possibly_installed)\b/.test(guestTools);
-const ready = state === 'running' && (profileName === 'linux' || guestToolsReady);
+const ready = state === 'running' && (profile.os === 'linux' || guestToolsReady);
 
 if (!ready) {
   console.error(`VM release smoke blocked for "${vmName}".`);
@@ -110,7 +134,7 @@ if (!packagePath) {
   process.exit(1);
 }
 
-if (profileName === 'linux') {
+if (profile.os === 'linux') {
   await runLinuxPackageSmoke();
   process.exit(0);
 }
@@ -130,7 +154,6 @@ process.exit(1);
 async function runWindowsPackageSmoke() {
   const repoPath = process.env[profile.repoEnv] ?? profile.defaultRepo;
   const backendPath = `${repoPath}\\release\\win-arm64-unpacked\\resources\\bin\\susura-desktop-backend.exe`;
-  const stimulusScript = `${repoPath}\\scripts\\windows-audio-stimulus.ps1`;
   const packageCheck = await runPrlctl([
     'exec',
     vmName,
@@ -139,7 +162,6 @@ async function runWindowsPackageSmoke() {
     [
       `if not exist ${cmdQuote(packagePath)} (echo missing ${packagePath} && exit /b 2)`,
       `if not exist ${cmdQuote(backendPath)} (echo missing ${backendPath} && exit /b 2)`,
-      `if not exist ${cmdQuote(stimulusScript)} (echo missing ${stimulusScript} && exit /b 2)`,
       `if exist ${cmdQuote(packagePath)}\\Susura.exe (echo unpacked package ready) else (for %F in (${cmdQuote(packagePath)}) do @if %~zF LEQ 0 (echo empty ${packagePath} && exit /b 2))`
     ].join(' && ')
   ]);
@@ -155,11 +177,7 @@ async function runWindowsPackageSmoke() {
     vmName,
     'cmd.exe',
     '/c',
-    [
-      `start "Susura audio stimulus" /MIN powershell.exe -NoProfile -ExecutionPolicy Bypass -File ${cmdQuote(stimulusScript)}`,
-      'powershell.exe -NoProfile -Command "Start-Sleep -Seconds 1"',
-      `${cmdQuote(backendPath)} --stream-system-audio --duration 3 --smoke-summary`
-    ].join(' && ')
+    `${cmdQuote(backendPath)} --stream-system-audio --duration 3 --smoke-summary --windows-wasapi-smoke-tone`
   ], { timeout: 30_000 });
 
   if (!backendSmoke.ok) {
@@ -181,11 +199,7 @@ async function runWindowsPackageSmoke() {
     vmName,
     'cmd.exe',
     '/c',
-    [
-      `start "Susura audio restart stimulus" /MIN powershell.exe -NoProfile -ExecutionPolicy Bypass -File ${cmdQuote(stimulusScript)}`,
-      'powershell.exe -NoProfile -Command "Start-Sleep -Seconds 1"',
-      `${cmdQuote(backendPath)} --capture-restart-smoke --source system --duration 2`
-    ].join(' && ')
+    `${cmdQuote(backendPath)} --capture-restart-smoke --source system --duration 2 --windows-wasapi-smoke-tone`
   ], { timeout: 30_000 });
 
   if (!systemRestartSmoke.ok) {
@@ -319,13 +333,18 @@ async function runLinuxPackageSmoke() {
     process.exit(1);
   }
 
-  const packageCheck = await runSsh(sshUser, ipAddress, knownHosts, [
-    `test -f ${shellQuote(packagePath)}`,
-    `dpkg-deb -f ${shellQuote(packagePath)} Package | grep -qx susura`,
-    `dpkg-deb -f ${shellQuote(packagePath)} Architecture | grep -qx arm64`,
-    `dpkg-deb -c ${shellQuote(packagePath)} | grep -q '/opt/Susura/resources/bin/susura-desktop-backend$'`,
-    `test -x ${shellQuote(`${repoPath}/release/linux-arm64-unpacked/resources/bin/susura-desktop-backend`)}`
-  ].join(' && '));
+  const packageCheck = await runLinuxCommand(
+    [
+      `test -f ${shellQuote(packagePath)}`,
+      linuxPackageMetadataCheck(packagePath),
+      profile.packageInstallOnly
+        ? null
+        : `test -x ${shellQuote(`${repoPath}/release/linux-arm64-unpacked/resources/bin/susura-desktop-backend`)}`
+    ].filter(Boolean).join(' && '),
+    sshUser,
+    ipAddress,
+    knownHosts
+  );
 
   if (!packageCheck.ok) {
     console.error(`Linux packaged smoke failed while validating ${packagePath}.`);
@@ -333,18 +352,52 @@ async function runLinuxPackageSmoke() {
     process.exit(1);
   }
 
-  const installCheck = await runPrlctl([
-    'exec',
-    vmName,
-    '/usr/bin/dpkg',
-    '-i',
-    packagePath
-  ], { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 });
+  const installCheck = profile.packageType === 'rpm'
+    ? await runLinuxCommand(
+        `${process.env[profile.installEnv] ?? profile.defaultInstallCommand} ${shellQuote(packagePath)}`,
+        sshUser,
+        ipAddress,
+        knownHosts,
+        { timeout: 90_000, maxBuffer: 10 * 1024 * 1024 }
+      )
+    : await runPrlctl([
+        'exec',
+        vmName,
+        '/usr/bin/dpkg',
+        '-i',
+        packagePath
+      ], { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 });
 
   if (!installCheck.ok) {
     console.error(`Linux packaged smoke failed while installing ${packagePath}.`);
     console.error(installCheck.text);
     process.exit(1);
+  }
+
+  if (profile.packageInstallOnly) {
+    const installedCheck = await runLinuxCommand(
+      [
+        'rpm -q susura',
+        "rpm -ql susura | grep -q '/opt/Susura/resources/bin/susura-desktop-backend$'",
+        'test -x /opt/Susura/resources/bin/susura-desktop-backend'
+      ].join(' && '),
+      sshUser,
+      ipAddress,
+      knownHosts
+    );
+
+    if (!installedCheck.ok) {
+      console.error('Linux RPM install smoke failed while validating the installed package.');
+      console.error(installedCheck.text);
+      process.exit(1);
+    }
+
+    console.log(`VM: ${vmName}`);
+    console.log(`Profile: ${profileName}`);
+    console.log(`Guest IP Addresses: ${ipAddresses || 'not reported by prlctl'}`);
+    console.log(`Package artefact: ${packagePath}`);
+    console.log('RPM install smoke: ok');
+    return;
   }
 
   const backendPath = `${repoPath}/release/linux-arm64-unpacked/resources/bin/susura-desktop-backend`;
@@ -502,6 +555,49 @@ async function runLinuxPackageSmoke() {
   console.log(`Launch surface: ${launchSummary.surface}`);
   console.log(`Pre-setup privacy: ${formatPrivacySummary(launchSummary.privacy)}`);
   console.log(`Onboarding completion: ${formatCompletionSummary(launchSummary.completion)}`);
+}
+
+async function runLinuxCommand(command, sshUser, ipAddress, knownHosts, options = {}) {
+  if (profile.transport === 'prlctl') {
+    return runPrlctlShell(command, options);
+  }
+
+  return runSsh(sshUser, ipAddress, knownHosts, command, options);
+}
+
+async function runPrlctlShell(command, options = {}) {
+  const scriptName = `.susura-prlctl-${process.pid}-${Date.now()}.sh`;
+  const hostScriptPath = path.join(process.cwd(), scriptName);
+  const guestScriptPath = `/media/psf/susura/${scriptName}`;
+
+  await writeFile(hostScriptPath, `#!/usr/bin/env bash\nset -euo pipefail\n${command}\n`);
+
+  try {
+    return await runPrlctl([
+      'exec',
+      vmName,
+      '/bin/bash',
+      guestScriptPath
+    ], options);
+  } finally {
+    await unlink(hostScriptPath).catch(() => {});
+  }
+}
+
+function linuxPackageMetadataCheck(packagePath) {
+  if (profile.packageType === 'rpm') {
+    return [
+      `rpm -qp --queryformat '%{NAME}\\n' ${shellQuote(packagePath)} | grep -qx susura`,
+      `rpm -qp --queryformat '%{ARCH}\\n' ${shellQuote(packagePath)} | grep -Eq '^(aarch64|x86_64)$'`,
+      `rpm -qpl ${shellQuote(packagePath)} | grep -q '/opt/Susura/resources/bin/susura-desktop-backend$'`
+    ].join(' && ');
+  }
+
+  return [
+    `dpkg-deb -f ${shellQuote(packagePath)} Package | grep -qx susura`,
+    `dpkg-deb -f ${shellQuote(packagePath)} Architecture | grep -qx arm64`,
+    `dpkg-deb -c ${shellQuote(packagePath)} | grep -q '/opt/Susura/resources/bin/susura-desktop-backend$'`
+  ].join(' && ');
 }
 
 async function runSsh(user, host, knownHosts, command, options = {}) {
@@ -684,7 +780,7 @@ async function runLinuxTranscriptionSmoke(sshUser, ipAddress, knownHosts, backen
 async function runLinuxRendererTranscriptionSmoke(sshUser, ipAddress, knownHosts, repoPath) {
   const modelDir = process.env[profile.modelEnv] ?? profile.defaultModelDir;
   const userData = `${repoPath}/artifacts/linux-renderer-transcription-smoke-user-data`;
-  const localFixture = await createLocalTranscriptionFixture(5);
+  const localFixture = await createLocalTranscriptionFixture(1);
   const fixturePath = '/tmp/susura-renderer-known-16k.wav';
 
   const copy = await execFileAsync('scp', [
@@ -716,13 +812,16 @@ async function runLinuxRendererTranscriptionSmoke(sshUser, ipAddress, knownHosts
       `mkdir -p ${shellQuote(`${userData}/models`)}`,
       `ln -s ${shellQuote(modelDir)} ${shellQuote(`${userData}/models/parakeet-tdt-0.6b-v3-int8`)}`,
       `printf '%s\\n' ${shellQuote(JSON.stringify(setupStateSeed()))} > ${shellQuote(`${userData}/setup-state.json`)}`,
-      `((sleep 8; wpctl set-mute @DEFAULT_AUDIO_SINK@ 0 >/tmp/susura-renderer-pw-play.log 2>&1 || true; wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.70 >>/tmp/susura-renderer-pw-play.log 2>&1 || true; timeout 30 pw-play ${shellQuote(fixturePath)} >>/tmp/susura-renderer-pw-play.log 2>&1) &)`,
+      `((sleep 8; wpctl set-mute @DEFAULT_AUDIO_SINK@ 0 >/tmp/susura-renderer-pw-play.log 2>&1 || true; wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.70 >>/tmp/susura-renderer-pw-play.log 2>&1 || true; deadline=$((SECONDS + 55)); while [ "$SECONDS" -lt "$deadline" ]; do timeout 18 pw-play ${shellQuote(fixturePath)} >>/tmp/susura-renderer-pw-play.log 2>&1 || true; sleep 1; done) &)`,
       [
         'DISPLAY=:0',
-        'SUSURA_RENDERER_TRANSCRIPTION_SMOKE_MS=45000',
+        'SUSURA_RENDERER_TRANSCRIPTION_SMOKE_MS=65000',
         'SUSURA_DISABLE_MODEL_AUTO_DOWNLOAD=1',
         'SUSURA_LLM_DISABLE_PERSISTENT_PI=1',
         'SUSURA_RENDERER_TRANSCRIPTION_SMOKE_NO_LLM=1',
+        'SUSURA_RENDERER_TRANSCRIPTION_SMOKE_BRIDGE_START=1',
+        'SUSURA_PIPELINE_METRICS=1',
+        'SUSURA_ENDPOINT_ENERGY_THRESHOLD=0.0001',
         `SUSURA_USER_DATA_DIR=${shellQuote(userData)}`,
         `SUSURA_RENDERER_TRANSCRIPTION_EXPECTED=${shellQuote(transcriptionExpectedPhrase)}`,
         '/opt/Susura/susura'
@@ -753,6 +852,24 @@ async function createLocalTranscriptionFixture(repetitions = 1) {
     maxBuffer: 5 * 1024 * 1024
   });
   await execFileAsync('afconvert', ['-f', 'WAVE', '-d', 'LEI16@16000', '-c', '1', aiffPath, wavPath], {
+    timeout: 30_000,
+    maxBuffer: 5 * 1024 * 1024
+  });
+  await execFileAsync('python3', ['-c', [
+    'import struct, sys, wave',
+    'path = sys.argv[1]',
+    'with wave.open(path, "rb") as source:',
+    '    params = source.getparams()',
+    '    frames = source.readframes(source.getnframes())',
+    'samples = struct.unpack("<" + "h" * (len(frames) // 2), frames)',
+    'scaled = bytearray()',
+    'for sample in samples:',
+    '    value = max(-32768, min(32767, int(sample * 4)))',
+    '    scaled.extend(struct.pack("<h", value))',
+    'with wave.open(path, "wb") as output:',
+    '    output.setparams(params)',
+    '    output.writeframes(bytes(scaled))'
+  ].join('\n'), wavPath], {
     timeout: 30_000,
     maxBuffer: 5 * 1024 * 1024
   });
@@ -925,21 +1042,36 @@ function powershellString(value) {
 function linuxToneStimulusCommand(logPath) {
   const script = [
     'import math, struct, wave',
-    "path = '/tmp/susura-tone.wav'",
+    "path = '/tmp/susura-audio-stimulus.wav'",
     'rate = 48000',
     'seconds = 6',
+    'chords = [',
+    '    (261.63, 329.63, 392.00),',
+    '    (293.66, 369.99, 440.00),',
+    '    (246.94, 329.63, 392.00),',
+    '    (220.00, 277.18, 329.63),',
+    ']',
+    'step = int(rate * 0.5)',
     "with wave.open(path, 'wb') as audio:",
     '    audio.setnchannels(1)',
     '    audio.setsampwidth(2)',
     '    audio.setframerate(rate)',
     '    for n in range(rate * seconds):',
-    '        sample = int(0.25 * 32767 * math.sin(2 * math.pi * 880 * n / rate))',
+    '        chord = chords[(n // step) % len(chords)]',
+    '        position = (n % step) / step',
+    '        attack = min(1.0, position / 0.08)',
+    '        release = min(1.0, (1.0 - position) / 0.18)',
+    '        envelope = max(0.0, min(attack, release))',
+    '        mixed = 0.0',
+    '        for index, frequency in enumerate(chord):',
+    '            mixed += math.sin(2 * math.pi * frequency * n / rate) * (1.0 - index * 0.15)',
+    '        sample = int(mixed / len(chord) * envelope * 9000)',
     "        audio.writeframesraw(struct.pack('<h', sample))"
   ].join('\n');
 
   return [
     `python3 -c ${shellQuote(script)}`,
-    `(timeout 7 pw-play /tmp/susura-tone.wav >${shellQuote(logPath)} 2>&1 &)`
+    `(timeout 7 pw-play /tmp/susura-audio-stimulus.wav >${shellQuote(logPath)} 2>&1 &)`
   ].join(' && ');
 }
 

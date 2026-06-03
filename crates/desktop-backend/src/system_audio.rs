@@ -50,7 +50,10 @@ enum PlatformRunningSystemAudio {
     #[cfg(target_os = "macos")]
     Macos(susura_macos_capture::RunningCapture),
     #[cfg(target_os = "windows")]
-    Cpal(cpal::Stream),
+    Wasapi {
+        stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    },
     #[cfg(target_os = "linux")]
     PipeWire(std::process::Child),
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
@@ -63,7 +66,12 @@ impl PlatformRunningSystemAudio {
             #[cfg(target_os = "macos")]
             Self::Macos(capture) => capture.stop(),
             #[cfg(target_os = "windows")]
-            Self::Cpal(_) => {}
+            Self::Wasapi { stop, thread } => {
+                stop.store(true, std::sync::atomic::Ordering::SeqCst);
+                if let Some(thread) = thread.take() {
+                    let _ = thread.join();
+                }
+            }
             #[cfg(target_os = "linux")]
             Self::PipeWire(child) => {
                 let _ = child.kill();
@@ -104,11 +112,18 @@ fn level_for_samples(samples: &[f32]) -> Option<AudioLevel> {
         return None;
     }
 
-    let peak = samples.iter().fold(0.0_f32, |max, sample| max.max(sample.abs()));
+    let peak = samples
+        .iter()
+        .fold(0.0_f32, |max, sample| max.max(sample.abs()));
     let sum_squares = samples.iter().map(|sample| sample * sample).sum::<f32>();
     let rms = (sum_squares / samples.len() as f32).sqrt();
 
-    AudioLevel::new(AudioSource::System, peak.clamp(0.0, 1.0), rms.clamp(0.0, 1.0)).ok()
+    AudioLevel::new(
+        AudioSource::System,
+        peak.clamp(0.0, 1.0),
+        rms.clamp(0.0, 1.0),
+    )
+    .ok()
 }
 
 #[allow(dead_code)]
@@ -135,8 +150,10 @@ mod platform {
         transcribe_parakeet: bool,
     ) -> Result<(PlatformRunningSystemAudio, Receiver<SystemAudioUpdate>), Box<dyn std::error::Error>>
     {
-        let (capture, receiver) =
-            susura_macos_capture::RunningCapture::start_system_audio(repository_root, transcribe_parakeet)?;
+        let (capture, receiver) = susura_macos_capture::RunningCapture::start_system_audio(
+            repository_root,
+            transcribe_parakeet,
+        )?;
         let (sender, mapped_receiver) = mpsc::channel();
 
         thread::spawn(move || {
@@ -196,11 +213,17 @@ mod platform {
 mod platform {
     use super::{
         encode_pcm16_base64, level_for_samples, PlatformRunningSystemAudio, SystemAudioUpdate,
-        ToFloatSample,
     };
-    use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+    use std::collections::VecDeque;
     use std::path::Path;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc::{self, Receiver};
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
+    use wasapi::{
+        initialize_mta, AudioClient, DeviceEnumerator, Direction, SampleType, StreamMode,
+    };
 
     pub fn start(
         _repository_root: &Path,
@@ -208,111 +231,239 @@ mod platform {
     ) -> Result<(PlatformRunningSystemAudio, Receiver<SystemAudioUpdate>), Box<dyn std::error::Error>>
     {
         let (sender, receiver) = mpsc::channel();
-        let host = cpal::default_host();
-        let device = system_audio_device(&host)?;
-        let config = system_audio_config(&device)?;
-        let sample_rate_hz = config.sample_rate();
-        let channels = config.channels();
-        let stream_config = config.config();
-        let error_sender = sender.clone();
-        let err_fn = move |error| {
-            let _ = error_sender.send(SystemAudioUpdate::Error(format!(
-                "System audio capture failed: {error}"
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = Arc::clone(&stop);
+
+        let thread = thread::spawn(move || run_wasapi_loopback(sender, thread_stop));
+
+        Ok((
+            PlatformRunningSystemAudio::Wasapi {
+                stop,
+                thread: Some(thread),
+            },
+            receiver,
+        ))
+    }
+
+    fn run_wasapi_loopback(sender: mpsc::Sender<SystemAudioUpdate>, stop: Arc<AtomicBool>) {
+        if let Err(error) = run_wasapi_loopback_inner(&sender, stop) {
+            let _ = sender.send(SystemAudioUpdate::Error(format!(
+                "WASAPI loopback capture failed: {error}"
             )));
+        }
+
+        let _ = sender.send(SystemAudioUpdate::Stopped);
+    }
+
+    fn run_wasapi_loopback_inner(
+        sender: &mpsc::Sender<SystemAudioUpdate>,
+        stop: Arc<AtomicBool>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        initialize_mta().ok()?;
+
+        let enumerator = DeviceEnumerator::new()?;
+        let device = enumerator.get_default_device(&Direction::Render)?;
+        let mut audio_client: AudioClient = device.get_iaudioclient()?;
+        let desired_format = audio_client.get_mixformat()?;
+        let sample_rate_hz = desired_format.get_samplespersec();
+        let channels = desired_format.get_nchannels();
+        let sample_type = desired_format.get_subformat()?;
+        let bits_per_sample = desired_format.get_bitspersample();
+        let block_align = desired_format.get_blockalign() as usize;
+        let (_default_period, min_period) = audio_client.get_device_period()?;
+        let mode = StreamMode::PollingShared {
+            autoconvert: true,
+            buffer_duration_hns: min_period,
         };
 
-        let _ = sender.send(SystemAudioUpdate::Stage(system_audio_started_message()));
+        audio_client.initialize_client(&desired_format, &Direction::Capture, &mode)?;
+        let capture_client = audio_client.get_audiocaptureclient()?;
+        let mut sample_queue = VecDeque::<u8>::with_capacity(block_align * 4096);
+
+        let _ = sender.send(SystemAudioUpdate::Stage(
+            "WASAPI polling loopback capture started".to_string(),
+        ));
         let _ = sender.send(SystemAudioUpdate::Started {
             sample_rate_hz,
             channels,
         });
 
-        let stream = match config.sample_format() {
-            cpal::SampleFormat::F32 => {
-                build_system_input_stream::<f32>(&device, &stream_config, sender, err_fn)?
-            }
-            cpal::SampleFormat::I16 => {
-                build_system_input_stream::<i16>(&device, &stream_config, sender, err_fn)?
-            }
-            cpal::SampleFormat::U16 => {
-                build_system_input_stream::<u16>(&device, &stream_config, sender, err_fn)?
-            }
-            sample_format => {
-                return Err(format!("Unsupported system audio sample format: {sample_format:?}").into());
-            }
-        };
+        audio_client.start_stream()?;
 
-        stream.play()?;
+        while !stop.load(Ordering::SeqCst) {
+            capture_client.read_from_device_to_deque(&mut sample_queue)?;
 
-        Ok((PlatformRunningSystemAudio::Cpal(stream), receiver))
-    }
+            while sample_queue.len() >= block_align * 256 {
+                let mut bytes = Vec::with_capacity(block_align * 256);
 
-    fn system_audio_device(host: &cpal::Host) -> Result<cpal::Device, Box<dyn std::error::Error>> {
-        host.default_output_device()
-            .ok_or_else(|| "Windows did not return a default output device for WASAPI loopback.".into())
-    }
+                for _ in 0..(block_align * 256) {
+                    if let Some(byte) = sample_queue.pop_front() {
+                        bytes.push(byte);
+                    }
+                }
 
-    fn system_audio_config(
-        device: &cpal::Device,
-    ) -> Result<cpal::SupportedStreamConfig, Box<dyn std::error::Error>> {
-        if let Ok(config) = device.default_input_config() {
-            return Ok(config);
-        }
-
-        if let Ok(config) = device.default_output_config() {
-            return Ok(config);
-        }
-
-        let mut configs = device.supported_input_configs()?;
-        let preferred_rate = 48_000;
-
-        configs
-            .find_map(|range| {
-                range
-                    .clone()
-                    .try_with_sample_rate(preferred_rate)
-                    .or_else(|| Some(range.with_max_sample_rate()))
-            })
-            .ok_or_else(|| "Windows output device did not expose a WASAPI loopback input config.".into())
-    }
-
-    fn build_system_input_stream<T>(
-        device: &cpal::Device,
-        config: &cpal::StreamConfig,
-        sender: mpsc::Sender<SystemAudioUpdate>,
-        err_fn: impl FnMut(cpal::StreamError) + Send + 'static,
-    ) -> Result<cpal::Stream, cpal::BuildStreamError>
-    where
-        T: Copy + cpal::SizedSample + ToFloatSample,
-    {
-        let sample_rate_hz = config.sample_rate;
-        let channels = config.channels;
-
-        device.build_input_stream(
-            config,
-            move |data: &[T], _| {
-                let samples = data
-                    .iter()
-                    .map(|sample| ToFloatSample::to_float_sample(*sample))
-                    .collect::<Vec<_>>();
+                let samples = decode_wasapi_samples(&bytes, sample_type, bits_per_sample);
 
                 if let Some(level) = level_for_samples(&samples) {
                     let _ = sender.send(SystemAudioUpdate::Level(level));
                 }
 
-                let pcm16_base64 = encode_pcm16_base64(&samples);
                 let _ = sender.send(SystemAudioUpdate::AudioFrame {
                     sample_rate_hz,
                     channels,
-                    pcm16_base64,
+                    pcm16_base64: encode_pcm16_base64(&samples),
                 });
-            },
-            err_fn,
-            None,
-        )
+            }
+
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        audio_client.stop_stream()?;
+
+        Ok(())
     }
-    fn system_audio_started_message() -> String {
-        "WASAPI loopback capture started".to_string()
+
+    fn decode_wasapi_samples(
+        bytes: &[u8],
+        sample_type: SampleType,
+        bits_per_sample: u16,
+    ) -> Vec<f32> {
+        match (sample_type, bits_per_sample) {
+            (SampleType::Float, 32) => bytes
+                .chunks_exact(4)
+                .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                .collect(),
+            (SampleType::Int, 16) => bytes
+                .chunks_exact(2)
+                .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]) as f32 / i16::MAX as f32)
+                .collect(),
+            (SampleType::Int, 24) => bytes
+                .chunks_exact(3)
+                .map(|chunk| {
+                    let value = i32::from_le_bytes([
+                        chunk[0],
+                        chunk[1],
+                        chunk[2],
+                        if chunk[2] & 0x80 == 0 { 0x00 } else { 0xff },
+                    ]);
+                    value as f32 / 8_388_607.0
+                })
+                .collect(),
+            (SampleType::Int, 32) => bytes
+                .chunks_exact(4)
+                .map(|chunk| {
+                    i32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]) as f32
+                        / i32::MAX as f32
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn spawn_wasapi_smoke_tone(duration: std::time::Duration) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        if let Err(error) = play_wasapi_smoke_tone(duration) {
+            eprintln!("Windows WASAPI smoke tone failed: {error}");
+        }
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn play_wasapi_smoke_tone(duration: std::time::Duration) -> Result<(), Box<dyn std::error::Error>> {
+    use std::collections::VecDeque;
+    use std::f32::consts::PI;
+    use wasapi::{initialize_mta, DeviceEnumerator, Direction, StreamMode};
+
+    initialize_mta().ok()?;
+
+    let enumerator = DeviceEnumerator::new()?;
+    let device = enumerator.get_default_device(&Direction::Render)?;
+    let mut audio_client = device.get_iaudioclient()?;
+    let desired_format = audio_client.get_mixformat()?;
+    let block_align = desired_format.get_blockalign() as usize;
+    let sample_rate_hz = desired_format.get_samplespersec();
+    let channels = desired_format.get_nchannels();
+    let sample_type = desired_format.get_subformat()?;
+    let bits_per_sample = desired_format.get_bitspersample();
+    let mode = StreamMode::PollingShared {
+        autoconvert: false,
+        buffer_duration_hns: 0,
+    };
+
+    audio_client.initialize_client(&desired_format, &Direction::Render, &mode)?;
+    let render_client = audio_client.get_audiorenderclient()?;
+    let total_frames = duration
+        .as_secs()
+        .saturating_mul(sample_rate_hz as u64)
+        .saturating_add(duration.subsec_nanos() as u64 * sample_rate_hz as u64 / 1_000_000_000);
+    let mut rendered_frames = 0_u64;
+    let mut sample_queue = VecDeque::<u8>::with_capacity(block_align * 4096);
+
+    audio_client.start_stream()?;
+
+    while rendered_frames < total_frames {
+        let available_frames = audio_client.get_available_space_in_frames()?.max(1) as u64;
+        let frames_to_write = available_frames.min(total_frames - rendered_frames) as usize;
+        let frames_to_write = frames_to_write.min(256);
+
+        for frame_offset in 0..frames_to_write {
+            let frame_index = rendered_frames + frame_offset as u64;
+            let elapsed = frame_index as f32 / sample_rate_hz as f32;
+            let envelope = if elapsed < 0.08 { elapsed / 0.08 } else { 1.0 };
+            let sample = ((2.0 * PI * 440.0 * elapsed).sin()
+                + (2.0 * PI * 659.25 * elapsed).sin() * 0.65)
+                * 0.18
+                * envelope.min(1.0);
+
+            for _ in 0..channels {
+                append_wasapi_tone_sample(&mut sample_queue, sample, sample_type, bits_per_sample)?;
+            }
+        }
+
+        render_client.write_to_device_from_deque(frames_to_write, &mut sample_queue, None)?;
+        rendered_frames += frames_to_write as u64;
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+
+    audio_client.stop_stream()?;
+
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn append_wasapi_tone_sample(
+    sample_queue: &mut std::collections::VecDeque<u8>,
+    sample: f32,
+    sample_type: wasapi::SampleType,
+    bits_per_sample: u16,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match (sample_type, bits_per_sample) {
+        (wasapi::SampleType::Float, 32) => {
+            sample_queue.extend(sample.to_le_bytes());
+            Ok(())
+        }
+        (wasapi::SampleType::Int, 16) => {
+            let value = (sample.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16;
+            sample_queue.extend(value.to_le_bytes());
+            Ok(())
+        }
+        (wasapi::SampleType::Int, 24) => {
+            let value = (sample.clamp(-1.0, 1.0) * 8_388_607.0).round() as i32;
+            let bytes = value.to_le_bytes();
+            sample_queue.extend([bytes[0], bytes[1], bytes[2]]);
+            Ok(())
+        }
+        (wasapi::SampleType::Int, 32) => {
+            let value = (sample.clamp(-1.0, 1.0) * i32::MAX as f32).round() as i32;
+            sample_queue.extend(value.to_le_bytes());
+            Ok(())
+        }
+        _ => Err(format!(
+            "unsupported WASAPI smoke tone format: {sample_type:?} {bits_per_sample}-bit"
+        )
+        .into()),
     }
 }
 

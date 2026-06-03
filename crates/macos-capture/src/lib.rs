@@ -286,6 +286,9 @@ fn request_terminate(child: &mut Child) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn parses_system_level_as_audio_level() {
@@ -323,6 +326,9 @@ mod tests {
 
     #[test]
     fn builds_swift_fallback_command() {
+        let _guard = ENV_LOCK.lock().expect("env lock should be available");
+        std::env::remove_var("SUSURA_AUDIO_HELPER_PATH");
+
         let command = HelperCommand::system_audio("/tmp/susura-missing-root", false);
 
         assert_eq!(command.command, PathBuf::from("swift"));
@@ -331,6 +337,7 @@ mod tests {
 
     #[test]
     fn uses_configured_audio_helper_path() {
+        let _guard = ENV_LOCK.lock().expect("env lock should be available");
         let helper_path = std::env::current_exe().expect("test executable path");
         std::env::set_var("SUSURA_AUDIO_HELPER_PATH", &helper_path);
 

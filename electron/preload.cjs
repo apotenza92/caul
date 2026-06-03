@@ -88,6 +88,7 @@ contextBridge.exposeInMainWorld('susura', {
           ipcRenderer.off('susura:parakeet-status', listener);
         };
       },
+      remove: (modelId) => ipcRenderer.invoke('susura:parakeet-remove', { modelId }),
       setModel: (modelId) => ipcRenderer.invoke('susura:parakeet-set-model', { modelId }),
       status: () => ipcRenderer.invoke('susura:parakeet-status')
     },
@@ -97,7 +98,7 @@ contextBridge.exposeInMainWorld('susura', {
       list: () => ipcRenderer.invoke('susura:prompt-templates-list'),
       reset: () => ipcRenderer.invoke('susura:prompt-templates-reset'),
       save: (template) => ipcRenderer.invoke('susura:prompt-templates-save', { template }),
-      setSelected: (id) => ipcRenderer.invoke('susura:prompt-templates-set-selected', { id })
+      setSelected: (ids) => ipcRenderer.invoke('susura:prompt-templates-set-selected', { ids })
     },
     quit: () => ipcRenderer.invoke('susura:settings-quit'),
     reset: () => ipcRenderer.invoke('susura:settings-reset')

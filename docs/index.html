@@ -475,6 +475,7 @@
         <div id="format-toggle" class="format-toggle" aria-label="Linux package format">
           <button id="format-appimage" class="format-btn active" type="button">AppImage</button>
           <button id="format-deb" class="format-btn" type="button">Ubuntu / Debian (.deb)</button>
+          <button id="format-rpm" class="format-btn" type="button">Fedora / RHEL (.rpm)</button>
         </div>
 
         <section id="download-section" class="download-wrapper">
@@ -530,8 +531,10 @@
           linux: {
             appImageArm64: `https://github.com/${repo}/releases/latest/download/susura-arm64.AppImage`,
             debArm64: `https://github.com/${repo}/releases/latest/download/susura-arm64.deb`,
+            rpmArm64: `https://github.com/${repo}/releases/latest/download/susura-arm64.rpm`,
             appImageX64: `https://github.com/${repo}/releases/latest/download/susura-x64.AppImage`,
-            debX64: `https://github.com/${repo}/releases/latest/download/susura-x64.deb`
+            debX64: `https://github.com/${repo}/releases/latest/download/susura-x64.deb`,
+            rpmX64: `https://github.com/${repo}/releases/latest/download/susura-x64.rpm`
           },
           mac: `https://github.com/${repo}/releases/latest/download/Susura-macos-arm64.zip`,
           windows: {
@@ -543,8 +546,10 @@
           linux: {
             appImageArm64: `https://github.com/${repo}/releases/latest/download/susura-beta-arm64.AppImage`,
             debArm64: `https://github.com/${repo}/releases/latest/download/susura-beta-arm64.deb`,
+            rpmArm64: `https://github.com/${repo}/releases/latest/download/susura-beta-arm64.rpm`,
             appImageX64: `https://github.com/${repo}/releases/latest/download/susura-beta-x64.AppImage`,
-            debX64: `https://github.com/${repo}/releases/latest/download/susura-beta-x64.deb`
+            debX64: `https://github.com/${repo}/releases/latest/download/susura-beta-x64.deb`,
+            rpmX64: `https://github.com/${repo}/releases/latest/download/susura-beta-x64.rpm`
           },
           mac: `https://github.com/${repo}/releases/latest/download/Susura-Beta-macos-arm64.zip`,
           windows: {
@@ -556,18 +561,22 @@
       const assetSizes = {
         "susura-arm64.AppImage": 196425023,
         "susura-arm64.deb": 129561944,
+        "susura-arm64.rpm": 129561944,
         "susura-beta-arm64.AppImage": 196428377,
         "susura-beta-arm64.deb": 129583424,
+        "susura-beta-arm64.rpm": 129583424,
         "Susura-Beta-macos-arm64.zip": 191359697,
         "Susura-Beta-windows-arm64-setup.exe": 143720983,
         "Susura-Beta-windows-x64-setup.exe": 152480606,
         "susura-beta-x64.AppImage": 195554514,
         "susura-beta-x64.deb": 129668900,
+        "susura-beta-x64.rpm": 129668900,
         "Susura-macos-arm64.zip": 191178473,
         "Susura-windows-arm64-setup.exe": 143720180,
         "Susura-windows-x64-setup.exe": 152482194,
         "susura-x64.AppImage": 195550088,
-        "susura-x64.deb": 129671352
+        "susura-x64.deb": 129671352,
+        "susura-x64.rpm": 129671352
       };
       const state = {
         channel: "stable",
@@ -641,8 +650,10 @@
               downloads.beta.linux = {
                 appImageArm64: `${base}/susura-beta-arm64.AppImage`,
                 debArm64: `${base}/susura-beta-arm64.deb`,
+                rpmArm64: `${base}/susura-beta-arm64.rpm`,
                 appImageX64: `${base}/susura-beta-x64.AppImage`,
-                debX64: `${base}/susura-beta-x64.deb`
+                debX64: `${base}/susura-beta-x64.deb`,
+                rpmX64: `${base}/susura-beta-x64.rpm`
               };
             }
           }
@@ -727,7 +738,12 @@
           const architectureLabel = state.arch === "arm64" ? "ARM64" : "x64";
           const appImage = linuxDownloads[`appImage${suffix}`] || "";
           const deb = linuxDownloads[`deb${suffix}`] || "";
-          const selectedDownload = state.linuxFormat === "deb" ? deb : appImage;
+          const rpm = linuxDownloads[`rpm${suffix}`] || "";
+          const selectedDownload = state.linuxFormat === "deb"
+            ? deb
+            : state.linuxFormat === "rpm"
+              ? rpm
+              : appImage;
 
           if (!selectedDownload) {
             downloadSection.style.display = "none";
@@ -742,7 +758,9 @@
           download.href = selectedDownload;
           const label = state.linuxFormat === "deb"
             ? `Download .deb for Ubuntu ${architectureLabel}`
-            : `Download AppImage for Linux ${architectureLabel}`;
+            : state.linuxFormat === "rpm"
+              ? `Download .rpm for Fedora ${architectureLabel}`
+              : `Download AppImage for Linux ${architectureLabel}`;
           downloadLabel.textContent = labelWithSize(label, selectedDownload);
           download.removeAttribute("aria-disabled");
           download.removeAttribute("tabindex");
@@ -798,6 +816,10 @@
       });
       document.getElementById("format-deb").addEventListener("click", () => {
         state.linuxFormat = "deb";
+        updateDownload();
+      });
+      document.getElementById("format-rpm").addEventListener("click", () => {
+        state.linuxFormat = "rpm";
         updateDownload();
       });
       document.getElementById("homebrew-box").addEventListener("click", async () => {

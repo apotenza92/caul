@@ -4,6 +4,11 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 
 const profiles = {
+  fedora: {
+    defaultName: 'Fedora 42 ARM64',
+    envName: 'SUSURA_FEDORA_VM_NAME',
+    probe: ['/usr/bin/uname', '-a']
+  },
   linux: {
     defaultName: 'Ubuntu 24.04.3 ARM64',
     envName: 'SUSURA_LINUX_VM_NAME',
@@ -20,7 +25,7 @@ const profileName = process.argv[2];
 const profile = profiles[profileName];
 
 if (!profile) {
-  console.error('Usage: node scripts/check-parallels-release-vm.mjs <win|linux>');
+  console.error('Usage: node scripts/check-parallels-release-vm.mjs <win|linux|fedora>');
   process.exit(1);
 }
 

@@ -61,6 +61,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             StreamSystemAudioOptions {
                 duration_limit: parse_duration_limit(&args),
                 smoke_summary: args.iter().any(|arg| arg == "--smoke-summary"),
+                windows_wasapi_smoke_tone: args
+                    .iter()
+                    .any(|arg| arg == "--windows-wasapi-smoke-tone"),
             },
         )?;
         return Ok(());
@@ -78,6 +81,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         run_capture_restart_smoke(CaptureRestartSmokeOptions {
             duration_limit: parse_duration_limit(&args).unwrap_or(Duration::from_secs(2)),
             source: parse_capture_restart_source(&args),
+            windows_wasapi_smoke_tone: args.iter().any(|arg| arg == "--windows-wasapi-smoke-tone"),
         })?;
         return Ok(());
     }
@@ -154,6 +158,7 @@ fn parse_capture_restart_source(args: &[String]) -> CaptureRestartSource {
 struct StreamSystemAudioOptions {
     duration_limit: Option<Duration>,
     smoke_summary: bool,
+    windows_wasapi_smoke_tone: bool,
 }
 
 struct StreamMicrophoneOptions {
@@ -164,6 +169,7 @@ struct StreamMicrophoneOptions {
 struct CaptureRestartSmokeOptions {
     duration_limit: Duration,
     source: CaptureRestartSource,
+    windows_wasapi_smoke_tone: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -195,13 +201,13 @@ fn stream_system_audio(
     options: StreamSystemAudioOptions,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let started_at = Instant::now();
-    let smoke_summary =
-        collect_system_audio_smoke_summary(
-            transcribe_parakeet,
-            options.duration_limit,
-            !options.smoke_summary,
-            true,
-        )?;
+    let smoke_summary = collect_system_audio_smoke_summary(
+        transcribe_parakeet,
+        options.duration_limit,
+        !options.smoke_summary,
+        true,
+        options.windows_wasapi_smoke_tone,
+    )?;
 
     if options.smoke_summary {
         emit_json(json!({
@@ -223,6 +229,7 @@ fn collect_system_audio_smoke_summary(
     duration_limit: Option<Duration>,
     emit_updates: bool,
     install_signal_handler: bool,
+    windows_wasapi_smoke_tone: bool,
 ) -> Result<SystemAudioSmokeSummary, Box<dyn std::error::Error>> {
     let running = Arc::new(AtomicBool::new(true));
 
@@ -235,8 +242,17 @@ fn collect_system_audio_smoke_summary(
     }
 
     let repository_root = env::current_dir()?;
-    let (mut capture, receiver) =
-        RunningSystemAudio::start(repository_root, transcribe_parakeet)?;
+    let (mut capture, receiver) = RunningSystemAudio::start(repository_root, transcribe_parakeet)?;
+    #[cfg(target_os = "windows")]
+    let tone_thread = if windows_wasapi_smoke_tone {
+        Some(system_audio::spawn_wasapi_smoke_tone(
+            duration_limit.unwrap_or(Duration::from_secs(3)),
+        ))
+    } else {
+        None
+    };
+    #[cfg(not(target_os = "windows"))]
+    let _ = windows_wasapi_smoke_tone;
     let started_at = Instant::now();
     let mut smoke_summary = SystemAudioSmokeSummary::default();
 
@@ -258,13 +274,15 @@ fn collect_system_audio_smoke_summary(
     }
 
     capture.stop();
+    #[cfg(target_os = "windows")]
+    if let Some(tone_thread) = tone_thread {
+        let _ = tone_thread.join();
+    }
 
     Ok(smoke_summary)
 }
 
-fn stream_microphone(
-    options: StreamMicrophoneOptions,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn stream_microphone(options: StreamMicrophoneOptions) -> Result<(), Box<dyn std::error::Error>> {
     let summary = local_transcription::run_microphone_smoke(options.duration_limit)?;
 
     if options.smoke_summary {
@@ -285,9 +303,17 @@ fn stream_microphone(
 fn run_capture_restart_smoke(
     options: CaptureRestartSmokeOptions,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let first = run_capture_restart_cycle(options.source, options.duration_limit)?;
+    let first = run_capture_restart_cycle(
+        options.source,
+        options.duration_limit,
+        options.windows_wasapi_smoke_tone,
+    )?;
     wait_between_restart_cycles();
-    let second = run_capture_restart_cycle(options.source, options.duration_limit)?;
+    let second = run_capture_restart_cycle(
+        options.source,
+        options.duration_limit,
+        options.windows_wasapi_smoke_tone,
+    )?;
 
     let ok = first.ok() && second.ok();
 
@@ -301,13 +327,18 @@ fn run_capture_restart_smoke(
     if ok {
         Ok(())
     } else {
-        Err(format!("{} capture did not restart cleanly", options.source.as_str()).into())
+        Err(format!(
+            "{} capture did not restart cleanly",
+            options.source.as_str()
+        )
+        .into())
     }
 }
 
 fn run_capture_restart_cycle(
     source: CaptureRestartSource,
     duration_limit: Duration,
+    windows_wasapi_smoke_tone: bool,
 ) -> Result<CaptureRestartCycleSummary, Box<dyn std::error::Error>> {
     match source {
         CaptureRestartSource::Microphone => {
@@ -322,8 +353,13 @@ fn run_capture_restart_cycle(
             })
         }
         CaptureRestartSource::System => {
-            let summary =
-                collect_system_audio_smoke_summary(false, Some(duration_limit), false, false)?;
+            let summary = collect_system_audio_smoke_summary(
+                false,
+                Some(duration_limit),
+                false,
+                false,
+                windows_wasapi_smoke_tone,
+            )?;
 
             Ok(CaptureRestartCycleSummary {
                 audio_frames: summary.audio_frames,
@@ -358,10 +394,7 @@ fn wait_between_restart_cycles() {
     std::thread::sleep(Duration::from_millis(300));
 }
 
-fn apply_smoke_summary_update(
-    summary: &mut SystemAudioSmokeSummary,
-    update: &SystemAudioUpdate,
-) {
+fn apply_smoke_summary_update(summary: &mut SystemAudioSmokeSummary, update: &SystemAudioUpdate) {
     match update {
         SystemAudioUpdate::Started { .. } => {
             summary.capture_started = true;

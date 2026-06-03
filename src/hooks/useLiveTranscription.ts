@@ -10,7 +10,7 @@ import type { CaptureSource } from '../foundation/capture';
 import { getRuntimeContext } from '../foundation/runtime';
 
 const awaitingResponseText = '';
-const idleLlmText = 'Auto Send is on.\nStop listening to send to AI.';
+const idleLlmText = 'Auto Send is on.\nStop listening to send transcript to AI';
 const idleTranscriptText = 'Your live transcript will appear here once you start listening.';
 let rendererTranscriptDebugEnabled = import.meta.env.VITE_SUSURA_TRANSCRIPT_DEBUG_LOG === '1';
 
@@ -22,6 +22,7 @@ export type LiveTranscriptionOptions = {
 export type StopTranscriptionOptions = {
   llmModel: LlmModel;
   llmReasoning: LlmReasoning;
+  generalInstructionsText?: string;
   promptTemplateAttachments?: PromptTemplateAttachment[];
   promptTemplateText?: string;
   sendToLlm?: boolean;
@@ -36,6 +37,7 @@ export type TranscriptSession = {
 export type AiResponseSession = {
   id: string;
   isWaiting?: boolean;
+  request: string;
   requestedAt: string;
   response: string;
 };
@@ -161,6 +163,7 @@ export function useLiveTranscription() {
   async function stop({
     llmModel = 'openai-codex/gpt-5.4-mini',
     llmReasoning = 'off',
+    generalInstructionsText,
     promptTemplateAttachments = [],
     promptTemplateText,
     sendToLlm = false
@@ -190,7 +193,7 @@ export function useLiveTranscription() {
     publishTranscript(transcript);
 
     if (sendToLlm && transcript) {
-      const requestTranscript = formatPromptTemplateRequest(transcript, promptTemplateText);
+      const requestTranscript = formatPromptTemplateRequest(transcript, promptTemplateText, generalInstructionsText);
       const requestedAt = new Date().toISOString();
       const responseId = `ai-response-${Date.now()}`;
       setIsAsking(true);
@@ -201,6 +204,7 @@ export function useLiveTranscription() {
       setLlmResponses((current) => [...current, {
         id: responseId,
         isWaiting: true,
+        request: requestTranscript,
         requestedAt,
         response: ''
       }]);
@@ -250,14 +254,16 @@ export function useLiveTranscription() {
     llmReasoning = 'off',
     promptTemplateAttachments = [],
     promptTemplateText,
+    generalInstructionsText,
     transcript
   }: Partial<Pick<StopTranscriptionOptions, 'llmModel' | 'llmReasoning'>> & {
     promptTemplateAttachments?: PromptTemplateAttachment[];
     promptTemplateText?: string;
+    generalInstructionsText?: string;
     transcript?: string;
   } = {}) {
     const bridge = getTranscriptionBridge();
-    const requestTranscript = formatPromptTemplateRequest(transcript ?? output, promptTemplateText);
+    const requestTranscript = formatPromptTemplateRequest(transcript ?? output, promptTemplateText, generalInstructionsText);
 
     if (!bridge || !requestTranscript || isSetupMessage(requestTranscript) || requestTranscript === idleTranscriptText) {
       return;
@@ -273,6 +279,7 @@ export function useLiveTranscription() {
     setLlmResponses((current) => [...current, {
       id: responseId,
       isWaiting: true,
+      request: requestTranscript,
       requestedAt,
       response: ''
     }]);
@@ -322,7 +329,7 @@ export function useLiveTranscription() {
         const before = renderTranscript();
         const beforeSnapshot = getTranscriptDebugSnapshot();
         const beforeFinalLines = finalTranscriptLinesRef.current;
-        const partialKey = getPartialTranscriptSlotKey(line.source);
+        const partialKey = getPartialTranscriptSlotKey(line);
         const shouldClearPartial = eventUtteranceKey === undefined
           || partialTranscriptLinesRef.current.get(partialKey)?.key === eventUtteranceKey;
 
@@ -397,7 +404,7 @@ export function useLiveTranscription() {
           return;
         }
 
-        partialTranscriptLinesRef.current.set(getPartialTranscriptSlotKey(eventSource), line);
+        partialTranscriptLinesRef.current.set(getPartialTranscriptSlotKey(line), line);
         const after = renderTranscript();
         logTranscriptDebug('renderer.partial_displayed', {
           afterSnapshot: getTranscriptDebugSnapshot(),
@@ -807,15 +814,24 @@ function isTranscriptText(output: string) {
     && !isSetupMessage(output);
 }
 
-function formatPromptTemplateRequest(transcript: string, promptTemplateText: string | undefined) {
+function formatPromptTemplateRequest(
+  transcript: string,
+  promptTemplateText: string | undefined,
+  generalInstructionsText: string | undefined
+) {
   const trimmedTranscript = transcript.trim();
+  const trimmedGeneralInstructions = generalInstructionsText?.trim();
   const trimmedTemplate = promptTemplateText?.trim();
+  const instructionBlocks = [
+    trimmedGeneralInstructions ? `General instructions:\n${trimmedGeneralInstructions}` : null,
+    trimmedTemplate
+  ].filter((block): block is string => Boolean(block));
 
-  if (!trimmedTemplate) {
+  if (instructionBlocks.length === 0) {
     return trimmedTranscript;
   }
 
-  return `${trimmedTemplate}\n\nTranscript:\n${trimmedTranscript}`;
+  return `${instructionBlocks.join('\n\n')}\n\nTranscript:\n${trimmedTranscript}`;
 }
 
 function getTranscriptHeader(startedAt: Date | null) {
@@ -891,8 +907,8 @@ function isStalePartialTranscriptLine(partial: TranscriptLine, finalLines: Trans
   ));
 }
 
-function getPartialTranscriptSlotKey(source: CaptureSource | undefined) {
-  return source ?? 'unknown';
+function getPartialTranscriptSlotKey(line: TranscriptLine) {
+  return line.key ?? line.source ?? 'unknown';
 }
 
 function renderPartialTranscriptDebugText(

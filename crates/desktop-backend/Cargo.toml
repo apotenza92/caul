@@ -19,3 +19,6 @@ transcribe-rs.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 susura-macos-capture = { path = "../macos-capture" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+wasapi = "0.23"

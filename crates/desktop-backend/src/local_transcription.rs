@@ -966,9 +966,7 @@ fn start_system_audio_thread(
     running: Arc<AtomicBool>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        let Ok((mut capture, receiver)) =
-            RunningSystemAudio::start(repository_root, false)
-        else {
+        let Ok((mut capture, receiver)) = RunningSystemAudio::start(repository_root, false) else {
             let _ = event_tx.send(BackendEvent::Error(
                 "System audio capture is currently unavailable.".to_string(),
             ));
@@ -978,9 +976,7 @@ fn start_system_audio_thread(
         while running.load(Ordering::SeqCst) {
             match receiver.recv_timeout(Duration::from_millis(100)) {
                 Ok(SystemAudioUpdate::Started { .. }) => {
-                    let _ = event_tx.send(BackendEvent::Stage(
-                        system_audio_started_stage(),
-                    ));
+                    let _ = event_tx.send(BackendEvent::Stage(system_audio_started_stage()));
                 }
                 Ok(SystemAudioUpdate::Stage(message)) => {
                     let _ = event_tx.send(BackendEvent::Stage(message));
@@ -1365,6 +1361,10 @@ impl EndpointConfig {
             config.end_silence_samples = ms_to_samples(end_silence_ms) as usize;
         }
 
+        if let Some(energy_threshold) = env_f32("SUSURA_ENDPOINT_ENERGY_THRESHOLD") {
+            config.energy_threshold = energy_threshold.max(0.0);
+        }
+
         config
     }
 }
@@ -1686,7 +1686,8 @@ fn run_transcription_worker(
                     Some(preview.queued_at_ms),
                 );
 
-                let Some(model) = get_or_load_local_model(&mut model, selected_model, &event_tx) else {
+                let Some(model) = get_or_load_local_model(&mut model, selected_model, &event_tx)
+                else {
                     preview.partial_gate.store(false, Ordering::SeqCst);
                     continue;
                 };
@@ -1751,7 +1752,8 @@ fn run_transcription_worker(
                     segment.metrics.asr_queued_at_ms,
                 );
 
-                let Some(model) = get_or_load_local_model(&mut model, selected_model, &event_tx) else {
+                let Some(model) = get_or_load_local_model(&mut model, selected_model, &event_tx)
+                else {
                     continue;
                 };
 
@@ -1847,6 +1849,12 @@ fn env_u64(name: &str) -> Option<u64> {
     std::env::var(name)
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
+}
+
+fn env_f32(name: &str) -> Option<f32> {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse::<f32>().ok())
 }
 
 fn preload_local_transcription_enabled() -> bool {

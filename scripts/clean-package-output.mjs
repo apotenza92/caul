@@ -21,9 +21,13 @@ if (target === 'win') {
   rmSync(path.join(root, 'release', `susura-${arch}.AppImage`), { force: true });
   rmSync(path.join(root, 'release', `susura-${electronBuilderArch}.AppImage`), { force: true });
   rmSync(path.join(root, 'release', `susura-${arch}.deb`), { force: true });
+  rmSync(path.join(root, 'release', `susura-${arch}.rpm`), { force: true });
+  rmSync(path.join(root, 'release', `susura-${electronBuilderArch}.rpm`), { force: true });
   rmSync(path.join(root, 'release', `susura-beta-${arch}.AppImage`), { force: true });
   rmSync(path.join(root, 'release', `susura-beta-${electronBuilderArch}.AppImage`), { force: true });
   rmSync(path.join(root, 'release', `susura-beta-${arch}.deb`), { force: true });
+  rmSync(path.join(root, 'release', `susura-beta-${arch}.rpm`), { force: true });
+  rmSync(path.join(root, 'release', `susura-beta-${electronBuilderArch}.rpm`), { force: true });
 } else {
   console.error('Usage: node scripts/clean-package-output.mjs <win|linux> [arm64|x64]');
   process.exit(1);

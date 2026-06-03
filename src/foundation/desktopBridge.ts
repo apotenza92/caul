@@ -130,7 +130,7 @@ export type PermissionStatusValue =
 
 export type PermissionItem = {
   description: string;
-  id: 'microphone' | 'screen-recording';
+  id: 'microphone' | 'screen-recording' | 'system-audio';
   label: string;
   status: PermissionStatusValue;
 };
@@ -152,7 +152,7 @@ export type PromptTemplate = {
 
 export type PromptTemplateState = {
   ok: boolean;
-  selectedTemplateId: string | null;
+  selectedTemplateIds: string[];
   templates: PromptTemplate[];
 };
 
@@ -251,6 +251,7 @@ export type SettingsBridge = {
     cancelDownload: () => Promise<ParakeetStatus>;
     download: (modelId?: LocalTranscriptionModelId) => Promise<ParakeetStatus>;
     onStatus: (callback: (status: ParakeetStatus) => void) => () => void;
+    remove: (modelId: LocalTranscriptionModelId) => Promise<ParakeetStatus>;
     setModel: (modelId: LocalTranscriptionModelId) => Promise<ParakeetStatus>;
     status: () => Promise<ParakeetStatus>;
   };
@@ -260,7 +261,7 @@ export type SettingsBridge = {
     list: () => Promise<PromptTemplateState>;
     reset?: () => Promise<PromptTemplateState>;
     save: (template: PromptTemplate) => Promise<PromptTemplateState>;
-    setSelected: (id: string | null) => Promise<PromptTemplateState>;
+    setSelected: (ids: string[]) => Promise<PromptTemplateState>;
   };
   quit?: () => Promise<{ ok: boolean }>;
   reset: () => Promise<{ ok: boolean }>;

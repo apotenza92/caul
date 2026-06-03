@@ -15,6 +15,7 @@ const systemAudioSmokeMs = Number(process.env.SUSURA_SYSTEM_AUDIO_SMOKE_MS ?? 0)
 const localParakeetSmokeMs = Number(process.env.SUSURA_LOCAL_PARAKEET_SMOKE_MS ?? 0);
 const rendererTranscriptionSmokeMs = Number(process.env.SUSURA_RENDERER_TRANSCRIPTION_SMOKE_MS ?? 0);
 const rendererTranscriptionSmokeNoLlm = process.env.SUSURA_RENDERER_TRANSCRIPTION_SMOKE_NO_LLM === '1';
+const rendererTranscriptionSmokeBridgeStart = process.env.SUSURA_RENDERER_TRANSCRIPTION_SMOKE_BRIDGE_START === '1';
 const rendererLlmSmoke = process.env.SUSURA_RENDERER_LLM_SMOKE === '1';
 const rendererRealLlmSmoke = process.env.SUSURA_RENDERER_REAL_LLM_SMOKE === '1';
 const onboardingSmokeDir = process.env.SUSURA_ONBOARDING_SMOKE_DIR;
@@ -119,21 +120,22 @@ const packagedPrivacySmokeState = {
 
 const starterPromptTemplates = [
   {
-    id: 'starter-summarise-phone-call',
-    name: 'Summarise this phone call',
-    prompt: 'Summarise this phone call clearly. Include the main points, decisions, open questions and follow-up actions.'
+    id: 'starter-answer-with-star',
+    name: 'Answer with STAR',
+    prompt: 'When the call transcript contains an interview question or a request for an example, help answer it using the STAR method. STAR means Situation, Task, Action and Result. Start with a concise direct answer, then structure the response as Situation: the context, Task: the responsibility or goal, Action: the specific steps taken, and Result: the measurable outcome or learning. Keep the answer natural enough to say aloud on a live call.'
   },
   {
-    id: 'starter-extract-action-items',
-    name: 'Extract action items',
-    prompt: 'Extract action items from this transcript. Include owner, task and due date when available.'
+    id: 'starter-use-my-cv',
+    name: 'Use my CV',
+    prompt: 'Use the attached or pasted CV as background context. When answering questions, prefer relevant experience, projects, achievements, tools and metrics from the CV. Do not invent roles, dates, qualifications or employers that are not present. If the CV is missing, say what CV detail would help answer better.'
   },
   {
-    id: 'starter-draft-follow-up-email',
-    name: 'Draft follow-up email',
-    prompt: 'Draft a concise follow-up email based on this transcript. Include decisions, action items and next steps.'
+    id: 'starter-job-description',
+    name: 'Job description',
+    prompt: 'Use the attached or pasted job description as role context. Prioritise the responsibilities, required skills, company language and seniority signals in that job description when suggesting answers. Connect the live call question to the role requirements where useful. If the job description is missing, ask for the relevant role details.'
   }
 ];
+const defaultSelectedPromptTemplateIds = ['starter-use-my-cv', 'starter-job-description'];
 
 if (packagedPrivacySmoke) {
   installPackagedPrivacyMainNetworkHooks();
@@ -345,6 +347,16 @@ function createStarterPromptTemplates() {
   }));
 }
 
+function mergeStarterPromptTemplates(templates) {
+  const starterTemplates = createStarterPromptTemplates();
+  const existingIds = new Set(templates.map((template) => template.id));
+
+  return [
+    ...templates,
+    ...starterTemplates.filter((template) => !existingIds.has(template.id))
+  ];
+}
+
 function normalisePromptTemplateAttachment(attachment) {
   if (!attachment || typeof attachment !== 'object') {
     return null;
@@ -487,16 +499,20 @@ function normalisePromptTemplateState(value) {
   const templates = Array.isArray(value?.templates)
     ? value.templates.map(normalisePromptTemplate).filter(Boolean)
     : [];
-  const starterTemplates = templates.length > 0 ? templates : createStarterPromptTemplates();
-  const selectedTemplateId = typeof value?.selectedTemplateId === 'string'
-    && starterTemplates.some((template) => template.id === value.selectedTemplateId)
-    ? value.selectedTemplateId
-    : null;
+  const promptTemplates = mergeStarterPromptTemplates(templates);
+  const requestedSelectedIds = Array.isArray(value?.selectedTemplateIds)
+    ? value.selectedTemplateIds
+    : defaultSelectedPromptTemplateIds;
+  const selectedTemplateIds = requestedSelectedIds.filter((id, index) => (
+    typeof id === 'string'
+    && requestedSelectedIds.indexOf(id) === index
+    && promptTemplates.some((template) => template.id === id)
+  ));
 
   return {
     ok: true,
-    selectedTemplateId,
-    templates: starterTemplates
+    selectedTemplateIds,
+    templates: promptTemplates
   };
 }
 
@@ -512,7 +528,7 @@ function writePromptTemplateState(state) {
   const nextState = normalisePromptTemplateState(state);
   fsSync.mkdirSync(app.getPath('userData'), { recursive: true });
   fsSync.writeFileSync(getPromptTemplatesPath(), `${JSON.stringify({
-    selectedTemplateId: nextState.selectedTemplateId,
+    selectedTemplateIds: nextState.selectedTemplateIds,
     templates: nextState.templates
   }, null, 2)}\n`);
 
@@ -535,7 +551,7 @@ function savePromptTemplate(template) {
     : [...existing.templates, normalised];
 
   return writePromptTemplateState({
-    selectedTemplateId: existing.selectedTemplateId,
+    selectedTemplateIds: existing.selectedTemplateIds,
     templates
   });
 }
@@ -545,14 +561,14 @@ function deletePromptTemplate(id) {
   const templates = existing.templates.filter((template) => template.id !== id);
 
   return writePromptTemplateState({
-    selectedTemplateId: existing.selectedTemplateId === id ? null : existing.selectedTemplateId,
+    selectedTemplateIds: existing.selectedTemplateIds.filter((selectedId) => selectedId !== id),
     templates
   });
 }
 
 function resetPromptTemplates() {
   return writePromptTemplateState({
-    selectedTemplateId: null,
+    selectedTemplateIds: defaultSelectedPromptTemplateIds,
     templates: createStarterPromptTemplates()
   });
 }
@@ -642,8 +658,7 @@ async function completeOnboarding() {
     onboardingWindow.close();
   }
 
-  createPrivateOverlayHandleWindow();
-  showPrivateOverlayHandleWindow();
+  showPrivateOverlayWindow();
 
   return getOnboardingStatus();
 }
@@ -653,15 +668,17 @@ async function reopenOnboarding() {
   return getOnboardingStatus();
 }
 
-function setSelectedPromptTemplate(id) {
+function setSelectedPromptTemplates(ids) {
   const existing = readPromptTemplateState();
-  const selectedTemplateId = typeof id === 'string'
+  const requestedIds = Array.isArray(ids) ? ids : [];
+  const selectedTemplateIds = requestedIds.filter((id, index) => (
+    typeof id === 'string'
+    && requestedIds.indexOf(id) === index
     && existing.templates.some((template) => template.id === id)
-    ? id
-    : null;
+  ));
 
   return writePromptTemplateState({
-    selectedTemplateId,
+    selectedTemplateIds,
     templates: existing.templates
   });
 }
@@ -1717,6 +1734,9 @@ async function getPermissionsStatus() {
   const screenRecordingStatus = isMac
     ? await getScreenRecordingPermissionStatus()
     : 'unsupported';
+  const systemAudioStatus = isMac
+    ? getSystemAudioPermissionStatus()
+    : 'unsupported';
 
   return {
     ok: true,
@@ -1729,6 +1749,12 @@ async function getPermissionsStatus() {
         status: screenRecordingStatus
       },
       {
+        description: 'Required when listening to audio from other apps.',
+        id: 'system-audio',
+        label: 'System Audio',
+        status: systemAudioStatus
+      },
+      {
         description: 'Required when listening to your microphone.',
         id: 'microphone',
         label: 'Microphone',
@@ -1738,6 +1764,20 @@ async function getPermissionsStatus() {
       }
     ]
   };
+}
+
+function getSystemAudioPermissionStatus() {
+  const state = readSetupState();
+
+  if (state.systemAudioPermissionDenied === true) {
+    return 'denied';
+  }
+
+  if (state.systemAudioPermissionRequested === true) {
+    return 'granted';
+  }
+
+  return 'not-determined';
 }
 
 async function getScreenRecordingPermissionStatus() {
@@ -1806,7 +1846,148 @@ async function requestPermission(permission) {
     };
   }
 
+  if (permission === 'system-audio') {
+    return requestSystemAudioPermission();
+  }
+
   return { ok: false, message: 'Unknown permission.' };
+}
+
+async function requestSystemAudioPermission() {
+  writeSetupState({
+    systemAudioPermissionDenied: false,
+    systemAudioPermissionRequested: true
+  });
+
+  try {
+    const result = await runSystemAudioPermissionProbe();
+
+    if (result.ok) {
+      writeSetupState({
+        systemAudioPermissionDenied: false,
+        systemAudioPermissionRequested: true
+      });
+
+      return { ok: true };
+    }
+
+    writeSetupState({
+      systemAudioPermissionDenied: true,
+      systemAudioPermissionRequested: true
+    });
+    openPermissionsSettings('system-audio');
+
+    return {
+      ok: false,
+      message: result.message ?? 'macOS did not grant System Audio permission yet.'
+    };
+  } catch (error) {
+    writeSetupState({
+      systemAudioPermissionDenied: true,
+      systemAudioPermissionRequested: true
+    });
+    openPermissionsSettings('system-audio');
+
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : 'macOS did not grant System Audio permission yet.'
+    };
+  }
+}
+
+function runSystemAudioPermissionProbe() {
+  return new Promise((resolve, reject) => {
+    const command = getDesktopBackendCommand(['--stream-system-audio', '--duration', '1']);
+    const child = spawn(command.command, command.args, {
+      cwd: getProjectRoot(),
+      env: {
+        ...process.env,
+        ...getAudioHelperEnvironment()
+      },
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    let stderr = '';
+    let settled = false;
+    let sawStarted = false;
+    const timer = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      child.kill('SIGTERM');
+      resolve({
+        ok: false,
+        message: 'Timed out waiting for macOS System Audio permission.'
+      });
+    }, 10000);
+
+    const settle = (value) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timer);
+      child.kill('SIGTERM');
+      resolve(value);
+    };
+
+    const reader = readline.createInterface({ input: child.stdout });
+
+    reader.on('line', (line) => {
+      let event;
+
+      try {
+        event = JSON.parse(line);
+      } catch {
+        return;
+      }
+
+      if (event?.type === 'capture_started') {
+        sawStarted = true;
+        settle({ ok: true });
+        return;
+      }
+
+      if (event?.type === 'permission_error') {
+        settle({
+          ok: false,
+          message: event.message ?? 'macOS did not grant System Audio permission yet.'
+        });
+      }
+    });
+
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on('error', (error) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        reject(error);
+      }
+    });
+    child.on('close', (code) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timer);
+
+      if (sawStarted || code === 0) {
+        resolve({ ok: true });
+        return;
+      }
+
+      resolve({
+        ok: false,
+        message: stderr.trim() || `System Audio permission probe exited with code ${code}.`
+      });
+    });
+  });
 }
 
 async function getAudioHelperScreenCapturePermissionStatus(request) {
@@ -2344,6 +2525,37 @@ function cancelParakeetDownload() {
   parakeetDownload.file?.destroy();
   parakeetDownload = null;
   fsSync.rmSync(path.join(getParakeetModelRoot(), 'parakeet-v3-int8.tar.gz.download'), { force: true });
+  emitParakeetStatus();
+
+  return getParakeetStatus();
+}
+
+function removeLocalTranscriptionModel(modelId) {
+  const selectedLocalTranscriptionModel = normaliseLocalTranscriptionModelId(modelId);
+
+  if (selectedLocalTranscriptionModel === 'moonshine-tiny') {
+    if (localModelDownload) {
+      localModelDownload.request?.destroy(new Error('Local model download cancelled.'));
+      localModelDownload.file?.destroy();
+      localModelDownload = null;
+    }
+
+    fsSync.rmSync(getMoonshineTinyModelPath(), { recursive: true, force: true });
+    fsSync.rmSync(path.join(getParakeetModelRoot(), 'moonshine-streaming'), { recursive: true, force: true });
+    fsSync.rmSync(path.join(getParakeetModelRoot(), 'moonshine-tiny-streaming-en.tar.gz'), { force: true });
+    fsSync.rmSync(path.join(getParakeetModelRoot(), 'moonshine-tiny-streaming-en.tar.gz.download'), { force: true });
+  } else {
+    if (parakeetDownload) {
+      parakeetDownload.request?.destroy(new Error('Parakeet download cancelled.'));
+      parakeetDownload.file?.destroy();
+      parakeetDownload = null;
+    }
+
+    fsSync.rmSync(getParakeetModelPath(), { recursive: true, force: true });
+    fsSync.rmSync(path.join(getParakeetModelRoot(), 'parakeet-v3-int8.tar.gz'), { force: true });
+    fsSync.rmSync(path.join(getParakeetModelRoot(), 'parakeet-v3-int8.tar.gz.download'), { force: true });
+  }
+
   emitParakeetStatus();
 
   return getParakeetStatus();
@@ -3057,10 +3269,16 @@ async function shouldPrepareLocalTranscriptionOnStartup() {
     return false;
   }
 
-  return status.permissions.permissions.some((permission) => (
-    permission.id === 'screen-recording'
-    && (permission.status === 'granted' || permission.status === 'unsupported')
-  ));
+  const permissionsById = new Map(
+    status.permissions.permissions.map((permission) => [permission.id, permission])
+  );
+  const screenRecording = permissionsById.get('screen-recording');
+  const systemAudio = permissionsById.get('system-audio');
+  const ready = (permission) => (
+    permission?.status === 'granted' || permission?.status === 'unsupported'
+  );
+
+  return ready(screenRecording) && ready(systemAudio);
 }
 
 async function prepareLocalTranscriptionOnStartup() {
@@ -4225,11 +4443,7 @@ function applyPrivateWindowProtection(window) {
       // Unsupported platforms should still keep the window usable.
     }
 
-    try {
-      window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    } catch {
-      // Best-effort on non-macOS platforms.
-    }
+    applyPrivateWindowWorkspaceBehaviour(window);
 
     setPrivateWindowAlwaysOnTop(window);
     return;
@@ -4256,6 +4470,12 @@ function applyPrivateWindowProtection(window) {
     }
   }
 
+  applyPrivateWindowWorkspaceBehaviour(window);
+
+  setPrivateWindowAlwaysOnTop(window);
+}
+
+function applyPrivateWindowWorkspaceBehaviour(window) {
   if (typeof window.setHiddenInMissionControl === 'function') {
     try {
       window.setHiddenInMissionControl(true);
@@ -4269,8 +4489,6 @@ function applyPrivateWindowProtection(window) {
   } catch {
     // Best-effort on non-macOS platforms.
   }
-
-  setPrivateWindowAlwaysOnTop(window);
 }
 
 function setPrivateWindowAlwaysOnTop(window) {
@@ -4753,6 +4971,7 @@ function createPrivateOverlayHandleWindow() {
   });
 
   privateOverlayHandleWindow.setOpacity(state.handle.opacity);
+  applyPrivateWindowWorkspaceBehaviour(privateOverlayHandleWindow);
   persistPrivateOverlayHandleState(privateOverlayHandleWindow);
   loadRendererSurface(privateOverlayHandleWindow, 'handle');
   runPackagedLaunchSmokeIfRequested(privateOverlayHandleWindow, 'private-overlay-handle');
@@ -4935,11 +5154,40 @@ function showPrivateOverlayWindow() {
   setPrivateOverlayWindowVisualBounds(bounds);
   window.setIgnoreMouseEvents(false);
   applyPrivateWindowProtection(window);
+  focusPrivateOverlayWindow(window);
   window.show();
-  window.focus();
-  window.moveTop();
+  focusPrivateOverlayWindow(window);
+  setImmediate(() => focusPrivateOverlayWindow(window));
   showPrivateOverlayHandleWindow();
   broadcastPrivateOverlayState();
+}
+
+function focusPrivateOverlayWindow(window) {
+  if (!window || window.isDestroyed()) {
+    return;
+  }
+
+  try {
+    app.focus({ steal: true });
+  } catch {
+    try {
+      app.focus();
+    } catch {
+      // App activation is best-effort when running as a Dockless accessory app.
+    }
+  }
+
+  try {
+    window.focus();
+  } catch {
+    // Best-effort across platforms and Electron window states.
+  }
+
+  try {
+    window.moveTop();
+  } catch {
+    // Some platforms may not support explicit front ordering.
+  }
 }
 
 function hidePrivateOverlayWindow() {
@@ -4986,6 +5234,7 @@ function showPrivateOverlayHandleWindow() {
   window.setBounds(bounds);
   window.setOpacity(state.handle.opacity);
   window.setIgnoreMouseEvents(false);
+  applyPrivateWindowWorkspaceBehaviour(window);
   try {
     window.setAlwaysOnTop(true, 'pop-up-menu');
   } catch {
@@ -5052,16 +5301,6 @@ function showPrivateOverlayHandleMenu(sender) {
     : BrowserWindow.fromWebContents(sender);
   const status = getPrivateOverlayStatus();
   const menu = Menu.buildFromTemplate([
-    {
-      label: 'Floating Button Size',
-      submenu: Object.entries(handleWindowSizePresets).map(([size, pixels]) => ({
-        checked: status.handle.size === size,
-        click: () => setPrivateOverlayHandleSize(size),
-        label: `${size[0].toUpperCase()}${size.slice(1)} (${pixels}px)`,
-        type: 'radio'
-      }))
-    },
-    { type: 'separator' },
     {
       label: 'Quit Susura',
       click: () => {
@@ -5748,7 +5987,7 @@ function createWindow() {
           !result.rendererVisible ||
           result.hasOuterScroll ||
           result.hasCredentialBridge ||
-          !result.resizable ||
+          result.resizable ||
           result.maximizable ||
           result.fullscreenable
         ) {
@@ -5901,6 +6140,7 @@ function createWindow() {
           (async () => {
             const events = [];
             const snapshots = [];
+            const eventStartedAt = Date.now();
             const statusPattern = /^(Not listening\\.|Requesting audio access\\.\\.\\.|Starting local Parakeet\\.\\.\\.|Loading local Parakeet\\.\\.\\.|Listening with local Parakeet\\.\\.\\.|Listening\\. Waiting for speech\\.\\.\\.|Speech detected\\.\\.\\.|Transcribing local audio\\.\\.\\.|local Parakeet capture started|local Parakeet loaded|reading default output device|creating Core Audio process tap|creating private aggregate device|reading Core Audio tap format|Core Audio tap format .*|creating aggregate device IO callback|starting aggregate device|Core Audio capture started|starting system audio capture|starting microphone capture|microphone capture started)$/;
             const transcriptPlaceholder = 'Your live transcript will appear here once you start listening.';
             let previousLongest = '';
@@ -5913,7 +6153,10 @@ function createWindow() {
             let autoSendButtonFound = false;
             let autoSendDisabled = false;
             const unsubscribe = window.susura.transcription.onEvent((event) => {
-              events.push(event);
+              events.push({
+                ...event,
+                smokeAtMs: Date.now() - eventStartedAt
+              });
             });
 
             await new Promise((resolve) => setTimeout(resolve, ${JSON.stringify(rendererRealLlmSmoke ? 1500 : 300)}));
@@ -5977,7 +6220,9 @@ function createWindow() {
             };
 
             sample();
-            if (startButton && !startButton.disabled) {
+            if (${JSON.stringify(rendererTranscriptionSmokeBridgeStart)}) {
+              await window.susura.transcription.start({ sources: ['system'] });
+            } else if (startButton && !startButton.disabled) {
               startButton.click();
             } else {
               usedBridgeFallback = true;
@@ -6006,7 +6251,10 @@ function createWindow() {
             restartStartButtonFound = Boolean(restartStartButton);
             restartStartButtonDisabled = restartStartButton ? Boolean(restartStartButton.disabled) : null;
 
-            if (restartStartButton && !restartStartButton.disabled) {
+            if (${JSON.stringify(rendererTranscriptionSmokeBridgeStart)}) {
+              await window.susura.transcription.start({ sources: ['system'] });
+              await new Promise((resolve) => setTimeout(resolve, 2_000));
+            } else if (restartStartButton && !restartStartButton.disabled) {
               restartStartButton.click();
               await new Promise((resolve) => setTimeout(resolve, 2_000));
             } else {
@@ -6043,6 +6291,14 @@ function createWindow() {
             const partial = events
               .filter((event) => event.type === 'partial' && event.text)
               .map((event) => event.text);
+            const firstPartialAtMs = events
+              .filter((event) => event.type === 'partial' && event.text)
+              .map((event) => event.smokeAtMs)
+              .find((atMs) => typeof atMs === 'number') ?? null;
+            const firstCompletedAtMs = events
+              .filter((event) => event.type === 'completed' && event.text)
+              .map((event) => event.smokeAtMs)
+              .find((atMs) => typeof atMs === 'number') ?? null;
             const errors = events
               .filter((event) => event.type === 'error')
               .map((event) => event.message);
@@ -6077,6 +6333,8 @@ function createWindow() {
               completedEvents,
               completedCount: completed.length,
               partialCount: partial.length,
+              firstPartialAtMs,
+              firstCompletedAtMs,
               detected: completed.length > 0 || partial.length > 0 || previousLongest.length > 0,
               errors,
               stages,
@@ -6479,6 +6737,7 @@ ipcMain.handle('susura:permissions-request', (_event, request) => {
 
 ipcMain.handle('susura:settings-reset', (event) => {
   resetWindowState(BrowserWindow.fromWebContents(event.sender));
+  resetPrivateOverlayHandlePosition();
   resetPromptTemplates();
 
   return { ok: true };
@@ -6500,6 +6759,8 @@ ipcMain.handle('susura:onboarding-open', () => reopenOnboarding());
 ipcMain.handle('susura:parakeet-status', () => getParakeetStatus());
 
 ipcMain.handle('susura:parakeet-download', (_event, request) => downloadLocalTranscriptionModel(request?.modelId));
+
+ipcMain.handle('susura:parakeet-remove', (_event, request) => removeLocalTranscriptionModel(request?.modelId));
 
 ipcMain.handle('susura:parakeet-set-model', (_event, request) => setPreferredLocalTranscriptionModel(request?.modelId));
 
@@ -6545,11 +6806,11 @@ ipcMain.handle('susura:prompt-templates-delete', (_event, request) => {
 });
 
 ipcMain.handle('susura:prompt-templates-set-selected', (_event, request) => {
-  const id = typeof request === 'object' && request !== null && typeof request.id === 'string'
-    ? request.id
-    : null;
+  const ids = typeof request === 'object' && request !== null && Array.isArray(request.ids)
+    ? request.ids
+    : [];
 
-  return setSelectedPromptTemplate(id);
+  return setSelectedPromptTemplates(ids);
 });
 
 ipcMain.handle('susura:capture-start', () => {

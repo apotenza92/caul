@@ -88,6 +88,8 @@ try {
   )) ?? false;
   const hasErrors = (summary?.errors?.length ?? 0) > 0;
   const result = {
+    firstCompletedAtMs: summary?.firstCompletedAtMs ?? null,
+    firstPartialAtMs: summary?.firstPartialAtMs ?? null,
     phrase,
     transcript,
     wordOverlap,

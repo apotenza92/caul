@@ -8,7 +8,7 @@ This folder is the durable project memory for future agents and contributors. Ke
 
 The `Publish Download Page` workflow mirrors only the static download page and icon assets into the public `apotenza92.github.io` site repo, keeping the published site independent from the source tree layout.
 
-The page currently offers stable and beta downloads for Apple Silicon macOS, Windows ARM64/x64 and Ubuntu/Linux ARM64/x64. macOS also includes Homebrew cask commands for stable and beta channels. Intel macOS builds are not supported. Windows/Linux ARM64 has local Parallels VM release-smoke coverage; Windows/Linux x64 is CI-built from the same platform backend and should not be described as locally smoke-tested until dedicated x64 coverage exists.
+The page currently offers stable and beta downloads for Apple Silicon macOS, Windows ARM64/x64, Linux ARM64/x64 AppImage, Ubuntu/Debian `.deb` and Fedora/RHEL `.rpm`. macOS also includes Homebrew cask commands for stable and beta channels. Intel macOS builds are not supported. Windows/Linux ARM64 has local Parallels VM release-smoke coverage; Fedora RPM smoke coverage uses the `Fedora 42 ARM64` Parallels VM. Windows/Linux x64 is CI-built from the same platform backend and should not be described as locally smoke-tested until dedicated x64 coverage exists.
 
 ## Reading Guide
 

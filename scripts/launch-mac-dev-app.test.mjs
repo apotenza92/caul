@@ -20,13 +20,28 @@ function runLauncher(args = []) {
   mkdirSync(join(appPath, 'Contents'), { recursive: true });
   mkdirSync(bin, { recursive: true });
 
-  for (const command of ['pkill', 'tccutil', 'open']) {
+  for (const command of ['killall', 'pkill', 'tccutil', 'open']) {
     writeFileSync(join(bin, command), [
       '#!/bin/sh',
       `echo "${command} $*" >> "$SUSURA_LAUNCHER_LOG"`,
       'exit 0'
     ].join('\n'), { mode: 0o755 });
   }
+
+  writeFileSync(join(bin, 'sqlite3'), [
+    '#!/bin/sh',
+    `echo "sqlite3 $*" >> "$SUSURA_LAUNCHER_LOG"`,
+    'case "$1" in',
+    '  /Library/*) exit 8 ;;',
+    '  *) exit 0 ;;',
+    'esac'
+  ].join('\n'), { mode: 0o755 });
+
+  writeFileSync(join(bin, 'osascript'), [
+    '#!/bin/sh',
+    `echo "osascript $*" >> "$SUSURA_LAUNCHER_LOG"`,
+    'exit 0'
+  ].join('\n'), { mode: 0o755 });
 
   const logPath = join(root, 'commands.log');
   const result = spawnSync(process.execPath, [scriptPath, '--keep-data', ...args], {
@@ -69,6 +84,13 @@ describe('launch-mac-dev-app', () => {
     expect(log).toContain('tccutil reset Microphone dev.susura.app.dev');
     expect(log).toContain('tccutil reset ScreenCapture dev.susura.app.dev');
     expect(log).toContain('tccutil reset AudioCapture dev.susura.app.dev');
+    expect(log).toContain('sqlite3 /Library/Application Support/com.apple.TCC/TCC.db');
+    expect(log).toContain('sqlite3 ');
+    expect(log).toContain('kTCCServiceScreenCapture');
+    expect(log).toContain('kTCCServiceAudioCapture');
+    expect(log).toContain('release-dev/mac-arm64/Susura Dev.app/Contents/MacOS/Susura Dev');
+    expect(log).toContain('osascript -e do shell script');
+    expect(log).toContain('killall tccd');
     expect(log).not.toContain('tccutil reset ScreenCapture\n');
     expect(log).not.toContain('tccutil reset AudioCapture\n');
   });
