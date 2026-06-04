@@ -130,20 +130,20 @@ const starterPromptTemplates = [
   {
     id: 'starter-answer-with-star',
     name: 'STAR',
-    prompt: 'When the call transcript contains an interview question or a request for an example, help answer it using the STAR method. STAR means Situation, Task, Action and Result. Start with a concise direct answer, then structure the response as Situation: the context, Task: the responsibility or goal, Action: the specific steps taken, and Result: the measurable outcome or learning. Keep the answer natural enough to say aloud on a live call.'
+    prompt: 'Use STAR when answering interview-style questions.\n\nStructure the answer as:\nSituation: brief context\nTask: what needed to be done\nAction: what I did\nResult: outcome or lesson\n\nKeep it concise and natural to say aloud.'
   },
   {
     id: 'starter-use-my-cv',
     name: 'CV',
-    prompt: 'Use the attached or pasted CV as background context. When answering questions, prefer relevant experience, projects, achievements, tools and metrics from the CV. Do not invent roles, dates, qualifications or employers that are not present. If the CV is missing, say what CV detail would help answer better.'
+    prompt: 'Use my CV as background context.\n\nPrefer relevant experience, projects, achievements and skills from the CV. Do not invent details.'
   },
   {
     id: 'starter-job-description',
     name: 'PD',
-    prompt: 'Use the attached or pasted position description as role context. Prioritise the duties, selection criteria, required skills, seniority signals and organisation language in that position description when suggesting answers. Connect the live call question to the role requirements where useful. If the position description is missing, ask for the relevant role details.'
+    prompt: 'Use the position description as role context.\n\nConnect answers to the role duties, skills and selection criteria where useful.'
   }
 ];
-const defaultSelectedPromptTemplateIds = ['starter-use-my-cv', 'starter-job-description'];
+const defaultSelectedPromptTemplateIds = [];
 
 if (packagedPrivacySmoke) {
   installPackagedPrivacyMainNetworkHooks();
@@ -744,6 +744,46 @@ function mergeStarterPromptTemplates(templates) {
   ];
 }
 
+function getCustomStarterPromptTemplateId(id) {
+  return `custom-${id}`;
+}
+
+function isStarterPromptTemplateCustomised(template, starterTemplate) {
+  return template.name !== starterTemplate.name
+    || template.prompt !== starterTemplate.prompt
+    || (template.attachments ?? []).length > 0;
+}
+
+function asCustomStarterPromptTemplate(template, existingTemplates = []) {
+  const customId = getCustomStarterPromptTemplateId(template.id);
+  const existingCustom = existingTemplates.find((item) => item.id === customId);
+
+  return {
+    ...template,
+    createdAt: existingCustom?.createdAt ?? template.createdAt,
+    id: customId,
+    updatedAt: template.updatedAt
+  };
+}
+
+function preserveCustomisedStarterPromptTemplates(templates) {
+  const starterTemplates = createStarterPromptTemplates();
+  const starterTemplatesById = new Map(starterTemplates.map((template) => [template.id, template]));
+  const preservedCustomStarters = templates
+    .filter((template) => {
+      const starterTemplate = starterTemplatesById.get(template.id);
+      return starterTemplate && isStarterPromptTemplateCustomised(template, starterTemplate);
+    })
+    .map((template) => asCustomStarterPromptTemplate(template, templates));
+  const existingCustomTemplates = templates.filter((template) => !starterTemplatesById.has(template.id));
+  const customTemplatesById = new Map([...existingCustomTemplates, ...preservedCustomStarters].map((template) => [template.id, template]));
+
+  return [
+    ...starterTemplates,
+    ...customTemplatesById.values()
+  ];
+}
+
 function normalisePromptTemplateAttachment(attachment) {
   if (!attachment || typeof attachment !== 'object') {
     return null;
@@ -933,9 +973,13 @@ function savePromptTemplate(template) {
     return existing;
   }
 
-  const templates = existing.templates.some((item) => item.id === normalised.id)
-    ? existing.templates.map((item) => (item.id === normalised.id ? normalised : item))
-    : [...existing.templates, normalised];
+  const starterTemplate = createStarterPromptTemplates().find((item) => item.id === normalised.id);
+  const templateToSave = starterTemplate && isStarterPromptTemplateCustomised(normalised, starterTemplate)
+    ? asCustomStarterPromptTemplate(normalised, existing.templates)
+    : normalised;
+  const templates = existing.templates.some((item) => item.id === templateToSave.id)
+    ? existing.templates.map((item) => (item.id === templateToSave.id ? templateToSave : item))
+    : [...existing.templates, templateToSave];
 
   return writePromptTemplateState({
     selectedTemplateIds: existing.selectedTemplateIds,
@@ -954,9 +998,11 @@ function deletePromptTemplate(id) {
 }
 
 function resetPromptTemplates() {
+  const existing = readPromptTemplateState();
+
   return writePromptTemplateState({
     selectedTemplateIds: defaultSelectedPromptTemplateIds,
-    templates: createStarterPromptTemplates()
+    templates: preserveCustomisedStarterPromptTemplates(existing.templates)
   });
 }
 
@@ -5851,6 +5897,33 @@ function resetPrivateOverlayHandlePosition() {
   return getPrivateOverlayStatus();
 }
 
+function resetPrivateOverlayWindowPosition() {
+  const wasOverlayVisible = Boolean(privateOverlayWindow && !privateOverlayWindow.isDestroyed() && privateOverlayWindow.isVisible());
+  const state = normalisePrivateOverlayState({
+    ...readPrivateOverlayState(),
+    overlay: {
+      visible: wasOverlayVisible
+    }
+  });
+
+  writePrivateOverlayState(({
+    ...readPrivateOverlayState(),
+    overlay: state.overlay
+  }));
+
+  if (privateOverlayWindow && !privateOverlayWindow.isDestroyed()) {
+    setPrivateOverlayWindowVisualBounds(state.overlay);
+  }
+
+  if (wasOverlayVisible) {
+    showPrivateOverlayWindow();
+  } else {
+    broadcastPrivateOverlayState();
+  }
+
+  return getPrivateOverlayStatus();
+}
+
 function normaliseHandleDragPoint(request) {
   return {
     screenX: Number(request?.screenX),
@@ -7276,6 +7349,7 @@ ipcMain.handle('susura:permissions-request', (_event, request) => {
 ipcMain.handle('susura:settings-reset', (event) => {
   resetWindowState(BrowserWindow.fromWebContents(event.sender));
   resetPrivateOverlayHandlePosition();
+  resetPrivateOverlayWindowPosition();
   resetPromptTemplates();
 
   return { ok: true };

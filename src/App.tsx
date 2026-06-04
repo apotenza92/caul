@@ -125,7 +125,7 @@ const layout = {
   panelScroller: 'panel-background relative -mt-px box-border h-full min-h-0 overflow-y-auto [overflow-anchor:none]',
   settingsBackdrop: 'absolute inset-0 z-40 cursor-default bg-black/10 supports-backdrop-filter:backdrop-blur-xs',
   modalBlurBackdrop: 'fixed inset-0 z-40 pointer-events-none bg-black/10 supports-backdrop-filter:backdrop-blur-xs',
-  settingsDialog: 'susura-settings-dialog absolute z-50 grid w-[59.765625vw] max-w-[59.765625vw] min-w-[min(32rem,calc(100vw-2rem))] overflow-hidden rounded-xl bg-popover text-sm text-popover-foreground ring-1 ring-foreground/10',
+  settingsDialog: 'susura-settings-dialog susura-large-modal-shell absolute z-50 grid h-[85vh] w-[85vw] max-w-[85vw] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-xl bg-popover text-sm text-popover-foreground ring-1 ring-foreground/10',
   modalHeaderTitle: 'font-heading text-sm leading-none font-medium text-center',
   settingsHeader: 'flex h-12 items-center justify-center border-b border-border px-12',
   settingsHeaderMac: '',
@@ -196,9 +196,9 @@ const layout = {
   pickerRow: 'group/picker-row relative min-w-0',
   pickerRowButton: 'pr-8',
   pickerRowDelete: 'absolute right-1 top-1/2 size-6 -translate-y-1/2 rounded-md text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/picker-row:opacity-100',
-  generalInstructionsDialog: 'susura-titlebar-centred-dialog grid h-[min(28rem,85vh)] w-[min(34rem,92vw)] max-w-[92vw] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-[34rem]',
+  generalInstructionsDialog: 'susura-settings-dialog susura-large-modal-shell absolute z-50 grid h-[85vh] w-[85vw] max-w-[85vw] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-xl bg-popover text-sm text-popover-foreground ring-1 ring-foreground/10',
   generalInstructionsEditor: 'grid min-h-0 p-4',
-  promptTemplateDialog: 'susura-titlebar-centred-dialog grid h-[85vh] w-[85vw] max-w-[85vw] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-[85vw]',
+  promptTemplateDialog: 'susura-settings-dialog susura-large-modal-shell absolute z-50 grid h-[85vh] w-[85vw] max-w-[85vw] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-xl bg-popover text-sm text-popover-foreground ring-1 ring-foreground/10',
   promptTemplateHeader: 'flex h-12 items-center justify-center border-b border-border px-12',
   promptTemplateHeaderMac: '',
   promptTemplateEditor: 'grid min-h-0 flex-1 gap-0 md:grid-cols-[220px_minmax(0,1fr)]',
@@ -217,7 +217,10 @@ const layout = {
   placeholder: 'box-border flex h-full min-h-0 items-center justify-center overflow-y-auto whitespace-pre-wrap px-6 py-6 text-center text-sm text-muted-foreground',
   startHereHint: 'susura-start-here-nudge pointer-events-none absolute left-2 top-4 z-20 flex w-[74%] max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-md border border-emerald-600/35 bg-background/95 px-3 py-2 text-left shadow-lg shadow-emerald-600/15 ring-1 ring-emerald-600/10 backdrop-blur',
   startHereArrow: 'size-5 shrink-0 text-emerald-600 dark:text-emerald-500',
-  startHereDescription: 'min-w-0 max-w-full text-sm leading-5 text-foreground'
+  startHereDescription: 'min-w-0 max-w-full text-sm leading-5 text-foreground',
+  aiPromptTemplateHint: 'susura-prompt-template-nudge pointer-events-none absolute left-2 top-4 z-20 flex w-[74%] max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-md border border-emerald-600/35 bg-background/95 px-3 py-2 text-left shadow-lg shadow-emerald-600/15 ring-1 ring-emerald-600/10 backdrop-blur',
+  aiPromptTemplateHintIcon: 'size-5 shrink-0 text-emerald-600 dark:text-emerald-500',
+  aiPromptTemplateHintDescription: 'min-w-0 max-w-full text-sm leading-5 text-foreground'
 };
 
 const transcriptPlaceholder = 'Your live transcript will appear here once you start listening.';
@@ -233,7 +236,8 @@ const defaultLlmModel: LlmModel = 'openai-codex/gpt-5.4-mini';
 const defaultLlmReasoning: LlmReasoning = 'off';
 const autoCollapsePreferenceKey = 'susura.auto-collapse';
 const generalInstructionsPreferenceKey = 'susura.general-instructions';
-const defaultGeneralInstructions = 'Always answer in British English.';
+const defaultGeneralInstructions = '';
+const generalInstructionsPlaceholder = 'e.g. Always answer in British English.';
 const handleDragThresholdPx = 6;
 const handleSnapVisualDurationMs = 280;
 const overlayOpenTooltipSuppressionMs = 700;
@@ -259,20 +263,20 @@ const starterPromptTemplates: PromptTemplate[] = [
   createPromptTemplate({
     id: 'starter-answer-with-star',
     name: 'STAR',
-    prompt: 'When the call transcript contains an interview question or a request for an example, help answer it using the STAR method. STAR means Situation, Task, Action and Result. Start with a concise direct answer, then structure the response as Situation: the context, Task: the responsibility or goal, Action: the specific steps taken, and Result: the measurable outcome or learning. Keep the answer natural enough to say aloud on a live call.'
+    prompt: 'Use STAR when answering interview-style questions.\n\nStructure the answer as:\nSituation: brief context\nTask: what needed to be done\nAction: what I did\nResult: outcome or lesson\n\nKeep it concise and natural to say aloud.'
   }),
   createPromptTemplate({
     id: 'starter-use-my-cv',
     name: 'CV',
-    prompt: 'Use the attached or pasted CV as background context. When answering questions, prefer relevant experience, projects, achievements, tools and metrics from the CV. Do not invent roles, dates, qualifications or employers that are not present. If the CV is missing, say what CV detail would help answer better.'
+    prompt: 'Use my CV as background context.\n\nPrefer relevant experience, projects, achievements and skills from the CV. Do not invent details.'
   }),
   createPromptTemplate({
     id: 'starter-job-description',
     name: 'PD',
-    prompt: 'Use the attached or pasted position description as role context. Prioritise the duties, selection criteria, required skills, seniority signals and organisation language in that position description when suggesting answers. Connect the live call question to the role requirements where useful. If the position description is missing, ask for the relevant role details.'
+    prompt: 'Use the position description as role context.\n\nConnect answers to the role duties, skills and selection criteria where useful.'
   })
 ];
-const defaultSelectedPromptTemplateIds = ['starter-use-my-cv', 'starter-job-description'];
+const defaultSelectedPromptTemplateIds: string[] = [];
 
 const llmModels: Array<{ label: string; value: LlmModel }> = [
   { label: '5.4 mini (Default)', value: 'openai-codex/gpt-5.4-mini' },
@@ -583,9 +587,13 @@ export function App() {
     const bridge = getSettingsBridge()?.promptTemplates;
 
     if (!bridge) {
-      const templates = promptTemplates.some((item) => item.id === template.id)
-        ? promptTemplates.map((item) => (item.id === template.id ? template : item))
-        : [...promptTemplates, template];
+      const starterTemplate = starterPromptTemplates.find((item) => item.id === template.id);
+      const templateToSave = starterTemplate && isStarterPromptTemplateCustomised(template, starterTemplate)
+        ? asCustomStarterPromptTemplate(template, promptTemplates)
+        : template;
+      const templates = promptTemplates.some((item) => item.id === templateToSave.id)
+        ? promptTemplates.map((item) => (item.id === templateToSave.id ? templateToSave : item))
+        : [...promptTemplates, templateToSave];
       setPromptTemplates(templates);
       return;
     }
@@ -635,7 +643,7 @@ export function App() {
     const selectedTemplateIds = nextIds.filter((id) => templates.some((template) => template.id === id));
 
     setPromptTemplates(templates);
-    setSelectedPromptTemplateIds(selectedTemplateIds.length > 0 ? selectedTemplateIds : getSelectedPromptTemplateIds(state, templates));
+    setSelectedPromptTemplateIds(selectedTemplateIds);
   }
 
   async function copyTranscript() {
@@ -684,9 +692,13 @@ export function App() {
   }
 
   function saveGeneralInstructions(instructions: string) {
-    const nextInstructions = instructions.trim() || defaultGeneralInstructions;
+    const nextInstructions = instructions;
     setGeneralInstructions(nextInstructions);
-    window.localStorage.setItem(generalInstructionsPreferenceKey, nextInstructions);
+    if (nextInstructions.trim()) {
+      window.localStorage.setItem(generalInstructionsPreferenceKey, nextInstructions);
+    } else {
+      window.localStorage.removeItem(generalInstructionsPreferenceKey);
+    }
   }
 
   function askAiFromTranscript() {
@@ -752,7 +764,7 @@ export function App() {
     setAutoCollapseState(defaultAutoCollapse);
     setLlmModel(defaultLlmModel);
     setLlmReasoning(defaultLlmReasoning);
-    setPromptTemplates(starterPromptTemplates);
+    setPromptTemplates((templates) => preserveCustomisedStarterPromptTemplates(templates));
     setSelectedPromptTemplateIds(defaultSelectedPromptTemplateIds);
     setGeneralInstructions(defaultGeneralInstructions);
     const reset = await getSettingsBridge()?.reset();
@@ -764,7 +776,7 @@ export function App() {
       applyPromptTemplateState({
         ok: true,
         selectedTemplateIds: defaultSelectedPromptTemplateIds,
-        templates: starterPromptTemplates
+        templates: preserveCustomisedStarterPromptTemplates(promptTemplates)
       });
     }
   }
@@ -2434,7 +2446,10 @@ function HomePage({
             onScroll={handleAiResponsePanelScroll}
           >
             {isAiResponsePanelPlaceholder ? (
-              sendToAiWhenListeningStops ? aiResponsePlaceholder : aiResponseDisabledPlaceholder
+              <>
+                {sendToAiWhenListeningStops ? aiResponsePlaceholder : aiResponseDisabledPlaceholder}
+                <AiPromptTemplateHint />
+              </>
             ) : visibleAiResponses.length > 0 ? (
               <AiResponseSectionList
                 activeResponseId={activeAiResponseId}
@@ -2571,6 +2586,17 @@ function StartHereHint({
   );
 }
 
+function AiPromptTemplateHint() {
+  return (
+    <div className={layout.aiPromptTemplateHint} aria-label="Prompt template hint">
+      <ArrowUpIcon className={layout.aiPromptTemplateHintIcon} aria-hidden="true" />
+      <div className={layout.aiPromptTemplateHintDescription}>
+        Pick a prompt template or customise one to change how AI responds.
+      </div>
+    </div>
+  );
+}
+
 function GeneralInstructionsDialog({
   instructions,
   isMac,
@@ -2584,33 +2610,33 @@ function GeneralInstructionsDialog({
   onSave: (instructions: string) => void;
   open: boolean;
 }) {
-  const [draft, setDraft] = useState(instructions);
-
-  useEffect(() => {
-    if (open) {
-      setDraft(instructions);
-    }
-  }, [instructions, open]);
-
-  function saveDraft() {
-    onSave(draft);
-    onOpenChange(false);
+  if (!open) {
+    return null;
   }
 
   return (
-    <Dialog modal={false} open={open} onOpenChange={onOpenChange}>
-      {open ? <div aria-hidden="true" className={layout.modalBlurBackdrop} /> : null}
-      <DialogContent
+    <>
+      <button
+        aria-label="Close general instructions backdrop"
+        className={layout.settingsBackdrop}
+        onClick={() => onOpenChange(false)}
+        type="button"
+      />
+      <section
+        aria-describedby="general-instructions-dialog-description"
+        aria-labelledby="general-instructions-dialog-title"
+        aria-modal="false"
         className={layout.generalInstructionsDialog}
-        showCloseButton={false}
+        data-state="open"
+        role="dialog"
       >
-        <PlatformDialogCloseButton isMac={isMac} label="Close general instructions" />
-        <DialogHeader className={`${layout.promptTemplateHeader} ${isMac ? layout.promptTemplateHeaderMac : ''}`}>
-          <DialogTitle className={layout.modalHeaderTitle}>Instructions</DialogTitle>
-          <DialogDescription className="sr-only">
+        <PlatformDialogCloseButton isMac={isMac} label="Close general instructions" onClick={() => onOpenChange(false)} />
+        <div className={`${layout.promptTemplateHeader} ${isMac ? layout.promptTemplateHeaderMac : ''}`}>
+          <h2 id="general-instructions-dialog-title" className={layout.modalHeaderTitle}>Instructions</h2>
+          <p id="general-instructions-dialog-description" className="sr-only">
             Add preferences you want every AI reply to follow, like spelling, tone, format or how concise to be.
-          </DialogDescription>
-        </DialogHeader>
+          </p>
+        </div>
         <div className={layout.generalInstructionsEditor}>
           <Field className="min-h-0">
             <p className={layout.settingsDescription}>
@@ -2620,21 +2646,14 @@ function GeneralInstructionsDialog({
               aria-label="Instructions"
               className="min-h-0 flex-1 resize-none"
               id="general-instructions"
-              onChange={(event) => setDraft(event.target.value)}
-              value={draft}
+              onChange={(event) => onSave(event.target.value)}
+              placeholder={generalInstructionsPlaceholder}
+              value={instructions}
             />
           </Field>
         </div>
-        <DialogFooter className={layout.promptTemplateFooter}>
-          <Button onClick={() => setDraft(defaultGeneralInstructions)} type="button" variant="outline">
-            Restore default
-          </Button>
-          <Button onClick={saveDraft} type="button">
-            Save
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </section>
+    </>
   );
 }
 
@@ -2950,20 +2969,19 @@ function TranscriptBottomActionControls({
           triggerLabel="Download"
           triggerSize={showLabels ? 'lg' : 'icon-lg'}
         />
-        <TooltipButton
-          aria-label="Clear transcript feed"
+        <ConfirmClearButton
+          actionLabel="Clear transcript"
+          ariaLabel="Clear transcript feed"
           className={showLabels ? layout.compactToolbarButton : undefined}
+          description="This removes the transcript from this session."
           disabled={!hasTranscript}
-          onClick={onClearTranscript}
+          onConfirm={onClearTranscript}
+          showLabels={showLabels}
           size={showLabels ? 'lg' : 'icon-lg'}
+          title="Clear transcript?"
           tooltip="Clear transcript feed"
           tooltipSide={tooltipSide}
-          type="button"
-          variant="outline"
-        >
-          <Trash2Icon />
-          <span className={showLabels ? layout.expandedToolbarButtonLabel : 'sr-only'}>Clear</span>
-        </TooltipButton>
+        />
       </div>
       <TooltipButton
         aria-label="Send full transcript to AI"
@@ -3027,21 +3045,87 @@ function AiResponseBottomActionControls({
       triggerSize={showLabels ? 'lg' : 'icon-lg'}
       wordTooltip="Download all AI responses as a Word document"
     />
-    <TooltipButton
-      aria-label="Clear AI response feed"
+    <ConfirmClearButton
+      actionLabel="Clear responses"
+      ariaLabel="Clear AI response feed"
       className={showLabels ? layout.compactToolbarButton : undefined}
+      description="This removes all AI responses from this session."
       disabled={!hasAiResponse}
-      onClick={onClearAiResponses}
+      onConfirm={onClearAiResponses}
+      showLabels={showLabels}
       size={showLabels ? 'lg' : 'icon-lg'}
+      title="Clear AI responses?"
       tooltip="Clear AI response feed"
       tooltipSide={tooltipSide}
-      type="button"
-      variant="outline"
-    >
-      <Trash2Icon />
-      <span className={showLabels ? layout.expandedToolbarButtonLabel : 'sr-only'}>Clear</span>
-    </TooltipButton>
+    />
     </div>
+  );
+}
+
+function ConfirmClearButton({
+  actionLabel,
+  ariaLabel,
+  className,
+  description,
+  disabled,
+  onConfirm,
+  showLabels,
+  size,
+  title,
+  tooltip,
+  tooltipSide
+}: {
+  actionLabel: string;
+  ariaLabel: string;
+  className?: string;
+  description: string;
+  disabled: boolean;
+  onConfirm: () => void;
+  showLabels: boolean;
+  size: 'lg' | 'icon-lg';
+  title: string;
+  tooltip: string;
+  tooltipSide: TooltipSide;
+}) {
+  const [open, setOpen] = useState(false);
+
+  function confirm() {
+    onConfirm();
+    setOpen(false);
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <TooltipButton
+          aria-label={ariaLabel}
+          className={className}
+          disabled={disabled}
+          size={size}
+          tooltip={tooltip}
+          tooltipSide={tooltipSide}
+          type="button"
+          variant="outline"
+        >
+          <Trash2Icon />
+          <span className={showLabels ? layout.expandedToolbarButtonLabel : 'sr-only'}>Clear</span>
+        </TooltipButton>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-64 gap-3" side={tooltipSide}>
+        <div>
+          <div className="text-sm font-medium">{title}</div>
+          <p className="text-sm text-muted-foreground">{description}</p>
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button onClick={() => setOpen(false)} type="button" variant="outline">
+            Cancel
+          </Button>
+          <Button onClick={confirm} type="button" variant="destructive">
+            {actionLabel}
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -4138,20 +4222,33 @@ function PromptTemplateDialog({
     setDeleteConfirmationId(null);
   }
 
+  if (!open) {
+    return null;
+  }
+
   return (
-    <Dialog modal={false} open={open} onOpenChange={onOpenChange}>
-      {open ? <div aria-hidden="true" className={layout.modalBlurBackdrop} /> : null}
-      <DialogContent
+    <>
+      <button
+        aria-label="Close prompt templates backdrop"
+        className={layout.settingsBackdrop}
+        onClick={() => onOpenChange(false)}
+        type="button"
+      />
+      <section
+        aria-describedby="prompt-templates-dialog-description"
+        aria-labelledby="prompt-templates-dialog-title"
+        aria-modal="false"
         className={layout.promptTemplateDialog}
-        showCloseButton={false}
+        data-state="open"
+        role="dialog"
       >
-        <PlatformDialogCloseButton isMac={isMac} label="Close prompt templates" />
-        <DialogHeader className={`${layout.promptTemplateHeader} ${isMac ? layout.promptTemplateHeaderMac : ''}`}>
-          <DialogTitle className={layout.modalHeaderTitle}>Prompt templates</DialogTitle>
-          <DialogDescription className="sr-only">
+        <PlatformDialogCloseButton isMac={isMac} label="Close prompt templates" onClick={() => onOpenChange(false)} />
+        <div className={`${layout.promptTemplateHeader} ${isMac ? layout.promptTemplateHeaderMac : ''}`}>
+          <h2 id="prompt-templates-dialog-title" className={layout.modalHeaderTitle}>Prompt templates</h2>
+          <p id="prompt-templates-dialog-description" className="sr-only">
             Save reusable instructions that are prepended to transcript requests.
-          </DialogDescription>
-        </DialogHeader>
+          </p>
+        </div>
         <div className={layout.promptTemplateEditor}>
           <div className={layout.promptTemplateSidebar}>
             <Button onClick={createNewTemplate} type="button" variant="outline">
@@ -4275,8 +4372,8 @@ function PromptTemplateDialog({
             </div>
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
+      </section>
+    </>
   );
 }
 
@@ -4778,6 +4875,45 @@ function mergeStarterPromptTemplates(templates: PromptTemplate[]) {
   ];
 }
 
+function getCustomStarterPromptTemplateId(id: string) {
+  return `custom-${id}`;
+}
+
+function isStarterPromptTemplateCustomised(template: PromptTemplate, starterTemplate: PromptTemplate) {
+  return template.name !== starterTemplate.name
+    || template.prompt !== starterTemplate.prompt
+    || (template.attachments ?? []).length > 0;
+}
+
+function asCustomStarterPromptTemplate(template: PromptTemplate, existingTemplates: PromptTemplate[] = []) {
+  const customId = getCustomStarterPromptTemplateId(template.id);
+  const existingCustom = existingTemplates.find((item) => item.id === customId);
+
+  return {
+    ...template,
+    createdAt: existingCustom?.createdAt ?? template.createdAt,
+    id: customId,
+    updatedAt: template.updatedAt
+  };
+}
+
+function preserveCustomisedStarterPromptTemplates(templates: PromptTemplate[]) {
+  const starterTemplatesById = new Map(starterPromptTemplates.map((template) => [template.id, template]));
+  const preservedCustomStarters = templates
+    .filter((template) => {
+      const starterTemplate = starterTemplatesById.get(template.id);
+      return starterTemplate && isStarterPromptTemplateCustomised(template, starterTemplate);
+    })
+    .map((template) => asCustomStarterPromptTemplate(template, templates));
+  const existingCustomTemplates = templates.filter((template) => !starterTemplatesById.has(template.id));
+  const customTemplatesById = new Map([...existingCustomTemplates, ...preservedCustomStarters].map((template) => [template.id, template]));
+
+  return [
+    ...starterPromptTemplates,
+    ...customTemplatesById.values()
+  ];
+}
+
 function getCanonicalPromptTemplateState(state: PromptTemplateState): PromptTemplateState {
   const templates = mergeStarterPromptTemplates(state.templates);
 
@@ -5058,8 +5194,8 @@ function SettingsPage({
                   <FieldLegend>Updates</FieldLegend>
                   <FieldGroup>
                     <div className="flex max-w-2xl flex-col items-start gap-3">
-                      <div className="grid w-full gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-                        <Field>
+                      <div className="flex w-full flex-wrap items-end gap-3">
+                        <Field className="w-auto">
                           <FieldLabel htmlFor="update-frequency">Automatic checks</FieldLabel>
                           <Select
                             disabled={!updateStatus?.enabled || updateStatus.checking || updateStatus.downloading}
@@ -5068,7 +5204,7 @@ function SettingsPage({
                             onValueChange={(value) => void getSettingsBridge()?.updates?.setFrequency(value as UpdateFrequency)}
                           >
                             <div>
-                              <SelectTrigger id="update-frequency">
+                              <SelectTrigger id="update-frequency" className="w-[8.5rem]">
                                 <SelectValue />
                               </SelectTrigger>
                             </div>
@@ -5140,28 +5276,7 @@ function SettingsPage({
                 <FieldSet>
                   <FieldLegend>System</FieldLegend>
                   <FieldGroup>
-                    <div className="flex max-w-2xl flex-col items-start gap-3">
-                      <div className="flex flex-col items-start gap-2">
-                        <TooltipButton
-                          disabled={isListening || isBusy}
-                          onClick={() => setIsResetDialogOpen(true)}
-                          size="default"
-                          tooltip="Reset settings"
-                          type="button"
-                          variant="outline"
-                        >
-                          Reset Settings
-                        </TooltipButton>
-                        <div className={layout.settingsDescription}>
-                          <p>Resets:</p>
-                          <ul className="list-disc pl-5">
-                            <li>Window size and position</li>
-                            <li>Floating button position</li>
-                            <li>Model and listening sources</li>
-                            <li>Starter prompt templates</li>
-                          </ul>
-                        </div>
-                      </div>
+                    <div className="flex max-w-2xl flex-wrap items-center gap-2">
                       <div className="flex">
                         <TooltipButton
                           onClick={onQuit}
@@ -5172,6 +5287,18 @@ function SettingsPage({
                         >
                           <LogOutIcon />
                           Quit Susura
+                        </TooltipButton>
+                      </div>
+                      <div className="flex">
+                        <TooltipButton
+                          disabled={isListening || isBusy}
+                          onClick={() => setIsResetDialogOpen(true)}
+                          size="default"
+                          tooltip="Reset settings"
+                          type="button"
+                          variant="outline"
+                        >
+                          Reset Settings
                         </TooltipButton>
                       </div>
                     </div>
@@ -5281,8 +5408,17 @@ function SettingsPage({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Reset settings?</DialogTitle>
-            <DialogDescription>
-              This will restore the default window size, location, floating button position, model, listening sources and starter prompt templates. Saved prompt templates will be deleted.
+            <DialogDescription asChild>
+              <div>
+                <p>This will restore:</p>
+                <ul className="mt-2 list-disc space-y-1 pl-5">
+                  <li>Window size and location</li>
+                  <li>Floating button position</li>
+                  <li>Model and listening sources</li>
+                  <li>Starter prompt templates</li>
+                  <li>Your custom prompts will not be deleted</li>
+                </ul>
+              </div>
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

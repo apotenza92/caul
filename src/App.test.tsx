@@ -37,7 +37,9 @@ describe('App', () => {
     expect(screen.getByLabelText('Start Listening hint')).toHaveTextContent(
       'Click Start Listening while playing something through your speakers or headphones.'
     );
-    expect(screen.queryByLabelText('Prompt template edit hint')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Prompt template hint')).toHaveTextContent(
+      'Pick a prompt template or customise one to change how AI responds.'
+    );
     expect(screen.queryByLabelText('LLM query')).not.toBeInTheDocument();
     expect(screen.getByLabelText('AI response')).toHaveTextContent(
       'Auto Send is on.\nStop listening to send transcript to AI',
@@ -64,8 +66,8 @@ describe('App', () => {
     expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Susura Settings' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('dialog', { name: 'Settings' })).toHaveClass('susura-settings-dialog');
-    expect(screen.getByRole('dialog', { name: 'Settings' })).toHaveClass('w-[59.765625vw]', 'max-w-[59.765625vw]');
-    expect(screen.getByRole('dialog', { name: 'Settings' })).not.toHaveClass('h-[85vh]', 'w-[50vw]', 'w-[85vw]');
+    expect(screen.getByRole('dialog', { name: 'Settings' })).toHaveClass('susura-large-modal-shell', 'h-[85vh]', 'w-[85vw]', 'max-w-[85vw]');
+    expect(screen.getByRole('dialog', { name: 'Settings' })).not.toHaveClass('w-[59.765625vw]', 'max-w-[59.765625vw]');
     expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: 'General' }))
       .toHaveAttribute('data-active', 'true');
     expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: 'General' }))
@@ -592,7 +594,7 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: 'Manage prompt templates' }));
 
     const promptTemplatesClose = await screen.findByRole('button', { name: 'Close prompt templates' });
-    expect(screen.getByRole('dialog', { name: 'Prompt templates' })).toHaveClass('susura-titlebar-centred-dialog');
+    expect(screen.getByRole('dialog', { name: 'Prompt templates' })).toHaveClass('susura-settings-dialog', 'susura-large-modal-shell', 'h-[85vh]', 'w-[85vw]');
     expect(screen.getByRole('heading', { name: 'Prompt templates' })).toHaveClass('text-sm', 'text-center');
     expect(screen.getByText('Save reusable instructions that are prepended to transcript requests.')).toHaveClass('sr-only');
     expect(promptTemplatesClose).toHaveClass('right-3');
@@ -1631,25 +1633,24 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findByRole('button', { name: 'Prompt template' })).toHaveTextContent('CV, PD');
+    expect(await screen.findByRole('button', { name: 'Prompt template' })).toHaveTextContent('No template');
     expect(screen.getByRole('button', { name: 'Manage prompt templates' })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Prompt template' }));
     expect(await screen.findByText('STAR')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'CV' }).querySelector('[data-slot="checkbox"]'))
-      .toHaveAttribute('data-state', 'checked');
+      .toHaveAttribute('data-state', 'unchecked');
     expect(screen.getByRole('button', { name: 'STAR' }).querySelector('[data-slot="checkbox"]'))
       .toHaveAttribute('data-state', 'unchecked');
     expect(screen.getByRole('button', { name: 'No template' }).querySelector('[data-slot="checkbox"]'))
       .not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'No template' })).toHaveAttribute('data-active', 'true');
 
     await user.type(screen.getByLabelText('Search prompt templates'), 'PD');
     expect(screen.getByText('PD')).toBeInTheDocument();
     expect(screen.queryByText('STAR')).not.toBeInTheDocument();
     await user.clear(screen.getByLabelText('Search prompt templates'));
 
-    await user.click(screen.getByText('No template'));
-    expect(screen.getByRole('button', { name: 'No template' })).toHaveAttribute('data-active', 'true');
     await user.click(screen.getByText('STAR'));
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Prompt template' })).toHaveTextContent('STAR');
@@ -1732,7 +1733,7 @@ describe('App', () => {
     await user.click(await screen.findByText('STAR'));
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Prompt template' })).toHaveTextContent('CV, PD, STAR');
+      expect(screen.getByRole('button', { name: 'Prompt template' })).toHaveTextContent('STAR');
     });
   });
 
@@ -1808,14 +1809,47 @@ describe('App', () => {
     const instructionsDialog = screen.getByRole('dialog', { name: 'Instructions' });
     const instructionsInput = within(instructionsDialog).getByRole('textbox', { name: 'Instructions' });
     expect(instructionsDialog).toHaveAttribute('data-state', 'open');
-    expect(instructionsInput).toHaveValue('Always answer in British English.');
+    expect(instructionsDialog).toHaveClass('susura-large-modal-shell', 'h-[85vh]', 'w-[85vw]');
+    expect(instructionsInput).toHaveValue('');
+    expect(instructionsInput).toHaveAttribute('placeholder', 'e.g. Always answer in British English.');
+    expect(screen.queryByRole('button', { name: 'Restore default' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
 
     await user.clear(instructionsInput);
     await user.type(instructionsInput, 'Keep the answer concise.');
-    await user.click(screen.getByRole('button', { name: 'Save' }));
 
     expect(window.localStorage.getItem('susura.general-instructions')).toBe('Keep the answer concise.');
-    expect(screen.queryByRole('dialog', { name: 'Instructions' })).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Instructions' })).toBeInTheDocument();
+  });
+
+  it('keeps blank general instructions as blank defaults', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge();
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Instructions' }));
+    const instructionsInput = within(screen.getByRole('dialog', { name: 'Instructions' }))
+      .getByRole('textbox', { name: 'Instructions' });
+    await user.type(instructionsInput, 'Temporary instruction');
+    await user.clear(instructionsInput);
+    await user.click(screen.getByRole('button', { name: 'Close general instructions' }));
+    await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
+
+    act(() => {
+      bridge.emit({
+        type: 'completed',
+        utteranceId: 1,
+        text: 'Discussed renewal timelines.'
+      });
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
+
+    const requestTranscript = bridge.llmRequests.at(-1)?.transcript ?? '';
+    expect(window.localStorage.getItem('susura.general-instructions')).toBeNull();
+    expect(requestTranscript).not.toContain('General instructions:');
+    expect(requestTranscript).toContain('Discussed renewal timelines.');
   });
 
   it('does not expose prompt template restoration in the prompt manager', async () => {
@@ -1859,7 +1893,7 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: 'Prompt template' }));
     await user.click(await screen.findByText('Image context'));
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Prompt template' })).toHaveTextContent('CV, PD, Image context');
+      expect(screen.getByRole('button', { name: 'Prompt template' })).toHaveTextContent('Image context');
     });
     await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
 
@@ -1897,13 +1931,10 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
 
     const requestTranscript = bridge.llmRequests.at(-1)?.transcript ?? '';
-    expect(requestTranscript).toContain('STAR means Situation, Task, Action and Result.');
-    expect(requestTranscript.indexOf('Use the attached or pasted CV as background context.')).toBeLessThan(
-      requestTranscript.indexOf('Use the attached or pasted position description as role context.')
-    );
-    expect(requestTranscript.indexOf('Use the attached or pasted position description as role context.')).toBeLessThan(
-      requestTranscript.indexOf('STAR means Situation, Task, Action and Result.')
-    );
+    expect(requestTranscript).toContain('Use STAR when answering interview-style questions.');
+    expect(requestTranscript).toContain('Situation: brief context');
+    expect(requestTranscript).not.toContain('Use my CV as background context.');
+    expect(requestTranscript).not.toContain('Use the position description as role context.');
     expect(requestTranscript).toContain('Transcript:');
     expect(requestTranscript).toContain('Discussed renewal timelines.');
   });
@@ -1919,7 +1950,7 @@ describe('App', () => {
     const instructionsInput = within(instructionsDialog).getByRole('textbox', { name: 'Instructions' });
     await user.clear(instructionsInput);
     await user.type(instructionsInput, 'Keep the answer concise.');
-    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await user.click(screen.getByRole('button', { name: 'Close general instructions' }));
     await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
 
     act(() => {
@@ -1935,7 +1966,7 @@ describe('App', () => {
     const requestTranscript = bridge.llmRequests.at(-1)?.transcript ?? '';
     expect(requestTranscript).toContain('General instructions:\nKeep the answer concise.');
     expect(requestTranscript.indexOf('General instructions:\nKeep the answer concise.')).toBeLessThan(
-      requestTranscript.indexOf('Use the attached or pasted position description as role context.')
+      requestTranscript.indexOf('Transcript:')
     );
     expect(requestTranscript).toContain('Transcript:');
     expect(requestTranscript).toContain('Discussed renewal timelines.');
@@ -2362,11 +2393,7 @@ describe('App', () => {
     expect(screen.getByRole('group', { name: 'System' })).toBeInTheDocument();
     expect(screen.queryByRole('group', { name: 'Setup' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Open Onboarding' })).not.toBeInTheDocument();
-    expect(screen.getByText('Resets:')).toBeInTheDocument();
-    expect(screen.getByText('Window size and position')).toBeInTheDocument();
-    expect(screen.getByText('Floating button position')).toBeInTheDocument();
-    expect(screen.getByText('Model and listening sources')).toBeInTheDocument();
-    expect(screen.getByText('Starter prompt templates')).toBeInTheDocument();
+    expect(screen.queryByText('Restores window size and position, floating button position, model and listening sources, and starter prompt templates.')).not.toBeInTheDocument();
     await openSettingsSection(user, 'Models');
     await selectSetting(user, 'Model', '5.5');
     await selectSetting(user, 'Reasoning', 'Low');
@@ -2376,22 +2403,25 @@ describe('App', () => {
 
     expect(bridge.settingsResets).toBe(0);
     expect(screen.getByRole('dialog', { name: 'Reset settings?' })).toBeInTheDocument();
-    expect(screen.getByText(/Saved prompt templates will be deleted\./)).toBeInTheDocument();
+    expect(screen.getByText('This will restore:')).toBeInTheDocument();
+    expect(screen.getByText('Window size and location')).toBeInTheDocument();
+    expect(screen.getByText('Floating button position')).toBeInTheDocument();
+    expect(screen.getByText('Model and listening sources')).toBeInTheDocument();
+    expect(screen.getByText('Starter prompt templates')).toBeInTheDocument();
+    expect(screen.getByText('Your custom prompts will not be deleted')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Reset Settings' }));
 
     expect(bridge.settingsResets).toBe(1);
     expect(screen.queryByRole('checkbox', { name: 'Microphone' })).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: 'Speaker' })).not.toBeInTheDocument();
-    expect(bridge.promptTemplateState.selectedTemplateIds).toEqual(['starter-use-my-cv', 'starter-job-description']);
+    expect(bridge.promptTemplateState.selectedTemplateIds).toEqual([]);
     expect(bridge.promptTemplateState.templates).toEqual([
       expect.objectContaining({ id: 'starter-answer-with-star' }),
       expect.objectContaining({ id: 'starter-use-my-cv' }),
-      expect.objectContaining({ id: 'starter-job-description' })
-    ]);
-    expect(bridge.promptTemplateState.templates).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'starter-job-description' }),
       expect.objectContaining({ id: 'custom-template' })
-    ]));
+    ]);
 
     await openHome(user);
     await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
@@ -2413,6 +2443,40 @@ describe('App', () => {
       reasoning: 'off',
       transcript: expect.stringContaining('Use the defaults.')
     });
+  });
+
+  it('keeps customised starter prompt templates when settings reset', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge({
+      promptTemplateState: testPromptTemplateState({
+        templates: [
+          testPromptTemplate({
+            id: 'starter-use-my-cv',
+            name: 'My CV',
+            prompt: 'Use my edited CV instructions.'
+          })
+        ]
+      })
+    });
+
+    render(<App />);
+
+    await openSettings(user);
+    await user.click(screen.getByRole('button', { name: 'Reset Settings' }));
+    await user.click(screen.getByRole('button', { name: 'Reset Settings' }));
+
+    expect(bridge.promptTemplateState.selectedTemplateIds).toEqual([]);
+    expect(bridge.promptTemplateState.templates).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'starter-use-my-cv',
+        name: 'CV'
+      }),
+      expect.objectContaining({
+        id: 'custom-starter-use-my-cv',
+        name: 'My CV',
+        prompt: 'Use my edited CV instructions.'
+      })
+    ]));
   });
 
   it('shows update settings with weekly default and manual check action', async () => {
@@ -2721,9 +2785,19 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
 
     expect(await screen.findByText('manual llm answer')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Prompt template hint')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Transcription output')).toHaveTextContent('Clear this transcript.');
 
     await user.click(screen.getByRole('button', { name: 'Clear transcript feed' }));
+    expect(screen.getByText('Clear transcript?')).toBeInTheDocument();
+    expect(screen.getByText('This removes the transcript from this session.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Transcription output')).toHaveTextContent('Clear this transcript.');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByText('Clear transcript?')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Transcription output')).toHaveTextContent('Clear this transcript.');
+
+    await user.click(screen.getByRole('button', { name: 'Clear transcript feed' }));
+    await user.click(screen.getByRole('button', { name: 'Clear transcript' }));
     expect(screen.getByLabelText('Transcription output')).toHaveTextContent(
       'Your live transcript will appear here once you start listening.'
     );
@@ -2732,9 +2806,21 @@ describe('App', () => {
     );
 
     await user.click(screen.getByRole('button', { name: 'Clear AI response feed' }));
+    expect(screen.getByText('Clear AI responses?')).toBeInTheDocument();
+    expect(screen.getByText('This removes all AI responses from this session.')).toBeInTheDocument();
+    expect(screen.getByLabelText('AI response')).toHaveTextContent('manual llm answer');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByText('Clear AI responses?')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('AI response')).toHaveTextContent('manual llm answer');
+
+    await user.click(screen.getByRole('button', { name: 'Clear AI response feed' }));
+    await user.click(screen.getByRole('button', { name: 'Clear responses' }));
     expect(screen.getByLabelText('AI response')).toHaveTextContent(
       'Auto Send is on.\nStop listening to send transcript to AI',
       { normalizeWhitespace: false }
+    );
+    expect(screen.getByLabelText('Prompt template hint')).toHaveTextContent(
+      'Pick a prompt template or customise one to change how AI responds.'
     );
   });
 
@@ -3669,17 +3755,20 @@ function installTestBridge(overrides: {
         },
         list: async () => promptTemplateState,
         reset: async () => {
-          promptTemplateState = testPromptTemplateState();
+          promptTemplateState = testPromptTemplateState({
+            templates: preserveCustomisedStarterTestPromptTemplates(promptTemplateState.templates)
+          });
 
           return promptTemplateState;
         },
         save: async (template) => {
+          const templateToSave = getPromptTemplateForTestSave(template, promptTemplateState.templates);
           promptTemplateState = {
             ok: true,
             selectedTemplateIds: promptTemplateState.selectedTemplateIds,
-            templates: promptTemplateState.templates.some((item) => item.id === template.id)
-              ? promptTemplateState.templates.map((item) => (item.id === template.id ? template : item))
-              : [...promptTemplateState.templates, template]
+            templates: promptTemplateState.templates.some((item) => item.id === templateToSave.id)
+              ? promptTemplateState.templates.map((item) => (item.id === templateToSave.id ? templateToSave : item))
+              : [...promptTemplateState.templates, templateToSave]
           };
 
           return promptTemplateState;
@@ -3737,7 +3826,9 @@ function installTestBridge(overrides: {
       },
       reset: async () => {
         settingsResets += 1;
-        promptTemplateState = testPromptTemplateState();
+        promptTemplateState = testPromptTemplateState({
+          templates: preserveCustomisedStarterTestPromptTemplates(promptTemplateState.templates)
+        });
 
         return { ok: true };
       },
@@ -3876,7 +3967,7 @@ function installTestBridge(overrides: {
 }
 
 function testPromptTemplateState(overrides: Partial<PromptTemplateState> = {}): PromptTemplateState {
-  const selectedTemplateIds = overrides.selectedTemplateIds ?? ['starter-use-my-cv', 'starter-job-description'];
+  const selectedTemplateIds = overrides.selectedTemplateIds ?? [];
 
   return {
     ok: true,
@@ -3906,19 +3997,76 @@ function starterTestPromptTemplates() {
     testPromptTemplate({
       id: 'starter-answer-with-star',
       name: 'STAR',
-      prompt: 'When the call transcript contains an interview question or a request for an example, help answer it using the STAR method. STAR means Situation, Task, Action and Result. Start with a concise direct answer, then structure the response as Situation: the context, Task: the responsibility or goal, Action: the specific steps taken, and Result: the measurable outcome or learning. Keep the answer natural enough to say aloud on a live call.'
+      prompt: 'Use STAR when answering interview-style questions.\n\nStructure the answer as:\nSituation: brief context\nTask: what needed to be done\nAction: what I did\nResult: outcome or lesson\n\nKeep it concise and natural to say aloud.'
     }),
     testPromptTemplate({
       id: 'starter-use-my-cv',
       name: 'CV',
-      prompt: 'Use the attached or pasted CV as background context. When answering questions, prefer relevant experience, projects, achievements, tools and metrics from the CV. Do not invent roles, dates, qualifications or employers that are not present. If the CV is missing, say what CV detail would help answer better.'
+      prompt: 'Use my CV as background context.\n\nPrefer relevant experience, projects, achievements and skills from the CV. Do not invent details.'
     }),
     testPromptTemplate({
       id: 'starter-job-description',
       name: 'PD',
-      prompt: 'Use the attached or pasted position description as role context. Prioritise the duties, selection criteria, required skills, seniority signals and organisation language in that position description when suggesting answers. Connect the live call question to the role requirements where useful. If the position description is missing, ask for the relevant role details.'
+      prompt: 'Use the position description as role context.\n\nConnect answers to the role duties, skills and selection criteria where useful.'
     })
   ];
+}
+
+function mergeStarterTestPromptTemplates(templates: PromptTemplate[]) {
+  const starterIds = new Set(starterTestPromptTemplates().map((template) => template.id));
+
+  return [
+    ...starterTestPromptTemplates(),
+    ...templates.filter((template) => !starterIds.has(template.id))
+  ];
+}
+
+function getCustomStarterTestPromptTemplateId(id: string) {
+  return `custom-${id}`;
+}
+
+function isStarterTestPromptTemplateCustomised(template: PromptTemplate, starterTemplate: PromptTemplate) {
+  return template.name !== starterTemplate.name
+    || template.prompt !== starterTemplate.prompt
+    || (template.attachments ?? []).length > 0;
+}
+
+function asCustomStarterTestPromptTemplate(template: PromptTemplate, existingTemplates: PromptTemplate[] = []) {
+  const customId = getCustomStarterTestPromptTemplateId(template.id);
+  const existingCustom = existingTemplates.find((item) => item.id === customId);
+
+  return {
+    ...template,
+    createdAt: existingCustom?.createdAt ?? template.createdAt,
+    id: customId,
+    updatedAt: template.updatedAt
+  };
+}
+
+function preserveCustomisedStarterTestPromptTemplates(templates: PromptTemplate[]) {
+  const starterTemplates = starterTestPromptTemplates();
+  const starterTemplatesById = new Map(starterTemplates.map((template) => [template.id, template]));
+  const preservedCustomStarters = templates
+    .filter((template) => {
+      const starterTemplate = starterTemplatesById.get(template.id);
+      return starterTemplate && isStarterTestPromptTemplateCustomised(template, starterTemplate);
+    })
+    .map((template) => asCustomStarterTestPromptTemplate(template, templates));
+  const existingCustomTemplates = templates.filter((template) => !starterTemplatesById.has(template.id));
+  const customTemplatesById = new Map([...existingCustomTemplates, ...preservedCustomStarters].map((template) => [template.id, template]));
+
+  return [
+    ...starterTemplates,
+    ...customTemplatesById.values()
+  ];
+}
+
+function getPromptTemplateForTestSave(template: PromptTemplate, existingTemplates: PromptTemplate[]) {
+  const starterTemplate = starterTestPromptTemplates().find((item) => item.id === template.id);
+
+  return starterTemplate && isStarterTestPromptTemplateCustomised(template, starterTemplate)
+    ? asCustomStarterTestPromptTemplate(template, existingTemplates)
+    : template;
 }
 
 function testPromptTemplate(overrides: Partial<PromptTemplate>): PromptTemplate {
