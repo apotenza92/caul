@@ -118,6 +118,7 @@ contextBridge.exposeInMainWorld('susura', {
       status: () => ipcRenderer.invoke('susura:updates-status')
     },
     quit: () => ipcRenderer.invoke('susura:settings-quit'),
+    relaunch: () => ipcRenderer.invoke('susura:settings-relaunch'),
     reset: () => ipcRenderer.invoke('susura:settings-reset')
   },
   transcription: {

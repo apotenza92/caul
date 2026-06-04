@@ -1036,6 +1036,7 @@ function OnboardingSurface() {
   const missingItems = getMissingOnboardingItems(status);
   const piReady = Boolean(status?.pi.connected);
   const visiblePermissions = getVisiblePermissionItems(status?.permissions);
+  const onboardingPermissionRows = getOnboardingPermissionRows(visiblePermissions);
   const contentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1123,15 +1124,24 @@ function OnboardingSurface() {
           <h1 className="text-lg font-semibold">Welcome to {appName}</h1>
         </header>
 
-        {visiblePermissions.length > 0 ? (
+        {onboardingPermissionRows.length > 0 ? (
           <OnboardingPanel sectionRef={permissionsRef} title="Permissions">
             <div className="grid">
-              {visiblePermissions.map((permission) => (
-                <PermissionSetupRow
-                  key={permission.id}
-                  onChange={() => void requestOnboardingPermission(permission.id)}
-                  permission={permission}
-                />
+              {onboardingPermissionRows.map((row) => (
+                row.kind === 'audio' ? (
+                  <AudioPermissionSetupRow
+                    key="audio"
+                    microphone={row.microphone}
+                    onChange={(permissions) => void requestOnboardingPermissions(permissions)}
+                    systemAudio={row.systemAudio}
+                  />
+                ) : (
+                  <PermissionSetupRow
+                    key={row.permission.id}
+                    onChange={() => void requestOnboardingPermission(row.permission.id)}
+                    permission={row.permission}
+                  />
+                )
               ))}
             </div>
           </OnboardingPanel>
@@ -1440,6 +1450,122 @@ function StatusPill({
     <span className={`rounded-full border px-2 py-1 text-xs font-medium ${ready ? 'border-emerald-600/35 text-emerald-700 dark:text-emerald-400' : 'border-destructive/35 text-destructive'}`}>
       {children}
     </span>
+  );
+}
+
+type OnboardingPermissionRow =
+  | { kind: 'permission'; permission: PermissionItem }
+  | { kind: 'audio'; microphone: PermissionItem | null; systemAudio: PermissionItem | null };
+
+function getOnboardingPermissionRows(permissions: PermissionItem[]): OnboardingPermissionRow[] {
+  const microphone = permissions.find((permission) => permission.id === 'microphone') ?? null;
+  const systemAudio = permissions.find((permission) => permission.id === 'system-audio') ?? null;
+  const rows: OnboardingPermissionRow[] = permissions
+    .filter((permission) => permission.id !== 'microphone' && permission.id !== 'system-audio')
+    .map((permission) => ({ kind: 'permission', permission }));
+
+  if (microphone || systemAudio) {
+    rows.push({ kind: 'audio', microphone, systemAudio });
+  }
+
+  return rows;
+}
+
+function AudioPermissionSetupRow({
+  microphone,
+  onChange,
+  showDivider = true,
+  systemAudio
+}: {
+  microphone: PermissionItem | null;
+  onChange: (permissions: Array<PermissionItem['id']>) => void;
+  showDivider?: boolean;
+  systemAudio: PermissionItem | null;
+}) {
+  const [restartHintVisible, setRestartHintVisible] = useState(false);
+  const permissions = [microphone, systemAudio].filter((permission): permission is PermissionItem => Boolean(permission));
+  const ready = permissions.every((permission) => permission.status === 'granted' || permission.status === 'unsupported');
+  const needsRestart = permissions.some((permission) => permission.status === 'denied' || permission.status === 'restricted');
+  const showRestart = needsRestart && restartHintVisible;
+  const actionLabel = needsRestart ? 'Open Settings' : 'Grant';
+  const missingPermissionIds = permissions
+    .filter((permission) => permission.status !== 'granted' && permission.status !== 'unsupported')
+    .map((permission) => permission.id)
+    .sort((a, b) => {
+      const order = ['microphone', 'system-audio'];
+      return order.indexOf(a) - order.indexOf(b);
+    });
+  const deniedPermissionIds = permissions
+    .filter((permission) => permission.status === 'denied' || permission.status === 'restricted')
+    .map((permission) => permission.id)
+    .sort((a, b) => {
+      const order = ['microphone', 'system-audio'];
+      return order.indexOf(a) - order.indexOf(b);
+    });
+  const actionPermissionIds = needsRestart
+    ? deniedPermissionIds.slice(0, 1)
+    : missingPermissionIds;
+
+  return (
+    <div className={`${showDivider ? 'border-b border-border/70 last:border-b-0' : ''} text-sm`.trim()}>
+      <div className="grid min-h-10 grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <h3 className="truncate text-sm font-medium">Microphone & System Audio</h3>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                aria-label="Microphone & System Audio permission info"
+                className="inline-flex size-6 shrink-0 cursor-default items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                type="button"
+              >
+                <InfoIcon className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <span className="block max-w-72">
+                Required for microphone input and audio from other apps. macOS may show these prompts one after the other.
+              </span>
+            </TooltipContent>
+          </Tooltip>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className={`rounded-full border px-2 py-1 text-xs font-medium ${ready ? 'border-emerald-600/35 text-emerald-700 dark:text-emerald-400' : 'border-destructive/35 text-destructive'}`}>
+            {ready ? 'Granted' : 'Not granted'}
+          </span>
+          {!ready ? (
+            <Button
+              aria-label="Grant Microphone & System Audio"
+              onClick={() => {
+                onChange(actionPermissionIds);
+                if (needsRestart) {
+                  setRestartHintVisible(true);
+                }
+              }}
+              size="sm"
+              type="button"
+            >
+              {actionLabel}
+            </Button>
+          ) : null}
+          {showRestart ? (
+            <Button
+              aria-label="Restart Susura"
+              onClick={() => void getSettingsBridge()?.relaunch?.()}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Restart
+            </Button>
+          ) : null}
+        </div>
+      </div>
+      {showRestart ? (
+        <p className="pb-2 text-xs text-muted-foreground">
+          Changed it in System Settings? Restart Susura to apply the permission.
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -5384,13 +5510,23 @@ function SettingsPage({
                 <FieldLegend>Permissions</FieldLegend>
                 <FieldGroup>
                   <div className="grid w-full">
-                    {permissionsStatus ? getVisiblePermissionItems(permissionsStatus).map((permission) => (
-                      <PermissionSetupRow
-                        key={permission.id}
-                        onChange={() => onRequestPermission(permission.id)}
-                        permission={permission}
-                        showDivider={false}
-                      />
+                    {permissionsStatus ? getOnboardingPermissionRows(getVisiblePermissionItems(permissionsStatus)).map((row) => (
+                      row.kind === 'audio' ? (
+                        <AudioPermissionSetupRow
+                          key="audio"
+                          microphone={row.microphone}
+                          onChange={(permissions) => permissions.forEach((permission) => onRequestPermission(permission))}
+                          showDivider={false}
+                          systemAudio={row.systemAudio}
+                        />
+                      ) : (
+                        <PermissionSetupRow
+                          key={row.permission.id}
+                          onChange={() => onRequestPermission(row.permission.id)}
+                          permission={row.permission}
+                          showDivider={false}
+                        />
+                      )
                     )) : (
                       <StatusRow
                         label="Permissions"

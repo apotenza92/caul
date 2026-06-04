@@ -12,13 +12,13 @@
   <string>Susura Audio Helper</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
+  <key>LSUIElement</key>
+  <true/>
   <key>CFBundleShortVersionString</key>
   <string>0.1.0</string>
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>NSAudioCaptureUsageDescription</key>
   <string>Susura needs access to system audio so it can transcribe audio playing on this Mac.</string>
-  <key>NSMicrophoneUsageDescription</key>
-  <string>Susura needs microphone access when microphone listening is enabled.</string>
 </dict>
 </plist>

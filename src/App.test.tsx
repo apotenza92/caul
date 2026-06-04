@@ -107,9 +107,9 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByAltText('Susura')).toBeInTheDocument();
-    expect(screen.getByText('Microphone')).toBeInTheDocument();
     expect(screen.getByText('Screen & System Audio Recording')).toBeInTheDocument();
-    expect(screen.getByText('System Audio')).toBeInTheDocument();
+    expect(screen.getByText('Microphone & System Audio')).toBeInTheDocument();
+    expect(screen.queryByText('Permission setup')).not.toBeInTheDocument();
   });
 
   it('shows targeted onboarding permission status and actions', async () => {
@@ -141,7 +141,7 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByText('Not granted')).toBeInTheDocument();
-    expect(screen.getAllByText('Granted')).toHaveLength(2);
+    expect(screen.getAllByText('Granted')).toHaveLength(1);
     expect(screen.queryByRole('button', { name: 'Request Permissions' })).not.toBeInTheDocument();
 
     await userEvent.setup().click(screen.getByRole('button', { name: 'Grant Screen & System Audio Recording' }));
@@ -176,12 +176,122 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findAllByText('Not granted')).toHaveLength(3);
+    expect(await screen.findAllByText('Not granted')).toHaveLength(2);
     expect(bridge.requestedPermissions).toEqual([]);
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Grant System Audio' }));
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Grant Microphone & System Audio' }));
+
+    expect(bridge.requestedPermissions).toEqual(['microphone', 'system-audio']);
+  });
+
+  it('only requests the missing audio permission from the combined onboarding row', async () => {
+    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    const bridge = installTestBridge({
+      permissions: [
+        {
+          description: 'Required when listening to speaker audio output.',
+          id: 'screen-recording',
+          label: 'Screen & System Audio Recording',
+          status: 'granted'
+        },
+        {
+          description: 'Required when listening to audio from other apps.',
+          id: 'system-audio',
+          label: 'System Audio',
+          status: 'denied'
+        },
+        {
+          description: 'Required when listening to your microphone.',
+          id: 'microphone',
+          label: 'Microphone',
+          status: 'granted'
+        }
+      ]
+    });
+
+    render(<App />);
+
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Grant Microphone & System Audio' }));
 
     expect(bridge.requestedPermissions).toEqual(['system-audio']);
+  });
+
+  it('offers to restart onboarding after the denied audio permission path is retried', async () => {
+    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    const bridge = installTestBridge({
+      permissions: [
+        {
+          description: 'Required when listening to speaker audio output.',
+          id: 'screen-recording',
+          label: 'Screen & System Audio Recording',
+          status: 'granted'
+        },
+        {
+          description: 'Required when listening to audio from other apps.',
+          id: 'system-audio',
+          label: 'System Audio',
+          status: 'granted'
+        },
+        {
+          description: 'Required when listening to your microphone.',
+          id: 'microphone',
+          label: 'Microphone',
+          status: 'denied'
+        }
+      ]
+    });
+
+    render(<App />);
+
+    const user = userEvent.setup();
+
+    expect(screen.queryByText('Changed it in System Settings? Restart Susura to apply the permission.')).not.toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Grant Microphone & System Audio' })).toHaveTextContent('Open Settings');
+
+    await user.click(await screen.findByRole('button', { name: 'Grant Microphone & System Audio' }));
+
+    expect(await screen.findByText('Changed it in System Settings? Restart Susura to apply the permission.')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Restart Susura' }));
+
+    expect(bridge.relaunches).toBe(1);
+  });
+
+  it('opens only one denied audio permission at a time during onboarding recovery', async () => {
+    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    const bridge = installTestBridge({
+      permissions: [
+        {
+          description: 'Required when listening to speaker audio output.',
+          id: 'screen-recording',
+          label: 'Screen & System Audio Recording',
+          status: 'granted'
+        },
+        {
+          description: 'Required when listening to audio from other apps.',
+          id: 'system-audio',
+          label: 'System Audio',
+          status: 'denied'
+        },
+        {
+          description: 'Required when listening to your microphone.',
+          id: 'microphone',
+          label: 'Microphone',
+          status: 'denied'
+        }
+      ]
+    });
+
+    render(<App />);
+
+    const user = userEvent.setup();
+
+    expect(await screen.findByRole('button', { name: 'Grant Microphone & System Audio' })).toHaveTextContent('Open Settings');
+
+    await user.click(screen.getByRole('button', { name: 'Grant Microphone & System Audio' }));
+
+    expect(bridge.requestedPermissions).toEqual(['microphone']);
+    expect(await screen.findByText('Changed it in System Settings? Restart Susura to apply the permission.')).toBeInTheDocument();
   });
 
   it('hides the permissions step during onboarding when no platform permissions are relevant', async () => {
@@ -1015,9 +1125,9 @@ describe('App', () => {
 
     expect(screen.getByRole('group', { name: 'Permissions' })).toBeInTheDocument();
     expect(screen.getByText('Screen & System Audio Recording')).toBeInTheDocument();
-    expect(screen.getByText('Microphone')).toBeInTheDocument();
+    expect(screen.getByText('Microphone & System Audio')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Grant Screen & System Audio Recording' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Grant Microphone' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Grant Microphone & System Audio' })).not.toBeInTheDocument();
   });
 
   it('hides unsupported permission rows in Settings', async () => {
@@ -1052,7 +1162,7 @@ describe('App', () => {
 
     expect(screen.queryByText('Screen & System Audio Recording')).not.toBeInTheDocument();
     expect(screen.queryByText('System Audio')).not.toBeInTheDocument();
-    expect(screen.getByText('Microphone')).toBeInTheDocument();
+    expect(screen.getByText('Microphone & System Audio')).toBeInTheDocument();
     expect(screen.queryByText('Unsupported')).not.toBeInTheDocument();
   });
 
@@ -1088,10 +1198,48 @@ describe('App', () => {
     await openSettingsSection(user, 'Permissions');
 
     expect(screen.getByRole('button', { name: 'Grant Screen & System Audio Recording' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Grant Microphone' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Grant Microphone & System Audio' })).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Grant Microphone' }));
+    await user.click(screen.getByRole('button', { name: 'Grant Microphone & System Audio' }));
+    expect(bridge.requestedPermissions).toEqual(['microphone', 'system-audio']);
+  });
+
+  it('opens only one denied audio permission at a time from Settings', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge({
+      permissions: [
+        {
+          description: 'Required when listening to speaker audio output.',
+          id: 'screen-recording',
+          label: 'Screen & System Audio Recording',
+          status: 'granted'
+        },
+        {
+          description: 'Required when listening to audio from other apps.',
+          id: 'system-audio',
+          label: 'System Audio',
+          status: 'denied'
+        },
+        {
+          description: 'Required when listening to your microphone.',
+          id: 'microphone',
+          label: 'Microphone',
+          status: 'denied'
+        }
+      ]
+    });
+
+    render(<App />);
+
+    await openSettings(user);
+    await openSettingsSection(user, 'Permissions');
+
+    expect(await screen.findByRole('button', { name: 'Grant Microphone & System Audio' })).toHaveTextContent('Open Settings');
+
+    await user.click(screen.getByRole('button', { name: 'Grant Microphone & System Audio' }));
+
     expect(bridge.requestedPermissions).toEqual(['microphone']);
+    expect(await screen.findByText('Changed it in System Settings? Restart Susura to apply the permission.')).toBeInTheDocument();
   });
 
   it('does not show Grant buttons for granted permissions in Settings', async () => {
@@ -1119,7 +1267,7 @@ describe('App', () => {
     await openSettingsSection(user, 'Permissions');
 
     expect(screen.queryByRole('button', { name: 'Grant Screen & System Audio Recording' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Grant Microphone' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Grant Microphone & System Audio' })).toBeInTheDocument();
   });
 
   it('replaces Start Listening with Grant Permissions when a selected source is missing permission', async () => {
@@ -3445,6 +3593,7 @@ function installTestBridge(overrides: {
   const requestedPermissions: string[] = [];
   let promptTemplateState = overrides.promptTemplateState ?? testPromptTemplateState();
   let settingsResets = 0;
+  let relaunches = 0;
   const savedPiModels: string[] = [];
   const selectedLocalTranscriptionModels: string[] = [];
   let chatGptLoginOpens = 0;
@@ -3832,7 +3981,12 @@ function installTestBridge(overrides: {
 
         return { ok: true };
       },
-      quit: async () => ({ ok: true })
+      quit: async () => ({ ok: true }),
+      relaunch: async () => {
+        relaunches += 1;
+
+        return { ok: true };
+      }
     },
     systemAudio: {
       start: async () => ({ ok: true }),
@@ -3953,6 +4107,9 @@ function installTestBridge(overrides: {
     },
     get settingsResets() {
       return settingsResets;
+    },
+    get relaunches() {
+      return relaunches;
     },
     get updateChecks() {
       return updateChecks;

@@ -6,6 +6,13 @@ const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline');
 const { pathToFileURL } = require('node:url');
+const {
+  getSystemAudioPermissionDeniedState,
+  getSystemAudioPermissionGrantedState,
+  getSystemAudioPermissionRequestedState,
+  getSystemAudioPermissionStatusFromState,
+  isSystemAudioPermissionProbeGrantedEvent
+} = require('./permissions.cjs');
 const { getPreferredOverlaySizeForEdge } = require('./privateOverlayGeometry.cjs');
 const { createStopFlushController } = require('./transcriptionStopFlush.cjs');
 const { createUpdaterService } = require('./updater.cjs');
@@ -2200,17 +2207,7 @@ async function getPermissionsStatus() {
 }
 
 function getSystemAudioPermissionStatus() {
-  const state = readSetupState();
-
-  if (state.systemAudioPermissionDenied === true) {
-    return 'denied';
-  }
-
-  if (state.systemAudioPermissionRequested === true) {
-    return 'granted';
-  }
-
-  return 'not-determined';
+  return getSystemAudioPermissionStatusFromState(readSetupState());
 }
 
 async function getScreenRecordingPermissionStatus() {
@@ -2287,27 +2284,18 @@ async function requestPermission(permission) {
 }
 
 async function requestSystemAudioPermission() {
-  writeSetupState({
-    systemAudioPermissionDenied: false,
-    systemAudioPermissionRequested: true
-  });
+  writeSetupState(getSystemAudioPermissionRequestedState());
 
   try {
     const result = await runSystemAudioPermissionProbe();
 
     if (result.ok) {
-      writeSetupState({
-        systemAudioPermissionDenied: false,
-        systemAudioPermissionRequested: true
-      });
+      writeSetupState(getSystemAudioPermissionGrantedState());
 
       return { ok: true };
     }
 
-    writeSetupState({
-      systemAudioPermissionDenied: true,
-      systemAudioPermissionRequested: true
-    });
+    writeSetupState(getSystemAudioPermissionDeniedState());
     openPermissionsSettings('system-audio');
 
     return {
@@ -2315,10 +2303,7 @@ async function requestSystemAudioPermission() {
       message: result.message ?? 'macOS did not grant System Audio permission yet.'
     };
   } catch (error) {
-    writeSetupState({
-      systemAudioPermissionDenied: true,
-      systemAudioPermissionRequested: true
-    });
+    writeSetupState(getSystemAudioPermissionDeniedState());
     openPermissionsSettings('system-audio');
 
     return {
@@ -2330,7 +2315,7 @@ async function requestSystemAudioPermission() {
 
 function runSystemAudioPermissionProbe() {
   return new Promise((resolve, reject) => {
-    const command = getDesktopBackendCommand(['--stream-system-audio', '--duration', '1']);
+    const command = getAudioHelperCommand(['--stream-system-audio', '--duration', '3']);
     const child = spawn(command.command, command.args, {
       cwd: getProjectRoot(),
       env: {
@@ -2341,7 +2326,7 @@ function runSystemAudioPermissionProbe() {
     });
     let stderr = '';
     let settled = false;
-    let sawStarted = false;
+    let sawCaptureOutput = false;
     const timer = setTimeout(() => {
       if (settled) {
         return;
@@ -2377,8 +2362,8 @@ function runSystemAudioPermissionProbe() {
         return;
       }
 
-      if (event?.type === 'capture_started') {
-        sawStarted = true;
+      if (isSystemAudioPermissionProbeGrantedEvent(event)) {
+        sawCaptureOutput = true;
         settle({ ok: true });
         return;
       }
@@ -2410,7 +2395,7 @@ function runSystemAudioPermissionProbe() {
       settled = true;
       clearTimeout(timer);
 
-      if (sawStarted || code === 0) {
+      if (sawCaptureOutput) {
         resolve({ ok: true });
         return;
       }
@@ -7356,6 +7341,12 @@ ipcMain.handle('susura:settings-reset', (event) => {
 });
 
 ipcMain.handle('susura:settings-quit', () => {
+  app.quit();
+  return { ok: true };
+});
+
+ipcMain.handle('susura:settings-relaunch', () => {
+  app.relaunch();
   app.quit();
   return { ok: true };
 });

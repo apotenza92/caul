@@ -302,6 +302,7 @@ export type SettingsBridge = {
     status: () => Promise<UpdateStatus>;
   };
   quit?: () => Promise<{ ok: boolean }>;
+  relaunch?: () => Promise<{ ok: boolean }>;
   reset: () => Promise<{ ok: boolean }>;
 };
 

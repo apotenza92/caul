@@ -46,7 +46,7 @@ const macConfig = {
   artifactName: `${artifactPrefix}-macos-\${arch}.\${ext}`,
   category: 'public.app-category.productivity',
   entitlements: 'electron/SusuraRelease.entitlements',
-  entitlementsInherit: 'electron/SusuraRelease.entitlements',
+  entitlementsInherit: 'electron/SusuraReleaseInherit.entitlements',
   extendInfo: {
     NSAudioCaptureUsageDescription: `${appDisplayName} needs access to system audio so it can transcribe audio playing on this Mac.`,
     NSMicrophoneUsageDescription: `${appDisplayName} needs microphone access when microphone listening is enabled.`,
