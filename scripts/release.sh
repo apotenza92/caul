@@ -77,6 +77,8 @@ if [ "$PACKAGE_VERSION" != "$VERSION" ]; then
   exit 1
 fi
 
+node scripts/assert-vm-e2e-summaries.mjs
+
 echo "Release: $TAG"
 
 if [ "$IS_STABLE" = true ]; then

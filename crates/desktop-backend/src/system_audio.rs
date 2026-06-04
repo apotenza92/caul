@@ -138,6 +138,37 @@ fn encode_pcm16_base64(samples: &[f32]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
+#[cfg(target_os = "windows")]
+pub fn windows_audio_diagnostics() -> serde_json::Value {
+    platform::windows_audio_diagnostics()
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn windows_audio_diagnostics() -> serde_json::Value {
+    serde_json::json!({
+        "error": "Windows audio diagnostics are only available on Windows.",
+        "ok": false,
+        "platform": std::env::consts::OS,
+        "type": "windows_audio_diagnostics"
+    })
+}
+
+#[cfg(target_os = "windows")]
+pub fn protect_window_handle(value: &str) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    platform::protect_window_handle(value)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn protect_window_handle(value: &str) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    Ok(serde_json::json!({
+        "hwnd": value,
+        "ok": false,
+        "platform": std::env::consts::OS,
+        "type": "window_display_affinity",
+        "error": "Window display affinity is only available on Windows."
+    }))
+}
+
 #[cfg(target_os = "macos")]
 mod platform {
     use super::{PlatformRunningSystemAudio, SystemAudioUpdate};
@@ -222,7 +253,7 @@ mod platform {
     use std::thread;
     use std::time::Duration;
     use wasapi::{
-        initialize_mta, AudioClient, DeviceEnumerator, Direction, SampleType, StreamMode,
+        initialize_mta, AudioClient, Device, DeviceEnumerator, Direction, SampleType, StreamMode,
     };
 
     pub fn start(
@@ -262,7 +293,7 @@ mod platform {
         initialize_mta().ok()?;
 
         let enumerator = DeviceEnumerator::new()?;
-        let device = enumerator.get_default_device(&Direction::Render)?;
+        let device = select_render_device(&enumerator)?;
         let mut audio_client: AudioClient = device.get_iaudioclient()?;
         let desired_format = audio_client.get_mixformat()?;
         let sample_rate_hz = desired_format.get_samplespersec();
@@ -359,6 +390,136 @@ mod platform {
             _ => Vec::new(),
         }
     }
+
+    pub(super) fn select_render_device(enumerator: &DeviceEnumerator) -> Result<Device, Box<dyn std::error::Error>> {
+        match enumerator.get_default_device(&Direction::Render) {
+            Ok(device) => Ok(device),
+            Err(default_error) => {
+                let collection = enumerator.get_device_collection(&Direction::Render)?;
+
+                if collection.get_nbr_devices()? == 0 {
+                    return Err(format!(
+                        "No active WASAPI render endpoints are available after default endpoint failed: {default_error}"
+                    )
+                    .into());
+                }
+
+                Ok(collection.get_device_at_index(0)?)
+            }
+        }
+    }
+
+    pub fn windows_audio_diagnostics() -> serde_json::Value {
+        match collect_windows_audio_diagnostics() {
+            Ok(value) => value,
+            Err(error) => serde_json::json!({
+                "error": error.to_string(),
+                "ok": false,
+                "platform": "windows",
+                "type": "windows_audio_diagnostics"
+            }),
+        }
+    }
+
+    fn collect_windows_audio_diagnostics() -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+        initialize_mta().ok()?;
+
+        let enumerator = DeviceEnumerator::new()?;
+        let default_device = enumerator.get_default_device(&Direction::Render);
+        let default_render_error = default_device.as_ref().err().map(|error| error.to_string());
+        let device = match default_device {
+            Ok(device) => device,
+            Err(_) => select_render_device(&enumerator)?,
+        };
+        let selected_device_name = device.get_friendlyname().unwrap_or_else(|_| "unknown".to_string());
+        let mut audio_client: AudioClient = device.get_iaudioclient()?;
+        let desired_format = audio_client.get_mixformat()?;
+        let periods = audio_client.get_device_period();
+        let sample_rate_hz = desired_format.get_samplespersec();
+        let channels = desired_format.get_nchannels();
+        let sample_type = format!("{:?}", desired_format.get_subformat()?);
+        let bits_per_sample = desired_format.get_bitspersample();
+        let block_align = desired_format.get_blockalign();
+        let mode = StreamMode::PollingShared {
+            autoconvert: true,
+            buffer_duration_hns: periods
+                .as_ref()
+                .map(|(_, min_period)| *min_period)
+                .unwrap_or(0),
+        };
+        let loopback_initialise = audio_client.initialize_client(&desired_format, &Direction::Capture, &mode);
+        let loopback_initialise_ok = loopback_initialise.is_ok();
+
+        Ok(serde_json::json!({
+            "defaultRenderDevice": true,
+            "defaultRenderError": default_render_error,
+            "devicePeriod": match periods {
+                Ok((default_period, minimum_period)) => serde_json::json!({
+                    "defaultHns": default_period,
+                    "minimumHns": minimum_period
+                }),
+                Err(error) => serde_json::json!({
+                    "error": error.to_string()
+                })
+            },
+            "selectedRenderDevice": selected_device_name,
+            "loopbackInitialise": match loopback_initialise {
+                Ok(_) => serde_json::json!({ "ok": true }),
+                Err(error) => serde_json::json!({
+                    "error": error.to_string(),
+                    "ok": false
+                })
+            },
+            "mixFormat": {
+                "bitsPerSample": bits_per_sample,
+                "blockAlign": block_align,
+                "channels": channels,
+                "sampleRateHz": sample_rate_hz,
+                "sampleType": sample_type
+            },
+            "ok": loopback_initialise_ok,
+            "platform": "windows",
+            "type": "windows_audio_diagnostics"
+        }))
+    }
+
+    pub fn protect_window_handle(value: &str) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+        use windows_sys::Win32::Foundation::HWND;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GetWindowDisplayAffinity, SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE,
+        };
+
+        let hwnd_value = parse_hwnd(value)?;
+        let hwnd = hwnd_value as HWND;
+
+        if hwnd.is_null() {
+            return Err("native window handle was null".into());
+        }
+
+        let set_ok = unsafe { SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE) } != 0;
+        let mut affinity = 0_u32;
+        let read_ok = unsafe { GetWindowDisplayAffinity(hwnd, &mut affinity) } != 0;
+
+        Ok(serde_json::json!({
+            "affinity": affinity,
+            "hwnd": hwnd_value,
+            "ok": set_ok && read_ok && affinity == WDA_EXCLUDEFROMCAPTURE,
+            "platform": "windows",
+            "readOk": read_ok,
+            "setOk": set_ok,
+            "type": "window_display_affinity"
+        }))
+    }
+
+    fn parse_hwnd(value: &str) -> Result<isize, Box<dyn std::error::Error>> {
+        let trimmed = value.trim();
+
+        if let Some(hex) = trimmed.strip_prefix("0x") {
+            return Ok(isize::from_str_radix(hex, 16)?);
+        }
+
+        Ok(trimmed.parse::<isize>()?)
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -379,7 +540,7 @@ fn play_wasapi_smoke_tone(duration: std::time::Duration) -> Result<(), Box<dyn s
     initialize_mta().ok()?;
 
     let enumerator = DeviceEnumerator::new()?;
-    let device = enumerator.get_default_device(&Direction::Render)?;
+    let device = platform::select_render_device(&enumerator)?;
     let mut audio_client = device.get_iaudioclient()?;
     let desired_format = audio_client.get_mixformat()?;
     let block_align = desired_format.get_blockalign() as usize;

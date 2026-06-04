@@ -1,0 +1,349 @@
+import { execFile, spawn } from 'node:child_process';
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
+const vmName = process.env.SUSURA_MACOS_VM_NAME ?? 'macOS';
+const packagePath = process.env.SUSURA_MACOS_PACKAGE_PATH ?? '/Users/alex/susura-e2e/Susura.app';
+const backendPath = process.env.SUSURA_MACOS_BACKEND_PATH ?? `${packagePath}/Contents/Resources/bin/susura-desktop-backend`;
+const modelPath = process.env.SUSURA_MACOS_PARAKEET_MODEL_DIR ?? '/Users/alex/susura-e2e/models/parakeet-tdt-0.6b-v3-int8';
+const userDataDir = process.env.SUSURA_MACOS_E2E_USER_DATA ?? '/tmp/susura-macos-e2e-user-data';
+const smokeOutputFile = `${userDataDir}/smoke-output.log`;
+const summaryDir = path.join(process.cwd(), 'artifacts', 'vm-e2e');
+const summaryPath = path.join(summaryDir, 'macos.json');
+
+async function runPrlctl(args, options = {}) {
+  if (typeof options.input === 'string') {
+    return runPrlctlWithInput(args, options);
+  }
+
+  try {
+    const result = await execFileAsync('prlctl', args, {
+      timeout: options.timeout ?? 15_000,
+      maxBuffer: options.maxBuffer ?? 10 * 1024 * 1024
+    });
+
+    return {
+      ok: true,
+      text: result.stdout.trim()
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      text: `${error.stdout ?? ''}${error.stderr ?? error.message}`.trim()
+    };
+  }
+}
+
+function runPrlctlWithInput(args, options = {}) {
+  return new Promise((resolve) => {
+    const timeout = options.timeout ?? 15_000;
+    const maxBuffer = options.maxBuffer ?? 10 * 1024 * 1024;
+    const child = spawn('prlctl', args, {
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+    const chunks = [];
+    const errorChunks = [];
+    let outputBytes = 0;
+    let killed = false;
+    const timer = setTimeout(() => {
+      killed = true;
+      child.kill('SIGTERM');
+    }, timeout);
+
+    child.stdout.on('data', (chunk) => {
+      outputBytes += chunk.length;
+
+      if (outputBytes <= maxBuffer) {
+        chunks.push(chunk);
+      }
+    });
+    child.stderr.on('data', (chunk) => {
+      outputBytes += chunk.length;
+
+      if (outputBytes <= maxBuffer) {
+        errorChunks.push(chunk);
+      }
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      const stdout = Buffer.concat(chunks).toString('utf8').trim();
+      const stderr = Buffer.concat(errorChunks).toString('utf8').trim();
+
+      resolve({
+        ok: !killed && code === 0,
+        text: `${stdout}${stderr ? `\n${stderr}` : ''}`.trim()
+      });
+    });
+    child.stdin.end(options.input);
+  });
+}
+
+async function runGuestScript(script, options = {}) {
+  return runPrlctl(['exec', vmName, '--current-user', '/bin/zsh', '-s'], {
+    ...options,
+    input: script
+  });
+}
+
+function extractValue(text, label) {
+  const line = text.split('\n').find((candidate) => candidate.trim().startsWith(label));
+  return line ? line.split(':').slice(1).join(':').trim() : 'unknown';
+}
+
+function parsePrefixedJson(text, prefix) {
+  const line = text.split('\n').find((candidate) => candidate.startsWith(`${prefix} `));
+
+  if (!line) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(line.slice(prefix.length + 1));
+  } catch {
+    return null;
+  }
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+function formatGate(value) {
+  return value ? 'ok' : 'failed';
+}
+
+async function writeSummary(summary) {
+  await mkdir(summaryDir, { recursive: true });
+  await writeFile(summaryPath, `${JSON.stringify(summary, null, 2)}\n`);
+}
+
+async function failMacosE2e(message, { blocked = false, details = '', gates = {} } = {}) {
+  const summary = {
+    blocked,
+    details,
+    error: message,
+    gates: {
+      ai: false,
+      install: false,
+      microphone: false,
+      onboarding: false,
+      privacy: false,
+      systemAudio: false,
+      transcription: false,
+      ...gates
+    },
+    ok: false,
+    packagePath,
+    vmName
+  };
+
+  await writeSummary(summary);
+  console.error(message);
+
+  if (details) {
+    console.error(details);
+  }
+
+  console.error(`susura-vm-e2e ${JSON.stringify(summary)}`);
+  process.exit(1);
+}
+
+const info = await runPrlctl(['list', vmName, '-i']);
+
+if (!info.ok) {
+  await failMacosE2e(`Could not inspect Parallels VM "${vmName}".`, {
+    blocked: true,
+    details: info.text
+  });
+}
+
+const state = extractValue(info.text, 'State');
+const guestTools = extractValue(info.text, 'GuestTools');
+const ipAddresses = extractValue(info.text, 'IP Addresses');
+const hasGuestIp = /\d+\.\d+\.\d+\.\d+/.test(ipAddresses);
+const ready = state === 'running' && /\bstate=(?:installed|possibly_installed)\b/.test(guestTools) && hasGuestIp;
+
+if (!ready) {
+  await failMacosE2e(`macOS VM E2E blocked for "${vmName}".`, {
+    blocked: true,
+    details: [
+      `State: ${state}`,
+      `Guest Tools: ${guestTools}`,
+      `IP Addresses: ${ipAddresses || 'none'}`,
+      'Install or repair Parallels Tools, ensure the guest has an IP address, then rerun npm run vm:e2e:macos.'
+    ].join('\n')
+  });
+}
+
+const appDirectoryCheck = await runPrlctl(['exec', vmName, '/bin/test', '-d', packagePath]);
+const appBinaryCheck = await runPrlctl(['exec', vmName, '/bin/test', '-x', `${packagePath}/Contents/MacOS/Susura`]);
+const backendBinaryCheck = await runPrlctl(['exec', vmName, '/bin/test', '-x', backendPath]);
+const packageCheck = {
+  ok: appDirectoryCheck.ok && appBinaryCheck.ok && backendBinaryCheck.ok,
+  text: [
+    appDirectoryCheck.ok ? '' : `Missing app bundle: ${packagePath}`,
+    appBinaryCheck.ok ? '' : `Missing executable app binary: ${packagePath}/Contents/MacOS/Susura`,
+    backendBinaryCheck.ok ? '' : `Missing executable backend binary: ${backendPath}`
+  ].filter(Boolean).join('\n')
+};
+
+if (!packageCheck.ok) {
+  await failMacosE2e(`macOS packaged E2E failed while validating ${packagePath}.`, {
+    blocked: true,
+    details: packageCheck.text
+  });
+}
+
+const systemAudioSmoke = await runPrlctl([
+  'exec',
+  vmName,
+  backendPath,
+  '--stream-system-audio',
+  '--duration',
+  '3',
+  '--smoke-summary'
+], { timeout: 45_000 });
+const microphoneSmoke = await runPrlctl([
+  'exec',
+  vmName,
+  backendPath,
+  '--stream-microphone',
+  '--duration',
+  '3',
+  '--smoke-summary'
+], { timeout: 45_000 });
+const rendererLlmSmoke = await runGuestScript([
+  `rm -rf ${shellQuote(userDataDir)}`,
+  seedMacosUserDataScript(userDataDir),
+  `SUSURA_RENDERER_LLM_SMOKE=1 SUSURA_LLM_SMOKE_MODE=speculative SUSURA_USER_DATA_DIR=${shellQuote(userDataDir)} SUSURA_SMOKE_OUTPUT_FILE=${shellQuote(smokeOutputFile)} ${shellQuote(`${packagePath}/Contents/MacOS/Susura`)}`,
+  `cat ${shellQuote(smokeOutputFile)} 2>/dev/null || true`
+].join('\n'), { timeout: 45_000, maxBuffer: 10 * 1024 * 1024 });
+const rendererTranscriptionSmoke = await runGuestScript([
+  `rm -rf ${shellQuote(userDataDir)}`,
+  seedMacosUserDataScript(userDataDir),
+  `SUSURA_RENDERER_TRANSCRIPTION_SMOKE_MS=8000 SUSURA_RENDERER_TRANSCRIPTION_SMOKE_NO_LLM=1 SUSURA_USER_DATA_DIR=${shellQuote(userDataDir)} SUSURA_SMOKE_OUTPUT_FILE=${shellQuote(smokeOutputFile)} ${shellQuote(`${packagePath}/Contents/MacOS/Susura`)}`,
+  `cat ${shellQuote(smokeOutputFile)} 2>/dev/null || true`
+].join('\n'), { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 });
+const launchSmoke = await runGuestScript([
+  `rm -rf ${shellQuote(userDataDir)}`,
+  seedMacosUserDataScript(userDataDir),
+  `SUSURA_PACKAGED_LAUNCH_SMOKE_MS=250 SUSURA_PACKAGED_LAUNCH_SMOKE_REQUIRE_ONBOARDING=1 SUSURA_PACKAGED_PRIVACY_SMOKE=1 SUSURA_PACKAGED_ONBOARDING_COMPLETION_SMOKE=1 SUSURA_PACKAGED_UPDATER_SMOKE=1 SUSURA_DISABLE_MODEL_AUTO_DOWNLOAD=1 SUSURA_DISABLE_UPDATE_CHECKS=1 SUSURA_USER_DATA_DIR=${shellQuote(userDataDir)} SUSURA_SMOKE_OUTPUT_FILE=${shellQuote(smokeOutputFile)} ${shellQuote(`${packagePath}/Contents/MacOS/Susura`)}`,
+  `cat ${shellQuote(smokeOutputFile)} 2>/dev/null || true`
+].join('\n'), { timeout: 45_000, maxBuffer: 10 * 1024 * 1024 });
+
+const launchSummary = parsePrefixedJson(launchSmoke.text, 'susura-packaged-launch-smoke');
+const llmSummary = parsePrefixedJson(rendererLlmSmoke.text, 'susura-renderer-llm-smoke');
+const transcriptionSummary = parsePrefixedJson(rendererTranscriptionSmoke.text, 'susura-renderer-transcription-smoke');
+const systemAudioOk = systemAudioSmoke.ok && /"type":"system_audio_smoke"/.test(systemAudioSmoke.text);
+const microphoneOk = microphoneSmoke.ok && /"type":"microphone_smoke"/.test(microphoneSmoke.text);
+const aiOk = rendererLlmSmoke.ok && (
+  Boolean(llmSummary?.ok)
+  || Boolean(llmSummary?.speculativeResult?.ok)
+  || (typeof llmSummary?.finalValue === 'string' && llmSummary.finalValue.trim().length > 0)
+);
+const transcriptionOk = rendererTranscriptionSmoke.ok && Boolean(transcriptionSummary?.detected) && !(transcriptionSummary?.errors?.length > 0);
+const onboardingOk = Boolean(launchSummary?.completion?.ok);
+const privacyOk = Boolean(launchSummary?.privacy?.ok);
+const updatesOk = Boolean(launchSummary?.updates?.ok);
+const installOk = Boolean(launchSummary?.isPackaged);
+const ok = installOk && onboardingOk && systemAudioOk && microphoneOk && transcriptionOk && aiOk && privacyOk && updatesOk;
+const provisioningIssues = getMacosProvisioningIssues({
+  aiOk,
+  installOk,
+  launchSummary,
+  onboardingOk,
+  privacyOk,
+  transcriptionOk
+});
+const summary = {
+  blocked: !ok && provisioningIssues.length > 0,
+  details: provisioningIssues.join('\n'),
+  ok,
+  gates: {
+    ai: aiOk,
+    install: installOk,
+    microphone: microphoneOk,
+    onboarding: onboardingOk,
+    privacy: privacyOk,
+    systemAudio: systemAudioOk,
+    transcription: transcriptionOk,
+    updates: updatesOk
+  },
+  launch: launchSummary,
+  packagePath,
+  vmName
+};
+
+await writeSummary(summary);
+
+console.log(`VM: ${vmName}`);
+console.log(`Profile: macos`);
+console.log(`Guest IP Addresses: ${ipAddresses || 'not reported by prlctl'}`);
+console.log(`Package artefact: ${packagePath}`);
+console.log(`Install launch: ${formatGate(installOk)}`);
+console.log(`Onboarding completion: ${formatGate(onboardingOk)}`);
+console.log(`System audio: ${formatGate(systemAudioOk)}`);
+console.log(`Microphone: ${formatGate(microphoneOk)}`);
+console.log(`Local transcription: ${formatGate(transcriptionOk)}`);
+console.log(`AI response: ${formatGate(aiOk)}`);
+console.log(`Privacy: ${formatGate(privacyOk)}`);
+if (provisioningIssues.length > 0) {
+  console.log('Provisioning: blocked');
+  for (const issue of provisioningIssues) {
+    console.log(`- ${issue}`);
+  }
+}
+console.log(`susura-vm-e2e ${JSON.stringify(summary)}`);
+
+if (!ok) {
+  process.exit(1);
+}
+
+function getMacosProvisioningIssues({
+  aiOk,
+  installOk,
+  launchSummary,
+  onboardingOk,
+  privacyOk,
+  transcriptionOk
+}) {
+  if (!installOk || !privacyOk || !launchSummary) {
+    return [];
+  }
+
+  const bodyText = String(launchSummary.bodyTextSample ?? '');
+  const issues = [];
+
+  if (!onboardingOk && bodyText.includes('Still needed')) {
+    issues.push(`The copied packaged app at ${packagePath} launches, but onboarding cannot complete because setup checks are still needed in the macOS VM.`);
+  }
+
+  if (!aiOk && bodyText.includes('Not signed in')) {
+    issues.push('ChatGPT is not signed in for the packaged app identity/path used by the macOS VM E2E.');
+  }
+
+  if (!transcriptionOk && bodyText.includes('Parakeet v3Use')) {
+    issues.push('The local transcription smoke did not confirm renderer text; the macOS VM still shows Parakeet v3 as available to select rather than an active ready model for this fresh userData run.');
+  }
+
+  return issues;
+}
+
+function seedMacosUserDataScript(directory) {
+  return [
+    `mkdir -p ${shellQuote(directory)}`,
+    `mkdir -p ${shellQuote(`${directory}/models`)}`,
+    `if [ -d ${shellQuote(modelPath)} ]; then ln -sfn ${shellQuote(modelPath)} ${shellQuote(`${directory}/models/parakeet-tdt-0.6b-v3-int8`)}; fi`,
+    `printf '%s\\n' ${shellQuote(JSON.stringify(setupStateSeed()))} > ${shellQuote(`${directory}/setup-state.json`)}`
+  ].join('\n');
+}
+
+function setupStateSeed() {
+  return {
+    onboardingCompletedAt: new Date().toISOString(),
+    selectedLocalTranscriptionModel: 'parakeet',
+    selectedPiModel: 'openai-codex/gpt-5.5'
+  };
+}

@@ -10,6 +10,10 @@ The `Publish Download Page` workflow mirrors only the static download page and i
 
 The page currently offers stable and beta downloads for Apple Silicon macOS, Windows ARM64/x64, Linux ARM64/x64 AppImage, Ubuntu/Debian `.deb` and Fedora/RHEL `.rpm`. macOS also includes Homebrew cask commands for stable and beta channels. Intel macOS builds are not supported. Windows/Linux ARM64 has local Parallels VM release-smoke coverage; Fedora RPM smoke coverage uses the `Fedora 42 ARM64` Parallels VM. Windows/Linux x64 is CI-built from the same platform backend and should not be described as locally smoke-tested until dedicated x64 coverage exists.
 
+## Updates
+
+Packaged stable and beta apps include GitHub-backed update checks. Stable builds stay on stable releases. Beta builds track the newest release across stable and prerelease tags while preserving the beta app identity. Automatic checks default to weekly and can be changed from `Settings > General > Updates`. Release privacy smokes disable update checks with `SUSURA_DISABLE_UPDATE_CHECKS=1` so expected GitHub release traffic is not counted as hidden pre-setup network activity.
+
 ## Reading Guide
 
 - `philosophy.md`: Product identity, usability principles and privacy stance.
@@ -30,7 +34,9 @@ The page currently offers stable and beta downloads for Apple Silicon macOS, Win
 
 ## Current Focus
 
-The current implementation milestone is a clean multi-platform Electron package backed by Rust process boundaries for reliable Apple Silicon macOS, Windows and Ubuntu/Linux capture. The app should keep first-run permissions, Parakeet model setup and Pi provider setup explicit before listening or AI requests are enabled. macOS remains the reference implementation, while Windows and Linux ARM64 have local VM release gates for packaged capture, transcription, onboarding and pre-setup privacy. Windows/Linux x64 artefacts are CI-built from the same backend and published with that caveat. Broader Linux distribution support remains deferred until it has dedicated test coverage.
+The current implementation milestone is a clean multi-platform Electron package backed by Rust process boundaries for reliable Apple Silicon macOS, Windows and Ubuntu/Linux capture. The app should keep first-run permissions, Parakeet model setup and Pi provider setup explicit before listening or AI requests are enabled. macOS remains the reference implementation, while macOS, Windows and Linux ARM64 have local VM release gates for packaged capture, transcription, AI response, onboarding and pre-setup privacy. Windows/Linux x64 artefacts are CI-built from the same backend and published with that caveat. Broader Linux distribution support remains deferred until it has dedicated test coverage.
+
+Release validation uses Parallels VM E2E gates for macOS, Windows and Ubuntu Linux. The gates must prove packaged launch or install, onboarding, audio capture, local transcription, renderer AI response and pre-setup privacy. macOS and Windows require Electron content protection on both the overlay and floating handle. Linux records the same protection path as best effort because Electron content protection is only supported on macOS and Windows. Fedora currently remains an RPM install/package gate.
 
 ## Development App Policy
 

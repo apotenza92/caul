@@ -120,6 +120,35 @@ export type OnboardingStatus = {
   transcription: TranscriptionRecommendation;
 };
 
+export type UpdateFrequency = 'never' | 'startup' | 'hourly' | 'sixHours' | 'twelveHours' | 'daily' | 'weekly';
+
+export type UpdateStatus = {
+  appChannel: 'stable' | 'beta' | 'dev' | string;
+  appName: string;
+  appVersion: string;
+  availableUpdate: null | {
+    downloadUrl?: string;
+    prerelease: boolean;
+    releaseName?: string;
+    version: string;
+  };
+  checking: boolean;
+  downloading: boolean;
+  enabled: boolean;
+  frequency: UpdateFrequency;
+  lastCheckedAt: string | null;
+  lastResult: null | {
+    ok: boolean;
+    status: string;
+    message: string;
+    progress?: {
+      percent: number;
+      transferred: number;
+      total: number | null;
+    };
+  };
+};
+
 export type PermissionStatusValue =
   | 'denied'
   | 'granted'
@@ -262,6 +291,15 @@ export type SettingsBridge = {
     reset?: () => Promise<PromptTemplateState>;
     save: (template: PromptTemplate) => Promise<PromptTemplateState>;
     setSelected: (ids: string[]) => Promise<PromptTemplateState>;
+  };
+  updates?: {
+    checkNow: () => Promise<UpdateStatus>;
+    downloadAndInstall: () => Promise<UpdateStatus>;
+    installDownloaded: () => Promise<{ ok: boolean }>;
+    onStatus: (callback: (status: UpdateStatus) => void) => () => void;
+    openDownloadPage: () => Promise<{ ok: boolean }>;
+    setFrequency: (frequency: UpdateFrequency) => Promise<UpdateStatus>;
+    status: () => Promise<UpdateStatus>;
   };
   quit?: () => Promise<{ ok: boolean }>;
   reset: () => Promise<{ ok: boolean }>;

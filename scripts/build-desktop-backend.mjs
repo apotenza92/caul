@@ -35,7 +35,7 @@ function resolveCargo() {
     }
   }
 
-  const userCargo = path.join(homedir(), '.cargo', 'bin', 'cargo');
+  const userCargo = path.join(homedir(), '.cargo', 'bin', process.platform === 'win32' ? 'cargo.exe' : 'cargo');
 
   if (existsSync(userCargo)) {
     return userCargo;
@@ -57,7 +57,7 @@ function resolveRustc() {
     }
   }
 
-  const userRustc = path.join(homedir(), '.cargo', 'bin', 'rustc');
+  const userRustc = path.join(homedir(), '.cargo', 'bin', process.platform === 'win32' ? 'rustc.exe' : 'rustc');
 
   if (existsSync(userRustc)) {
     return userRustc;

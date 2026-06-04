@@ -55,6 +55,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    if args.iter().any(|arg| arg == "--windows-audio-diagnostics") {
+        emit_json(system_audio::windows_audio_diagnostics());
+        return Ok(());
+    }
+
+    if let Some(index) = args.iter().position(|arg| arg == "--protect-window-hwnd") {
+        let hwnd = args
+            .get(index + 1)
+            .ok_or("--protect-window-hwnd requires a native window handle")?;
+        emit_json(system_audio::protect_window_handle(hwnd)?);
+        return Ok(());
+    }
+
     if args.iter().any(|arg| arg == "--stream-system-audio") {
         stream_system_audio(
             args.iter().any(|arg| arg == "--transcribe-parakeet"),

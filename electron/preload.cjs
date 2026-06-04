@@ -100,6 +100,23 @@ contextBridge.exposeInMainWorld('susura', {
       save: (template) => ipcRenderer.invoke('susura:prompt-templates-save', { template }),
       setSelected: (ids) => ipcRenderer.invoke('susura:prompt-templates-set-selected', { ids })
     },
+    updates: {
+      checkNow: () => ipcRenderer.invoke('susura:updates-check-now'),
+      downloadAndInstall: () => ipcRenderer.invoke('susura:updates-download-and-install'),
+      installDownloaded: () => ipcRenderer.invoke('susura:updates-install-downloaded'),
+      onStatus: (callback) => {
+        const listener = (_event, payload) => callback(payload);
+
+        ipcRenderer.on('susura:updates-status', listener);
+
+        return () => {
+          ipcRenderer.off('susura:updates-status', listener);
+        };
+      },
+      openDownloadPage: () => ipcRenderer.invoke('susura:updates-open-download-page'),
+      setFrequency: (frequency) => ipcRenderer.invoke('susura:updates-set-frequency', { frequency }),
+      status: () => ipcRenderer.invoke('susura:updates-status')
+    },
     quit: () => ipcRenderer.invoke('susura:settings-quit'),
     reset: () => ipcRenderer.invoke('susura:settings-reset')
   },

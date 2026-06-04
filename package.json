@@ -1,6 +1,6 @@
 {
   "name": "susura",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "private": true,
   "description": "A private AI overlay for live calls and screen work.",
   "main": "electron/main.cjs",
@@ -79,6 +79,10 @@
     "vm:backend-smoke:win": "node scripts/smoke-parallels-backend-vm.mjs win",
     "vm:backend-smoke:linux": "node scripts/smoke-parallels-backend-vm.mjs linux",
     "vm:smoke": "concurrently -k --success first \"vite --host 0.0.0.0\" \"wait-on http://127.0.0.1:5173 && node scripts/smoke-parallels-macos-vm.mjs\"",
+    "vm:e2e": "npm run vm:e2e:macos && npm run vm:e2e:win && npm run vm:e2e:linux",
+    "vm:e2e:macos": "node scripts/smoke-parallels-macos-e2e.mjs",
+    "vm:e2e:win": "node scripts/smoke-parallels-release-vm.mjs win",
+    "vm:e2e:linux": "node scripts/smoke-parallels-release-vm.mjs linux",
     "vm:smoke:win": "node scripts/smoke-parallels-release-vm.mjs win",
     "vm:smoke:linux": "node scripts/smoke-parallels-release-vm.mjs linux",
     "vm:smoke:fedora": "node scripts/smoke-parallels-release-vm.mjs fedora"
@@ -89,6 +93,7 @@
     "@tailwindcss/vite": "^4.3.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "electron-updater": "^6.8.3",
     "lucide-react": "^1.16.0",
     "radix-ui": "^1.4.3",
     "react": "^19.2.3",

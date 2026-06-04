@@ -1,5 +1,5 @@
-const { app, BrowserWindow, Menu, dialog, globalShortcut, ipcMain, nativeTheme, screen, session, shell, systemPreferences } = require('electron');
-const { spawn } = require('node:child_process');
+const { app, BrowserWindow, Menu, desktopCapturer, dialog, globalShortcut, ipcMain, nativeTheme, screen, session, shell, systemPreferences } = require('electron');
+const { spawn, spawnSync } = require('node:child_process');
 const fsSync = require('node:fs');
 const https = require('node:https');
 const os = require('node:os');
@@ -8,6 +8,7 @@ const readline = require('node:readline');
 const { pathToFileURL } = require('node:url');
 const { getPreferredOverlaySizeForEdge } = require('./privateOverlayGeometry.cjs');
 const { createStopFlushController } = require('./transcriptionStopFlush.cjs');
+const { createUpdaterService } = require('./updater.cjs');
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const smokeExitMs = Number(process.env.SUSURA_SMOKE_EXIT_MS ?? 0);
@@ -24,10 +25,13 @@ const resourceSmokeMaxWorkingSetMb = Number(process.env.SUSURA_RESOURCE_SMOKE_MA
 const packagedLaunchSmokeMs = Number(process.env.SUSURA_PACKAGED_LAUNCH_SMOKE_MS ?? 0);
 const packagedLaunchSmokeRequiresOnboarding = process.env.SUSURA_PACKAGED_LAUNCH_SMOKE_REQUIRE_ONBOARDING === '1';
 const packagedLaunchSmokeWaitMs = Number(process.env.SUSURA_PACKAGED_LAUNCH_SMOKE_WAIT_MS ?? (packagedLaunchSmokeRequiresOnboarding ? 5000 : 1000));
+const packagedUpdaterSmoke = process.env.SUSURA_PACKAGED_UPDATER_SMOKE === '1';
 const packagedPrivacySmoke = process.env.SUSURA_PACKAGED_PRIVACY_SMOKE === '1';
 const packagedOnboardingCompletionSmoke = process.env.SUSURA_PACKAGED_ONBOARDING_COMPLETION_SMOKE === '1';
+const windowsExternalCaptureProbe = process.env.SUSURA_WINDOWS_EXTERNAL_CAPTURE_PROBE === '1';
 const smokeOutputFile = process.env.SUSURA_SMOKE_OUTPUT_FILE;
 const piLlmBridgeMode = String(process.env.SUSURA_PI_LLM_BRIDGE ?? '').trim().toLowerCase();
+
 const defaultAppWindowSize = {
   width: 960,
   height: 688
@@ -107,6 +111,7 @@ let privateOverlayHandleSnapAnimation = null;
 let privateOverlayWindowDrag = null;
 let privateOverlayWindowResize = null;
 let onboardingWindow = null;
+let updaterService = null;
 let parakeetDownload = null;
 let localModelDownload = null;
 let piChatGptLoginPromise = null;
@@ -114,25 +119,28 @@ let piAuthStorageImportPromise = null;
 let isQuitting = false;
 let packagedLaunchSmokeStarted = false;
 const packagedPrivacySmokeState = {
+  captureProbe: null,
   mainHttpRequests: [],
-  rendererHttpRequests: []
+  nativeProtection: new WeakMap(),
+  rendererHttpRequests: [],
+  protectedWindows: new WeakSet()
 };
 
 const starterPromptTemplates = [
   {
     id: 'starter-answer-with-star',
-    name: 'Answer with STAR',
+    name: 'STAR',
     prompt: 'When the call transcript contains an interview question or a request for an example, help answer it using the STAR method. STAR means Situation, Task, Action and Result. Start with a concise direct answer, then structure the response as Situation: the context, Task: the responsibility or goal, Action: the specific steps taken, and Result: the measurable outcome or learning. Keep the answer natural enough to say aloud on a live call.'
   },
   {
     id: 'starter-use-my-cv',
-    name: 'Use my CV',
+    name: 'CV',
     prompt: 'Use the attached or pasted CV as background context. When answering questions, prefer relevant experience, projects, achievements, tools and metrics from the CV. Do not invent roles, dates, qualifications or employers that are not present. If the CV is missing, say what CV detail would help answer better.'
   },
   {
     id: 'starter-job-description',
-    name: 'Job description',
-    prompt: 'Use the attached or pasted job description as role context. Prioritise the responsibilities, required skills, company language and seniority signals in that job description when suggesting answers. Connect the live call question to the role requirements where useful. If the job description is missing, ask for the relevant role details.'
+    name: 'PD',
+    prompt: 'Use the attached or pasted position description as role context. Prioritise the duties, selection criteria, required skills, seniority signals and organisation language in that position description when suggesting answers. Connect the live call question to the role requirements where useful. If the position description is missing, ask for the relevant role details.'
   }
 ];
 const defaultSelectedPromptTemplateIds = ['starter-use-my-cv', 'starter-job-description'];
@@ -194,7 +202,8 @@ function installPackagedPrivacyRendererNetworkHooks() {
   });
 }
 
-function getPackagedPrivacySmokeSummary() {
+async function getPackagedPrivacySmokeSummary() {
+  const privateWindows = await getPrivateWindowProtectionSummary();
   const rawAudioFiles = listUserDataFilesMatching((filePath) => (
     /\.(?:aif|aiff|flac|m4a|mp3|pcm|raw|wav)$/i.test(filePath)
   ));
@@ -204,15 +213,379 @@ function getPackagedPrivacySmokeSummary() {
   const ok = packagedPrivacySmokeState.mainHttpRequests.length === 0
     && packagedPrivacySmokeState.rendererHttpRequests.length === 0
     && rawAudioFiles.length === 0
-    && transcriptDebugFiles.length === 0;
+    && transcriptDebugFiles.length === 0
+    && privateWindows.ok;
 
   return {
     ok,
+    privateWindows,
     mainHttpRequests: packagedPrivacySmokeState.mainHttpRequests,
     rawAudioFiles,
     rendererHttpRequests: packagedPrivacySmokeState.rendererHttpRequests,
     transcriptDebugFiles
   };
+}
+
+async function getPrivateWindowProtectionSummary() {
+  const contentProtectionSupported = process.platform === 'darwin' || process.platform === 'win32';
+  const diagnosticWindow = getPrivateWindowProtectionDiagnosticSummary();
+  const captureProbe = await getPrivateWindowCaptureProbeSummary();
+  const windows = [
+    ['overlay', privateOverlayWindow],
+    ['handle', privateOverlayHandleWindow]
+  ].map(([name, window]) => {
+    const exists = Boolean(window && !window.isDestroyed());
+    const contentProtected = exists && typeof window.isContentProtected === 'function'
+      ? window.isContentProtected()
+      : null;
+
+    return {
+      contentProtected,
+      exists,
+      name,
+      nativeProtection: exists ? packagedPrivacySmokeState.nativeProtection.get(window) ?? null : null,
+      protectionAttempted: exists ? packagedPrivacySmokeState.protectedWindows.has(window) : false
+    };
+  });
+  const shouldProtect = shouldProtectPrivateWindowContent();
+
+  return {
+    contentProtectionSupported,
+    captureProbe,
+    diagnosticWindow,
+    ok: !shouldProtect || windows.every((window) => (
+      !window.exists
+      || (
+        process.platform === 'win32'
+          ? captureProbe?.ok === true && window.protectionAttempted === true
+          : contentProtectionSupported
+          ? window.contentProtected === true || window.nativeProtection?.ok === true
+          : window.protectionAttempted === true
+      )
+    )),
+    shouldProtect,
+    windows
+  };
+}
+
+async function getPrivateWindowCaptureProbeSummary() {
+  if (!packagedPrivacySmoke || process.platform !== 'win32') {
+    return null;
+  }
+
+  if (packagedPrivacySmokeState.captureProbe) {
+    return packagedPrivacySmokeState.captureProbe;
+  }
+
+  packagedPrivacySmokeState.captureProbe = await runWindowsCaptureProtectionProbe();
+
+  return packagedPrivacySmokeState.captureProbe;
+}
+
+async function runWindowsCaptureProtectionProbe() {
+  const display = screen.getPrimaryDisplay();
+  const { workArea, scaleFactor } = display;
+  const windowSize = {
+    height: 96,
+    width: 128
+  };
+  const protectedBounds = {
+    x: workArea.x + 24,
+    y: workArea.y + 24,
+    ...windowSize
+  };
+  const controlBounds = {
+    x: workArea.x + 168,
+    y: workArea.y + 24,
+    ...windowSize
+  };
+  let protectedWindow = null;
+  let controlWindow = null;
+
+  try {
+    protectedWindow = createCaptureProbeWindow(protectedBounds, '#ff0000', true);
+    controlWindow = createCaptureProbeWindow(controlBounds, '#00ff00', false);
+
+    await Promise.all([
+      waitForWindowReadyToShow(protectedWindow),
+      waitForWindowReadyToShow(controlWindow)
+    ]);
+
+    controlWindow.show();
+    protectedWindow.show();
+    controlWindow.moveTop();
+    protectedWindow.moveTop();
+    await wait(800);
+
+    const capture = await capturePrimaryDisplayPixels(display);
+    const protectedPixelCount = countRgbPixelsInRect(capture, protectedBounds, scaleFactor, {
+      b: 0,
+      g: 0,
+      r: 255
+    });
+    const controlPixelCount = countRgbPixelsInRect(capture, controlBounds, scaleFactor, {
+      b: 0,
+      g: 255,
+      r: 0
+    });
+    const minimumExpectedPixels = Math.round(windowSize.width * windowSize.height * scaleFactor * scaleFactor * 0.12);
+
+    return {
+      controlPixelCount,
+      controlVisible: controlPixelCount >= minimumExpectedPixels,
+      minimumExpectedPixels,
+      ok: controlPixelCount >= minimumExpectedPixels && protectedPixelCount < minimumExpectedPixels,
+      protectedPixelCount,
+      protectedExcluded: protectedPixelCount < minimumExpectedPixels,
+      type: 'windows_capture_protection_probe'
+    };
+  } catch (error) {
+    return {
+      error: error.message,
+      ok: false,
+      type: 'windows_capture_protection_probe'
+    };
+  } finally {
+    for (const window of [protectedWindow, controlWindow]) {
+      if (window && !window.isDestroyed()) {
+        window.destroy();
+      }
+    }
+  }
+}
+
+async function runWindowsExternalCaptureProtectionProbe() {
+  if (process.platform !== 'win32') {
+    emitSmokeLine(`susura-windows-capture-probe ${JSON.stringify({
+      error: 'Windows capture protection probe only runs on Windows.',
+      ok: false
+    })}`);
+    app.exitCode = 1;
+    app.exit(1);
+    return;
+  }
+
+  const display = screen.getPrimaryDisplay();
+  const { workArea, scaleFactor } = display;
+  const windowSize = {
+    height: 96,
+    width: 128
+  };
+  const protectedBounds = {
+    x: workArea.x + 24,
+    y: workArea.y + 24,
+    ...windowSize
+  };
+  const controlBounds = {
+    x: workArea.x + 168,
+    y: workArea.y + 24,
+    ...windowSize
+  };
+  const holdMs = Number(process.env.SUSURA_WINDOWS_EXTERNAL_CAPTURE_PROBE_MS ?? 8000);
+  const protectedWindow = createCaptureProbeWindow(protectedBounds, '#ff0000', true);
+  const controlWindow = createCaptureProbeWindow(controlBounds, '#00ff00', false);
+
+  await Promise.all([
+    waitForWindowReadyToShow(protectedWindow),
+    waitForWindowReadyToShow(controlWindow)
+  ]);
+
+  controlWindow.show();
+  protectedWindow.show();
+  controlWindow.moveTop();
+  protectedWindow.moveTop();
+  await wait(250);
+  protectedWindow.setContentProtection(true);
+  protectedWindow.moveTop();
+  await wait(250);
+  const internalCapture = await runWindowsVisibleCaptureAnalysis(display, protectedBounds, controlBounds, scaleFactor, windowSize);
+
+  emitSmokeLine(`susura-windows-capture-probe ${JSON.stringify({
+    controlBounds,
+    display: {
+      id: display.id,
+      scaleFactor,
+      workArea
+    },
+    holdMs,
+    internalCapture,
+    ok: true,
+    protectedContentProtected: typeof protectedWindow.isContentProtected === 'function'
+      ? protectedWindow.isContentProtected()
+      : null,
+    protectedBounds
+  })}`);
+
+  setTimeout(() => {
+    app.exit(0);
+  }, holdMs);
+}
+
+async function runWindowsVisibleCaptureAnalysis(display, protectedBounds, controlBounds, scaleFactor, windowSize) {
+  try {
+    const capture = await capturePrimaryDisplayPixels(display);
+    const protectedPixelCount = countRgbPixelsInRect(capture, protectedBounds, scaleFactor, {
+      b: 0,
+      g: 0,
+      r: 255
+    });
+    const controlPixelCount = countRgbPixelsInRect(capture, controlBounds, scaleFactor, {
+      b: 0,
+      g: 255,
+      r: 0
+    });
+    const minimumExpectedPixels = Math.round(windowSize.width * windowSize.height * scaleFactor * scaleFactor * 0.12);
+
+    return {
+      controlPixelCount,
+      controlVisible: controlPixelCount >= minimumExpectedPixels,
+      minimumExpectedPixels,
+      ok: controlPixelCount >= minimumExpectedPixels && protectedPixelCount < minimumExpectedPixels,
+      protectedExcluded: protectedPixelCount < minimumExpectedPixels,
+      protectedPixelCount,
+      type: 'windows_visible_capture_analysis'
+    };
+  } catch (error) {
+    return {
+      error: error.message,
+      ok: false,
+      type: 'windows_visible_capture_analysis'
+    };
+  }
+}
+
+function createCaptureProbeWindow(bounds, colour, protect) {
+  const window = new BrowserWindow({
+    ...bounds,
+    alwaysOnTop: true,
+    backgroundColor: colour,
+    frame: false,
+    focusable: false,
+    resizable: false,
+    show: false,
+    skipTaskbar: true,
+    transparent: false,
+    webPreferences: {
+      contextIsolation: true,
+      devTools: false,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  });
+
+  window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`<html><body style="margin:0;background:${colour};width:100vw;height:100vh"></body></html>`)}`);
+
+  if (protect) {
+    window.setContentProtection(true);
+  }
+
+  return window;
+}
+
+function waitForWindowReadyToShow(window) {
+  if (window.isDestroyed()) {
+    return Promise.resolve();
+  }
+
+  if (!window.webContents.isLoading()) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    window.webContents.once('did-finish-load', resolve);
+  });
+}
+
+async function capturePrimaryDisplayPixels(display) {
+  const thumbnailSize = {
+    height: Math.round(display.size.height * display.scaleFactor),
+    width: Math.round(display.size.width * display.scaleFactor)
+  };
+  const sources = await desktopCapturer.getSources({
+    thumbnailSize,
+    types: ['screen']
+  });
+  const source = sources.find((candidate) => candidate.display_id === String(display.id)) ?? sources[0];
+
+  if (!source || source.thumbnail.isEmpty()) {
+    throw new Error('Desktop capture did not return a screen thumbnail.');
+  }
+
+  const size = source.thumbnail.getSize();
+
+  return {
+    bitmap: source.thumbnail.toBitmap(),
+    height: size.height,
+    width: size.width
+  };
+}
+
+function countRgbPixelsInRect(capture, bounds, scaleFactor, target) {
+  const startX = Math.max(0, Math.floor(bounds.x * scaleFactor));
+  const startY = Math.max(0, Math.floor(bounds.y * scaleFactor));
+  const endX = Math.min(capture.width, Math.ceil((bounds.x + bounds.width) * scaleFactor));
+  const endY = Math.min(capture.height, Math.ceil((bounds.y + bounds.height) * scaleFactor));
+  let count = 0;
+
+  for (let y = startY; y < endY; y += 1) {
+    for (let x = startX; x < endX; x += 1) {
+      const offset = ((y * capture.width) + x) * 4;
+      const b = capture.bitmap[offset] ?? 0;
+      const g = capture.bitmap[offset + 1] ?? 0;
+      const r = capture.bitmap[offset + 2] ?? 0;
+
+      if (
+        Math.abs(r - target.r) <= 28
+        && Math.abs(g - target.g) <= 28
+        && Math.abs(b - target.b) <= 28
+      ) {
+        count += 1;
+      }
+    }
+  }
+
+  return count;
+}
+
+function getPrivateWindowProtectionDiagnosticSummary() {
+  if (!packagedPrivacySmoke || process.platform !== 'win32') {
+    return null;
+  }
+
+  let window = null;
+
+  try {
+    window = new BrowserWindow({
+      width: 32,
+      height: 32,
+      show: false,
+      frame: true,
+      transparent: false,
+      backgroundColor: '#111111',
+      skipTaskbar: true,
+      webPreferences: {
+        contextIsolation: true,
+        devTools: false,
+        nodeIntegration: false,
+        sandbox: false
+      }
+    });
+    window.setContentProtection(true);
+
+    return {
+      contentProtected: typeof window.isContentProtected === 'function' ? window.isContentProtected() : null,
+      ok: typeof window.isContentProtected === 'function' ? window.isContentProtected() === true : false
+    };
+  } catch (error) {
+    return {
+      error: error.message,
+      ok: false
+    };
+  } finally {
+    if (window && !window.isDestroyed()) {
+      window.destroy();
+    }
+  }
 }
 
 function listUserDataFilesMatching(predicate) {
@@ -274,6 +647,19 @@ function getAppChannel() {
   }
 
   return 'stable';
+}
+
+function getUpdaterService() {
+  if (!updaterService) {
+    updaterService = createUpdaterService({
+      appChannel: getAppChannel(),
+      appName: getAppDisplayName(),
+      forceEnabled: process.env.SUSURA_FORCE_UPDATE_CHECKS === '1',
+      isDev
+    });
+  }
+
+  return updaterService;
 }
 
 function getBundledExecutablePath(name) {
@@ -349,11 +735,12 @@ function createStarterPromptTemplates() {
 
 function mergeStarterPromptTemplates(templates) {
   const starterTemplates = createStarterPromptTemplates();
-  const existingIds = new Set(templates.map((template) => template.id));
+  const starterTemplatesById = new Map(starterTemplates.map((template) => [template.id, template]));
+  const customTemplates = templates.filter((template) => !starterTemplatesById.has(template.id));
 
   return [
-    ...templates,
-    ...starterTemplates.filter((template) => !existingIds.has(template.id))
+    ...starterTemplates,
+    ...customTemplates
   ];
 }
 
@@ -2928,7 +3315,7 @@ async function shouldShowOnboarding() {
   }
 
   if (packagedOnboardingCompletionSmoke) {
-    return true;
+    return !readSetupState().onboardingCompletedAt;
   }
 
   return (await getOnboardingStatus()).required;
@@ -4457,22 +4844,95 @@ function applyPrivateWindowProtection(window) {
   window.setSkipTaskbar(true);
 
   if (shouldProtectPrivateWindowContent()) {
-    try {
-      window.setContentProtection(true);
-    } catch {
-      // Unsupported platforms should still keep the overlay usable.
-    }
+    setPrivateWindowContentProtection(window, true);
   } else {
-    try {
-      window.setContentProtection(false);
-    } catch {
-      // Unsupported platforms should still keep the overlay usable.
-    }
+    setPrivateWindowContentProtection(window, false);
   }
 
   applyPrivateWindowWorkspaceBehaviour(window);
 
   setPrivateWindowAlwaysOnTop(window);
+}
+
+function setPrivateWindowContentProtection(window, enabled) {
+  try {
+    window.setContentProtection(enabled);
+
+    if (enabled) {
+      packagedPrivacySmokeState.protectedWindows.add(window);
+      applyWindowsNativeContentProtection(window);
+    }
+  } catch {
+    // Unsupported platforms should still keep the overlay usable.
+  }
+}
+
+function applyWindowsNativeContentProtection(window) {
+  if (process.platform !== 'win32' || !window || window.isDestroyed()) {
+    return;
+  }
+
+  try {
+    const handle = window.getNativeWindowHandle();
+    const hwnd = handle.length >= 8
+      ? handle.readBigUInt64LE(0).toString()
+      : String(handle.readUInt32LE(0));
+    const command = getDesktopBackendCommand(['--protect-window-hwnd', hwnd]);
+    const result = spawnSync(command.command, command.args, {
+      env: process.env,
+      encoding: 'utf8',
+      maxBuffer: 1024 * 1024,
+      windowsHide: true
+    });
+    const text = String(result.stdout ?? '').trim();
+    const errorText = String(result.stderr ?? '').trim();
+
+    if (text) {
+      console.log(text);
+
+      try {
+        const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+        const parsed = JSON.parse(lines.at(-1) ?? '{}');
+
+        if (parsed?.type === 'window_display_affinity') {
+          packagedPrivacySmokeState.nativeProtection.set(window, parsed);
+        }
+      } catch {
+        packagedPrivacySmokeState.nativeProtection.set(window, {
+          ok: false,
+          output: text,
+          type: 'window_display_affinity'
+        });
+      }
+    }
+
+    if (errorText) {
+      console.error(errorText);
+    }
+  } catch (error) {
+    console.error(`window-display-affinity failed ${error.message}`);
+  }
+}
+
+function refreshPrivateWindowContentProtection(window) {
+  if (!window || window.isDestroyed() || !shouldProtectPrivateWindowContent()) {
+    return;
+  }
+
+  setPrivateWindowContentProtection(window, true);
+}
+
+function refreshPrivateWindowContentProtectionSoon(window) {
+  if (!window || window.isDestroyed()) {
+    return;
+  }
+
+  window.once('show', () => refreshPrivateWindowContentProtection(window));
+  window.webContents.once('did-finish-load', () => refreshPrivateWindowContentProtection(window));
+
+  for (const delayMs of [50, 250, 1000]) {
+    setTimeout(() => refreshPrivateWindowContentProtection(window), delayMs);
+  }
 }
 
 function applyPrivateWindowWorkspaceBehaviour(window) {
@@ -4507,6 +4967,10 @@ function shouldProtectPrivateWindowContent() {
   return !isDev && getAppChannel() !== 'dev';
 }
 
+function shouldUseOpaquePrivateWindowsForProtection() {
+  return process.platform === 'win32' && shouldProtectPrivateWindowContent();
+}
+
 function createPrivateOverlayWindow() {
   if (privateOverlayWindow && !privateOverlayWindow.isDestroyed()) {
     return privateOverlayWindow;
@@ -4524,8 +4988,8 @@ function createPrivateOverlayWindow() {
     useContentSize: true,
     show: true,
     frame: false,
-    transparent: true,
-    backgroundColor: '#00000000',
+    transparent: !shouldUseOpaquePrivateWindowsForProtection(),
+    backgroundColor: shouldUseOpaquePrivateWindowsForProtection() ? '#111111' : '#00000000',
     title: getAppDisplayName(),
     skipTaskbar: true,
     resizable: false,
@@ -4542,6 +5006,7 @@ function createPrivateOverlayWindow() {
   });
 
   applyPrivateWindowProtection(privateOverlayWindow);
+  refreshPrivateWindowContentProtectionSoon(privateOverlayWindow);
   persistPrivateOverlayWindowState(privateOverlayWindow);
   loadRendererSurface(privateOverlayWindow, null);
   runPackagedLaunchSmokeIfRequested(privateOverlayWindow, 'private-overlay');
@@ -4658,11 +5123,15 @@ function runPackagedLaunchSmokeIfRequested(window, surface) {
         summary.ok = summary.ok && completion.ok;
       }
 
-      const privacy = packagedPrivacySmoke ? getPackagedPrivacySmokeSummary() : null;
+      const privacy = packagedPrivacySmoke ? await getPackagedPrivacySmokeSummary() : null;
 
       if (privacy) {
         summary.privacy = privacy;
         summary.ok = summary.ok && privacy.ok;
+      }
+
+      if (packagedUpdaterSmoke) {
+        summary.ok = summary.ok && summary.updates?.ok === true;
       }
 
       emitSmokeLine(`susura-packaged-launch-smoke ${JSON.stringify(summary)}`);
@@ -4700,6 +5169,7 @@ function getPackagedLaunchSmokeRendererResult(window) {
       let homeLayout = null;
       let handle = null;
       let completion = null;
+      let updates = null;
 
       while (Date.now() <= waitUntil) {
         const bodyText = (document.body?.textContent ?? '').trim();
@@ -4731,8 +5201,33 @@ function getPackagedLaunchSmokeRendererResult(window) {
       }
 
       const runtime = await window.susura.getRuntimeContext();
+      if (${JSON.stringify(packagedUpdaterSmoke)}) {
+        const bridge = window.susura?.settings?.updates;
+        updates = {
+          ok: false,
+          statusAvailable: Boolean(bridge?.status),
+          initial: null,
+          afterDaily: null,
+          afterWeekly: null,
+          manualCheck: null
+        };
+
+        if (bridge?.status && bridge?.setFrequency && bridge?.checkNow) {
+          updates.initial = await bridge.status();
+          updates.afterDaily = await bridge.setFrequency('daily');
+          updates.afterWeekly = await bridge.setFrequency('weekly');
+          updates.manualCheck = await bridge.checkNow();
+          updates.ok = updates.initial?.frequency === 'weekly'
+            && updates.afterDaily?.frequency === 'daily'
+            && updates.afterWeekly?.frequency === 'weekly'
+            && updates.manualCheck?.frequency === 'weekly'
+            && updates.manualCheck?.lastResult?.status === 'disabled';
+        }
+      }
+
       return {
         runtime,
+        updates,
         completion,
         hasHandle: Boolean(handle),
         hasOnboarding: Boolean(onboarding),
@@ -4839,11 +5334,19 @@ function startPackagedLaunchSmokeFallback() {
       hasOnboarding,
       rendererResults,
       windowCount: windows.length,
-      windows: windows.map((window) => ({
-        title: window.getTitle(),
-        visible: window.isVisible(),
-        bounds: window.getBounds()
-      }))
+      windows: windows.map((window) => {
+        if (window.isDestroyed()) {
+          return {
+            destroyed: true
+          };
+        }
+
+        return {
+          bounds: window.getBounds(),
+          title: window.getTitle(),
+          visible: window.isVisible()
+        };
+      })
     };
 
     if (completion) {
@@ -4851,11 +5354,15 @@ function startPackagedLaunchSmokeFallback() {
       summary.ok = summary.ok && completion.ok;
     }
 
-    const privacy = packagedPrivacySmoke ? getPackagedPrivacySmokeSummary() : null;
+    const privacy = packagedPrivacySmoke ? await getPackagedPrivacySmokeSummary() : null;
 
     if (privacy) {
       summary.privacy = privacy;
       summary.ok = summary.ok && privacy.ok;
+    }
+
+    if (packagedUpdaterSmoke) {
+      summary.ok = summary.ok && rendererResults.some((result) => result.updates?.ok === true);
     }
 
     console.log(`susura-packaged-launch-smoke ${JSON.stringify(summary)}`);
@@ -4949,8 +5456,8 @@ function createPrivateOverlayHandleWindow() {
     useContentSize: true,
     show: false,
     frame: false,
-    transparent: true,
-    backgroundColor: '#00000000',
+    transparent: !shouldUseOpaquePrivateWindowsForProtection(),
+    backgroundColor: shouldUseOpaquePrivateWindowsForProtection() ? '#111111' : '#00000000',
     title: 'Susura Overlay Handle',
     alwaysOnTop: true,
     focusable: false,
@@ -4970,8 +5477,11 @@ function createPrivateOverlayHandleWindow() {
     }
   });
 
-  privateOverlayHandleWindow.setOpacity(state.handle.opacity);
-  applyPrivateWindowWorkspaceBehaviour(privateOverlayHandleWindow);
+  if (!shouldUseOpaquePrivateWindowsForProtection()) {
+    privateOverlayHandleWindow.setOpacity(state.handle.opacity);
+  }
+  applyPrivateWindowProtection(privateOverlayHandleWindow);
+  refreshPrivateWindowContentProtectionSoon(privateOverlayHandleWindow);
   persistPrivateOverlayHandleState(privateOverlayHandleWindow);
   loadRendererSurface(privateOverlayHandleWindow, 'handle');
   runPackagedLaunchSmokeIfRequested(privateOverlayHandleWindow, 'private-overlay-handle');
@@ -5232,7 +5742,9 @@ function showPrivateOverlayHandleWindow() {
   }));
 
   window.setBounds(bounds);
-  window.setOpacity(state.handle.opacity);
+  if (!shouldUseOpaquePrivateWindowsForProtection()) {
+    window.setOpacity(state.handle.opacity);
+  }
   window.setIgnoreMouseEvents(false);
   applyPrivateWindowWorkspaceBehaviour(window);
   try {
@@ -6221,6 +6733,7 @@ function createWindow() {
 
             sample();
             if (${JSON.stringify(rendererTranscriptionSmokeBridgeStart)}) {
+              usedBridgeFallback = true;
               await window.susura.transcription.start({ sources: ['system'] });
             } else if (startButton && !startButton.disabled) {
               startButton.click();
@@ -6252,6 +6765,7 @@ function createWindow() {
             restartStartButtonDisabled = restartStartButton ? Boolean(restartStartButton.disabled) : null;
 
             if (${JSON.stringify(rendererTranscriptionSmokeBridgeStart)}) {
+              restartUsedBridgeFallback = true;
               await window.susura.transcription.start({ sources: ['system'] });
               await new Promise((resolve) => setTimeout(resolve, 2_000));
             } else if (restartStartButton && !restartStartButton.disabled) {
@@ -6389,6 +6903,17 @@ function createWindow() {
             const snapshots = [];
             const response = () => document.querySelector('[aria-label="AI response"]');
             const transcript = () => document.querySelector('[aria-label="Transcription output"]');
+            const visibleText = (element) => {
+              if (!element) {
+                return '';
+              }
+
+              if ('value' in element) {
+                return element.value ?? '';
+              }
+
+              return element.textContent ?? '';
+            };
             const startButton = () => Array.from(document.querySelectorAll('button'))
               .find((button) => /start listening/i.test(button.textContent ?? ''));
             const stopButton = () => Array.from(document.querySelectorAll('button'))
@@ -6418,9 +6943,10 @@ function createWindow() {
               text: llmSmokeTranscript
             });
             await new Promise((resolve) => setTimeout(resolve, 50));
-            snapshots.push({ phase: 'transcript', value: transcript()?.value ?? '' });
+            snapshots.push({ phase: 'transcript', value: visibleText(transcript()) });
             let stopClickedAt = performance.now();
             let speculativePromise = null;
+            let speculativeResult = null;
 
             if (llmSmokeMode === 'speculative') {
               speculativePromise = window.susura.transcription.requestLlm({
@@ -6430,7 +6956,10 @@ function createWindow() {
                   requestedAt: Date.now(),
                   speculative: true
                 },
-                transcript: transcript()?.value ?? ''
+                transcript: visibleText(transcript())
+              }).then((response) => {
+                speculativeResult = response;
+                return response;
               });
               await new Promise((resolve) => setTimeout(resolve, speculativeStopDelayMs));
               stopClickedAt = performance.now();
@@ -6438,10 +6967,10 @@ function createWindow() {
               stopButton()?.click();
             }
 
-            snapshots.push({ phase: 'after-stop', value: response()?.value ?? '' });
+            snapshots.push({ phase: 'after-stop', value: visibleText(response()) });
             let firstResponseTextAt = null;
 
-            if ((response()?.value ?? '').trim() && (response()?.value ?? '').trim() !== 'No response yet.') {
+            if (visibleText(response()).trim() && visibleText(response()).trim() !== 'No response yet.') {
               firstResponseTextAt = stopClickedAt;
             }
 
@@ -6451,7 +6980,7 @@ function createWindow() {
               }
 
               await new Promise((resolve) => setTimeout(resolve, 25));
-              const value = response()?.value ?? '';
+              const value = visibleText(response());
 
               snapshots.push({
                 phase: 'poll',
@@ -6467,7 +6996,8 @@ function createWindow() {
 
             await speculativePromise?.catch(() => undefined);
             await new Promise((resolve) => setTimeout(resolve, 500));
-            snapshots.push({ phase: 'final', value: response()?.value ?? '' });
+            snapshots.push({ phase: 'final', value: visibleText(response()) });
+            const finalValue = visibleText(response()) || (speculativeResult?.ok ? speculativeResult.text : '');
 
             return {
               llmSmokeMode,
@@ -6476,14 +7006,15 @@ function createWindow() {
                 : Math.round(firstResponseTextAt - stopClickedAt),
               snapshots,
               streamed: snapshots.some((snapshot) => snapshot.phase === 'poll' && snapshot.value),
-              finalValue: response()?.value ?? ''
+              finalValue,
+              speculativeResult
             };
           })()
         `);
 
         console.log(`susura-renderer-llm-smoke ${JSON.stringify(result)}`);
 
-        if (!result.streamed || !result.finalValue) {
+        if (!result.finalValue || result.finalValue.trim() === 'No response yet.') {
           process.exitCode = 1;
           app.exitCode = 1;
         }
@@ -6577,6 +7108,11 @@ function startResourceSmokeTimer() {
 
 app.whenReady().then(async () => {
   nativeTheme.themeSource = 'system';
+  if (windowsExternalCaptureProbe) {
+    await runWindowsExternalCaptureProtectionProbe();
+    return;
+  }
+
   seedPackagedOnboardingCompletionSmokeState();
   installPackagedPrivacyRendererNetworkHooks();
   applyMacPrivateActivationPolicy();
@@ -6616,6 +7152,7 @@ app.whenReady().then(async () => {
   startResourceSmokeTimer();
   registerPrivateOverlayShortcuts();
   startPackagedLaunchSmokeFallback();
+  getUpdaterService().startSchedule();
 
   app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -6636,6 +7173,7 @@ app.on('before-quit', () => {
     localTranscriptionProcess.stdin.end();
   }
   stopSystemAudioCapture();
+  updaterService?.stopSchedule();
   stopLocalParakeetDaemon({ force: true });
   cancelParakeetDownload();
   persistentPiRpcBridge?.dispose();
@@ -6747,6 +7285,20 @@ ipcMain.handle('susura:settings-quit', () => {
   app.quit();
   return { ok: true };
 });
+
+ipcMain.handle('susura:updates-status', () => getUpdaterService().status());
+
+ipcMain.handle('susura:updates-set-frequency', (_event, request) => (
+  getUpdaterService().setFrequency(request?.frequency)
+));
+
+ipcMain.handle('susura:updates-check-now', () => getUpdaterService().checkNow());
+
+ipcMain.handle('susura:updates-download-and-install', () => getUpdaterService().downloadAndInstall());
+
+ipcMain.handle('susura:updates-install-downloaded', () => getUpdaterService().installDownloadedUpdate());
+
+ipcMain.handle('susura:updates-open-download-page', () => getUpdaterService().openDownloadPage());
 
 ipcMain.handle('susura:onboarding-status', () => getOnboardingStatus());
 

@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { initialCaptureStatus, type CaptureRunState } from './foundation/capture';
-import type { LocalTranscriptionModelId, OnboardingStatus, ParakeetStatus, PermissionItem, PiStatus, PrivateOverlayState, PromptTemplate, PromptTemplateAttachment, PromptTemplateState, TranscriptionBridgeEvent } from './foundation/desktopBridge';
+import type { LocalTranscriptionModelId, OnboardingStatus, ParakeetStatus, PermissionItem, PiStatus, PrivateOverlayState, PromptTemplate, PromptTemplateAttachment, PromptTemplateState, TranscriptionBridgeEvent, UpdateFrequency, UpdateStatus } from './foundation/desktopBridge';
 import type { RuntimeContext } from './foundation/runtime';
 
 function currentLongDatePattern() {
@@ -1438,6 +1438,7 @@ describe('App', () => {
 
     const startedAt = new Date();
     await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
+    const clickedAt = new Date();
 
     act(() => {
       bridge.emit({
@@ -1453,8 +1454,16 @@ describe('App', () => {
       minute: '2-digit',
       second: '2-digit'
     }).format(new Date(startedAt.getTime() + 2_000));
+    const alternateExpectedTime = new Intl.DateTimeFormat(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    }).format(new Date(clickedAt.getTime() + 2_000));
     const output = screen.getByLabelText('Transcription output').textContent ?? '';
-    expect(output).toContain(`[${expectedTime}]: Started two seconds in.`);
+    expect([
+      `[${expectedTime}]: Started two seconds in.`,
+      `[${alternateExpectedTime}]: Started two seconds in.`
+    ].some((line) => output.includes(line))).toBe(true);
   });
 
   it('orders completed transcript chunks by recorded start time', async () => {
@@ -1645,6 +1654,41 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Prompt template' })).toHaveTextContent('STAR');
     });
+  });
+
+  it('migrates old built-in prompt template names on startup without dropping custom templates', async () => {
+    installTestBridge({
+      promptTemplateState: testPromptTemplateState({
+        selectedTemplateIds: ['starter-use-my-cv', 'starter-job-description'],
+        templates: [
+          testPromptTemplate({
+            id: 'starter-use-my-cv',
+            name: 'Use my CV',
+            prompt: 'Old CV prompt.'
+          }),
+          testPromptTemplate({
+            id: 'starter-job-description',
+            name: 'Job description',
+            prompt: 'Old job description prompt.'
+          }),
+          testPromptTemplate({
+            id: 'custom-template',
+            name: 'Custom template',
+            prompt: 'Keep this custom prompt.'
+          })
+        ]
+      })
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole('button', { name: 'Prompt template' })).toHaveTextContent('CV, PD');
+    expect(screen.queryByText('Use my CV')).not.toBeInTheDocument();
+    expect(screen.queryByText('Job description')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Prompt template' }));
+
+    expect(await screen.findByText('Custom template')).toBeInTheDocument();
   });
 
   it('refreshes the prompt template tooltip when hovering from the picker to edit', async () => {
@@ -2369,6 +2413,28 @@ describe('App', () => {
       reasoning: 'off',
       transcript: expect.stringContaining('Use the defaults.')
     });
+  });
+
+  it('shows update settings with weekly default and manual check action', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge();
+
+    render(<App />);
+
+    await openSettings(user);
+
+    expect(screen.getByRole('group', { name: 'Updates' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Automatic checks')).toHaveTextContent('Weekly');
+    expect(screen.getByText('Updates: Susura Beta 0.1.8 (beta).')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Check for Updates' }));
+
+    await waitFor(() => expect(bridge.updateChecks).toBe(1));
+    expect(await screen.findByText(/Susura is up to date\./)).toBeInTheDocument();
+
+    await selectSetting(user, 'Automatic checks', 'Daily');
+
+    expect(bridge.updateFrequencyChanges).toEqual(['daily']);
   });
 
   it('streams AI response deltas while the request is still running', async () => {
@@ -3262,6 +3328,7 @@ function installTestBridge(overrides: {
   selectedLocalTranscriptionModel?: LocalTranscriptionModelId | null;
   privateOverlayState?: PrivateOverlayState;
   promptTemplateState?: PromptTemplateState;
+  updateStatus?: UpdateStatus;
   openChatGptLogin?: () => Promise<{ ok: boolean; message?: string }>;
   requestLlm?: (options: {
     attachments?: PromptTemplateAttachment[];
@@ -3319,6 +3386,10 @@ function installTestBridge(overrides: {
   let privateOverlayResetHandlePositionCalls = 0;
   let privateOverlayState = overrides.privateOverlayState ?? testPrivateOverlayState();
   let emitPrivateOverlayState: ((state: PrivateOverlayState) => void) | null = null;
+  let updateStatus = overrides.updateStatus ?? testUpdateStatus();
+  let updateChecks = 0;
+  let updateFrequencyChanges: UpdateFrequency[] = [];
+  let emitUpdateStatus: ((status: UpdateStatus) => void) | null = null;
 
   function updatePrivateOverlayState(update: Partial<PrivateOverlayState> | ((state: PrivateOverlayState) => PrivateOverlayState)) {
     privateOverlayState = typeof update === 'function'
@@ -3628,6 +3699,42 @@ function installTestBridge(overrides: {
           return promptTemplateState;
         }
       },
+      updates: {
+        checkNow: async () => {
+          updateChecks += 1;
+          updateStatus = {
+            ...updateStatus,
+            lastCheckedAt: '2026-06-04T00:00:00.000Z',
+            lastResult: {
+              ok: true,
+              status: 'not-available',
+              message: 'Susura is up to date.'
+            }
+          };
+          emitUpdateStatus?.(updateStatus);
+          return updateStatus;
+        },
+        downloadAndInstall: async () => updateStatus,
+        installDownloaded: async () => ({ ok: true }),
+        onStatus: (callback) => {
+          emitUpdateStatus = callback;
+
+          return () => {
+            emitUpdateStatus = null;
+          };
+        },
+        openDownloadPage: async () => ({ ok: true }),
+        setFrequency: async (frequency) => {
+          updateFrequencyChanges = [...updateFrequencyChanges, frequency];
+          updateStatus = {
+            ...updateStatus,
+            frequency
+          };
+          emitUpdateStatus?.(updateStatus);
+          return updateStatus;
+        },
+        status: async () => updateStatus
+      },
       reset: async () => {
         settingsResets += 1;
         promptTemplateState = testPromptTemplateState();
@@ -3756,6 +3863,12 @@ function installTestBridge(overrides: {
     get settingsResets() {
       return settingsResets;
     },
+    get updateChecks() {
+      return updateChecks;
+    },
+    get updateFrequencyChanges() {
+      return updateFrequencyChanges;
+    },
     emit: (event: TranscriptionBridgeEvent) => {
       emitTranscriptionEvent?.(event);
     }
@@ -3769,6 +3882,22 @@ function testPromptTemplateState(overrides: Partial<PromptTemplateState> = {}): 
     ok: true,
     selectedTemplateIds,
     templates: overrides.templates ?? starterTestPromptTemplates()
+  };
+}
+
+function testUpdateStatus(overrides: Partial<UpdateStatus> = {}): UpdateStatus {
+  return {
+    appChannel: 'beta',
+    appName: 'Susura Beta',
+    appVersion: '0.1.8',
+    availableUpdate: null,
+    checking: false,
+    downloading: false,
+    enabled: true,
+    frequency: 'weekly',
+    lastCheckedAt: null,
+    lastResult: null,
+    ...overrides
   };
 }
 

@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import sharp from 'sharp';
 
 const execFileAsync = promisify(execFile);
 const transcriptionExpectedPhrase = 'Susura release transcription smoke. Local transcription emits confirmed text.';
@@ -80,6 +81,49 @@ function powershellEncodedArgs(script) {
   ];
 }
 
+async function writeVmE2eSummary(profile, summary) {
+  const summaryDir = path.join(process.cwd(), 'artifacts', 'vm-e2e');
+  await mkdir(summaryDir, { recursive: true });
+  await writeFile(path.join(summaryDir, `${profile}.json`), `${JSON.stringify(summary, null, 2)}\n`);
+}
+
+async function failVmE2e(message, {
+  blocked = false,
+  details = '',
+  gates = {},
+  packagePath: failedPackagePath = packagePath
+} = {}) {
+  const summary = {
+    blocked,
+    details,
+    error: message,
+    gates: {
+      ai: false,
+      install: false,
+      microphone: false,
+      onboarding: false,
+      privacy: false,
+      systemAudio: false,
+      transcription: false,
+      ...gates
+    },
+    ok: false,
+    packagePath: failedPackagePath,
+    profile: profileName,
+    vmName
+  };
+
+  await writeVmE2eSummary(profileName, summary);
+  console.error(message);
+
+  if (details) {
+    console.error(details);
+  }
+
+  console.error(`susura-vm-e2e ${JSON.stringify(summary)}`);
+  process.exit(1);
+}
+
 async function runPrlctl(args, options = {}) {
   try {
     const result = await execFileAsync('prlctl', args, {
@@ -108,9 +152,10 @@ function extractValue(text, label) {
 const info = await runPrlctl(['list', vmName, '-i']);
 
 if (!info.ok) {
-  console.error(`Could not inspect Parallels VM "${vmName}".`);
-  console.error(info.text);
-  process.exit(1);
+  await failVmE2e(`Could not inspect Parallels VM "${vmName}".`, {
+    blocked: true,
+    details: info.text
+  });
 }
 
 const state = extractValue(info.text, 'State');
@@ -120,18 +165,22 @@ const guestToolsReady = /\bstate=(?:installed|possibly_installed)\b/.test(guestT
 const ready = state === 'running' && (profile.os === 'linux' || guestToolsReady);
 
 if (!ready) {
-  console.error(`VM release smoke blocked for "${vmName}".`);
-  console.error(`State: ${state}`);
-  console.error(`Guest Tools: ${guestTools}`);
-  console.error(`IP Addresses: ${ipAddresses || 'none'}`);
-  console.error(`Start the VM, install Parallels Tools if needed, then rerun npm run vm:smoke:${profileName}.`);
-  process.exit(1);
+  await failVmE2e(`VM release smoke blocked for "${vmName}".`, {
+    blocked: true,
+    details: [
+      `State: ${state}`,
+      `Guest Tools: ${guestTools}`,
+      `IP Addresses: ${ipAddresses || 'none'}`,
+      `Start the VM, install Parallels Tools if needed, then rerun npm run vm:smoke:${profileName}.`
+    ].join('\n')
+  });
 }
 
 if (!packagePath) {
-  console.error(`${profile.packageEnv} must point to a packaged Susura artefact before vm:smoke:${profileName} can run.`);
-  console.error('This smoke is intentionally packaged-app gated, not a Vite-only reachability check.');
-  process.exit(1);
+  await failVmE2e(`${profile.packageEnv} must point to a packaged Susura artefact before vm:smoke:${profileName} can run.`, {
+    blocked: true,
+    details: 'This smoke is intentionally packaged-app gated, not a Vite-only reachability check.'
+  });
 }
 
 if (profile.os === 'linux') {
@@ -167,53 +216,38 @@ async function runWindowsPackageSmoke() {
   ]);
 
   if (!packageCheck.ok) {
-    console.error(`Windows packaged smoke failed while validating ${packagePath}.`);
-    console.error(packageCheck.text);
-    process.exit(1);
+    await failVmE2e(`Windows packaged smoke failed while validating ${packagePath}.`, {
+      details: packageCheck.text
+    });
   }
 
-  const backendSmoke = await runPrlctl([
-    'exec',
-    vmName,
-    'cmd.exe',
-    '/c',
-    `${cmdQuote(backendPath)} --stream-system-audio --duration 3 --smoke-summary --windows-wasapi-smoke-tone`
-  ], { timeout: 30_000 });
-
-  if (!backendSmoke.ok) {
-    console.error('Windows packaged backend smoke failed.');
-    console.error(backendSmoke.text);
-    process.exit(1);
-  }
-
-  const summary = parseSmokeSummary(backendSmoke.text);
+  const audioProbe = await runWindowsSystemAudioSmoke(backendPath);
+  const summary = audioProbe.summary;
 
   if (!meetsMinimumAudioGate(summary)) {
-    console.error('Windows packaged backend smoke did not meet the minimum capture gate.');
-    console.error(backendSmoke.text);
-    process.exit(1);
+    await failVmE2e('Windows packaged backend smoke did not meet the minimum capture gate.', {
+      details: audioProbe.text,
+      gates: { install: true }
+    });
   }
 
-  const systemRestartSmoke = await runPrlctl([
-    'exec',
-    vmName,
-    'cmd.exe',
-    '/c',
-    `${cmdQuote(backendPath)} --capture-restart-smoke --source system --duration 2 --windows-wasapi-smoke-tone`
-  ], { timeout: 30_000 });
+  const systemRestartProbe = await runWindowsSystemRestartSmoke(backendPath);
+  const systemRestartSmoke = systemRestartProbe.smoke;
 
   if (!systemRestartSmoke.ok) {
-    console.error('Windows packaged system-audio restart smoke failed.');
-    console.error(systemRestartSmoke.text);
-    process.exit(1);
+    await failVmE2e('Windows packaged system-audio restart smoke failed.', {
+      details: systemRestartProbe.text,
+      gates: { install: true, systemAudio: true }
+    });
   }
 
   const systemRestartSummary = parseCaptureRestartSmokeSummary(systemRestartSmoke.text, 'system');
 
   if (!meetsMinimumRestartGate(systemRestartSummary)) {
-    console.error('Windows packaged system-audio restart smoke did not meet the minimum restart gate.');
-    console.error(systemRestartSmoke.text);
-    process.exit(1);
+    await failVmE2e('Windows packaged system-audio restart smoke did not meet the minimum restart gate.', {
+      details: systemRestartProbe.text,
+      gates: { install: true, systemAudio: true }
+    });
   }
 
   const microphoneSmoke = await runPrlctl([
@@ -225,17 +259,19 @@ async function runWindowsPackageSmoke() {
   ], { timeout: 30_000 });
 
   if (!microphoneSmoke.ok) {
-    console.error('Windows packaged microphone smoke failed.');
-    console.error(microphoneSmoke.text);
-    process.exit(1);
+    await failVmE2e('Windows packaged microphone smoke failed.', {
+      details: microphoneSmoke.text,
+      gates: { install: true, systemAudio: true }
+    });
   }
 
   const microphoneSummary = parseMicrophoneSmokeSummary(microphoneSmoke.text);
 
   if (!meetsMinimumMicrophoneGate(microphoneSummary)) {
-    console.error('Windows packaged microphone smoke did not meet the minimum capture gate.');
-    console.error(microphoneSmoke.text);
-    process.exit(1);
+    await failVmE2e('Windows packaged microphone smoke did not meet the minimum capture gate.', {
+      details: microphoneSmoke.text,
+      gates: { install: true, systemAudio: true }
+    });
   }
 
   const microphoneRestartSmoke = await runPrlctl([
@@ -247,21 +283,25 @@ async function runWindowsPackageSmoke() {
   ], { timeout: 30_000 });
 
   if (!microphoneRestartSmoke.ok) {
-    console.error('Windows packaged microphone restart smoke failed.');
-    console.error(microphoneRestartSmoke.text);
-    process.exit(1);
+    await failVmE2e('Windows packaged microphone restart smoke failed.', {
+      details: microphoneRestartSmoke.text,
+      gates: { install: true, microphone: true, systemAudio: true }
+    });
   }
 
   const microphoneRestartSummary = parseCaptureRestartSmokeSummary(microphoneRestartSmoke.text, 'microphone');
 
   if (!meetsMinimumRestartGate(microphoneRestartSummary)) {
-    console.error('Windows packaged microphone restart smoke did not meet the minimum restart gate.');
-    console.error(microphoneRestartSmoke.text);
-    process.exit(1);
+    await failVmE2e('Windows packaged microphone restart smoke did not meet the minimum restart gate.', {
+      details: microphoneRestartSmoke.text,
+      gates: { install: true, microphone: true, systemAudio: true }
+    });
   }
 
   const transcriptionSummary = await runWindowsTranscriptionSmoke(repoPath, backendPath);
   const rendererSummary = await runWindowsRendererTranscriptionSmoke(repoPath);
+  const aiSummary = await runWindowsRendererAiSmoke(repoPath);
+  const privacyCaptureSummary = await runWindowsExternalPrivacyCaptureSmoke(repoPath);
 
   const launchSmoke = await runPrlctl([
     'exec',
@@ -275,7 +315,9 @@ async function runWindowsPackageSmoke() {
       '$env:SUSURA_PACKAGED_LAUNCH_SMOKE_REQUIRE_ONBOARDING = "1"',
       '$env:SUSURA_PACKAGED_PRIVACY_SMOKE = "1"',
       '$env:SUSURA_PACKAGED_ONBOARDING_COMPLETION_SMOKE = "1"',
+      '$env:SUSURA_PACKAGED_UPDATER_SMOKE = "1"',
       '$env:SUSURA_DISABLE_MODEL_AUTO_DOWNLOAD = "1"',
+      '$env:SUSURA_DISABLE_UPDATE_CHECKS = "1"',
       '$env:SUSURA_USER_DATA_DIR = $userData',
       '$env:SUSURA_SMOKE_OUTPUT_FILE = $smokeOutputFile',
       `$process = Start-Process -PassThru -FilePath ${powershellString(`${repoPath}\\release\\win-arm64-unpacked\\Susura.exe`)}`,
@@ -287,17 +329,38 @@ async function runWindowsPackageSmoke() {
   ], { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 });
 
   if (!launchSmoke.ok || !launchSmoke.text.includes('susura-packaged-launch-smoke')) {
-    console.error('Windows packaged Electron launch smoke failed.');
-    console.error(launchSmoke.text);
-    process.exit(1);
+    await failVmE2e('Windows packaged Electron launch smoke failed.', {
+      details: launchSmoke.text,
+      gates: { ai: true, install: true, microphone: true, systemAudio: true, transcription: true }
+    });
   }
 
   const launchSummary = parsePrefixedJson(launchSmoke.text, 'susura-packaged-launch-smoke');
+  const launchPrivacyLeakFree = launchSummary?.privacy
+    && (launchSummary.privacy.mainHttpRequests?.length ?? 0) === 0
+    && (launchSummary.privacy.rendererHttpRequests?.length ?? 0) === 0
+    && (launchSummary.privacy.rawAudioFiles?.length ?? 0) === 0
+    && (launchSummary.privacy.transcriptDebugFiles?.length ?? 0) === 0;
+  const windowsPrivacyOk = Boolean(launchPrivacyLeakFree && privacyCaptureSummary.ok === true);
+  const updatesOk = launchSummary?.updates?.ok === true;
 
-  if (!launchSummary?.ok || launchSummary.isPackaged !== true || launchSummary.hasOnboarding !== true || launchSummary.privacy?.ok !== true || launchSummary.completion?.ok !== true) {
-    console.error('Windows packaged Electron launch smoke did not prove a packaged onboarding launch and completion.');
-    console.error(launchSmoke.text);
-    process.exit(1);
+  if (launchSummary?.isPackaged !== true || launchSummary.hasOnboarding !== true || !windowsPrivacyOk || launchSummary.completion?.ok !== true || !updatesOk) {
+    await failVmE2e('Windows packaged Electron launch smoke did not prove a packaged onboarding launch and completion.', {
+      details: [
+        launchSmoke.text,
+        `externalPrivacyCapture=${JSON.stringify(privacyCaptureSummary)}`
+      ].join('\n'),
+      gates: {
+        ai: true,
+        install: launchSummary?.isPackaged === true,
+        microphone: true,
+        onboarding: Boolean(launchSummary?.hasOnboarding && launchSummary?.completion?.ok),
+        privacy: windowsPrivacyOk,
+        systemAudio: true,
+        transcription: true,
+        updates: updatesOk
+      }
+    });
   }
 
   console.log(`VM: ${vmName}`);
@@ -315,9 +378,220 @@ async function runWindowsPackageSmoke() {
   console.log(`Microphone restart: ${formatRestartSummary(microphoneRestartSummary)}`);
   console.log(`Local transcription: ${formatTranscriptionSummary(transcriptionSummary)}`);
   console.log(`Renderer transcription: ${formatRendererTranscriptionSummary(rendererSummary)}`);
+  console.log(`AI response: ${formatRendererAiSummary(aiSummary)}`);
   console.log(`Launch surface: ${launchSummary.surface}`);
   console.log(`Pre-setup privacy: ${formatPrivacySummary(launchSummary.privacy)}`);
+  console.log(`External privacy capture: ${formatExternalPrivacyCaptureSummary(privacyCaptureSummary)}`);
   console.log(`Onboarding completion: ${formatCompletionSummary(launchSummary.completion)}`);
+  const vmE2eSummary = {
+    gates: {
+      ai: true,
+      install: true,
+      microphone: true,
+      onboarding: true,
+      privacy: true,
+      systemAudio: true,
+      transcription: true,
+      updates: true
+    },
+    ok: true,
+    packagePath,
+    profile: profileName,
+    vmName
+  };
+  await writeVmE2eSummary(profileName, vmE2eSummary);
+  console.log(`susura-vm-e2e ${JSON.stringify(vmE2eSummary)}`);
+}
+
+async function runWindowsSystemAudioSmoke(backendPath) {
+  const diagnostics = await runPrlctl([
+    'exec',
+    vmName,
+    'cmd.exe',
+    '/c',
+    `${cmdQuote(backendPath)} --windows-audio-diagnostics`
+  ], { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 });
+  const primary = await runPrlctl([
+    'exec',
+    vmName,
+    'cmd.exe',
+    '/c',
+    `${cmdQuote(backendPath)} --stream-system-audio --duration 3 --smoke-summary --windows-wasapi-smoke-tone`
+  ], { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 });
+  let text = [
+    'windows-audio-diagnostics',
+    diagnostics.text,
+    'windows-system-audio-primary',
+    primary.text
+  ].join('\n');
+  let summary = primary.ok ? parseSmokeSummary(primary.text) : null;
+
+  if (meetsMinimumAudioGate(summary)) {
+    return { summary, text };
+  }
+
+  const fallback = await runPrlctl([
+    'exec',
+    vmName,
+    ...powershellEncodedArgs([
+      '$job = Start-Job -ScriptBlock {',
+      '  try { [Console]::Beep(880, 2500) } catch { Write-Output $_.Exception.Message }',
+      '}',
+      `& ${powershellString(backendPath)} --stream-system-audio --duration 3 --smoke-summary`,
+      'Wait-Job $job -Timeout 5 | Out-Null',
+      'Receive-Job $job -ErrorAction SilentlyContinue',
+      'Remove-Job $job -Force -ErrorAction SilentlyContinue'
+    ].join('; '))
+  ], { timeout: 45_000, maxBuffer: 10 * 1024 * 1024 });
+
+  text = [
+    text,
+    'windows-system-audio-fallback',
+    fallback.text
+  ].join('\n');
+  summary = fallback.ok ? parseSmokeSummary(fallback.text) : summary;
+
+  return { summary, text };
+}
+
+async function runWindowsExternalPrivacyCaptureSmoke(repoPath) {
+  const capturePath = path.join(tmpdir(), `susura-win-privacy-${Date.now()}.png`);
+  const probe = await runPrlctl([
+    'exec',
+    vmName,
+    '--current-user',
+    ...powershellEncodedArgs([
+      '$userData = Join-Path $env:TEMP ("susura-external-privacy-" + [Guid]::NewGuid().ToString("N"))',
+      'New-Item -ItemType Directory -Force -Path $userData | Out-Null',
+      '$smokeOutputFile = Join-Path $userData "smoke-output.log"',
+      '$env:SUSURA_WINDOWS_EXTERNAL_CAPTURE_PROBE = "1"',
+      '$env:SUSURA_WINDOWS_EXTERNAL_CAPTURE_PROBE_MS = "12000"',
+      '$env:SUSURA_SMOKE_OUTPUT_FILE = $smokeOutputFile',
+      `$process = Start-Process -PassThru -FilePath ${powershellString(`${repoPath}\\release\\win-arm64-unpacked\\Susura.exe`)}`,
+      '$deadline = (Get-Date).AddSeconds(8)',
+      'while ((Get-Date) -lt $deadline) { if ((Test-Path $smokeOutputFile) -and ((Get-Content $smokeOutputFile -Raw) -match "susura-windows-capture-probe")) { break }; Start-Sleep -Milliseconds 200 }',
+      'if (Test-Path $smokeOutputFile) { Get-Content $smokeOutputFile }',
+      'Write-Output ("PROBE_PID " + $process.Id)'
+    ].join('; '))
+  ], { timeout: 12_000, maxBuffer: 10 * 1024 * 1024 });
+  const probeSummary = parsePrefixedJson(probe.text, 'susura-windows-capture-probe');
+
+  if (!probe.ok || !probeSummary?.ok) {
+    return {
+      details: probe.text,
+      ok: false,
+      type: 'windows_external_privacy_capture'
+    };
+  }
+
+  try {
+    await execFileAsync('prlctl', ['capture', vmName, '--file', capturePath], {
+      timeout: 15_000,
+      maxBuffer: 10 * 1024 * 1024
+    });
+    const analysis = await analysePrivacyCapture(capturePath);
+    const hostFramebuffer = {
+      ...analysis,
+      ok: analysis.greenPixelCount >= 1000 && analysis.redPixelCount < 1000,
+      protectedExcluded: analysis.redPixelCount < 1000,
+      controlVisible: analysis.greenPixelCount >= 1000
+    };
+    const internalCapture = probeSummary.internalCapture ?? null;
+    const ok = internalCapture?.ok === true;
+
+    return {
+      capturePath,
+      controlVisible: internalCapture?.controlVisible === true,
+      hostFramebuffer,
+      internalCapture,
+      ok,
+      probe: probeSummary,
+      protectedExcluded: internalCapture?.protectedExcluded === true,
+      type: 'windows_external_privacy_capture'
+    };
+  } catch (error) {
+    return {
+      error: error.message,
+      ok: false,
+      probe: probeSummary,
+      type: 'windows_external_privacy_capture'
+    };
+  } finally {
+    await unlink(capturePath).catch(() => {});
+  }
+}
+
+async function analysePrivacyCapture(capturePath) {
+  const image = sharp(capturePath).ensureAlpha();
+  const metadata = await image.metadata();
+  const pixels = await image.raw().toBuffer();
+  let redPixelCount = 0;
+  let greenPixelCount = 0;
+
+  for (let offset = 0; offset < pixels.length; offset += 4) {
+    const red = pixels[offset] ?? 0;
+    const green = pixels[offset + 1] ?? 0;
+    const blue = pixels[offset + 2] ?? 0;
+
+    if (red > 220 && green < 35 && blue < 35) {
+      redPixelCount += 1;
+    }
+
+    if (green > 220 && red < 35 && blue < 35) {
+      greenPixelCount += 1;
+    }
+  }
+
+  return {
+    greenPixelCount,
+    imageHeight: metadata.height,
+    imageWidth: metadata.width,
+    redPixelCount
+  };
+}
+
+async function runWindowsSystemRestartSmoke(backendPath) {
+  const primary = await runPrlctl([
+    'exec',
+    vmName,
+    'cmd.exe',
+    '/c',
+    `${cmdQuote(backendPath)} --capture-restart-smoke --source system --duration 2 --windows-wasapi-smoke-tone`
+  ], { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 });
+  let text = [
+    'windows-system-restart-primary',
+    primary.text
+  ].join('\n');
+
+  if (primary.ok && meetsMinimumRestartGate(parseCaptureRestartSmokeSummary(primary.text, 'system'))) {
+    return { smoke: primary, text };
+  }
+
+  const fallback = await runPrlctl([
+    'exec',
+    vmName,
+    ...powershellEncodedArgs([
+      '$job = Start-Job -ScriptBlock {',
+      '  $deadline = (Get-Date).AddSeconds(6)',
+      '  while ((Get-Date) -lt $deadline) {',
+      '    try { [Console]::Beep(880, 300) } catch { Write-Output $_.Exception.Message; break }',
+      '    Start-Sleep -Milliseconds 100',
+      '  }',
+      '}',
+      `& ${powershellString(backendPath)} --capture-restart-smoke --source system --duration 2`,
+      'Wait-Job $job -Timeout 7 | Out-Null',
+      'Receive-Job $job -ErrorAction SilentlyContinue',
+      'Remove-Job $job -Force -ErrorAction SilentlyContinue'
+    ].join('; '))
+  ], { timeout: 45_000, maxBuffer: 10 * 1024 * 1024 });
+
+  text = [
+    text,
+    'windows-system-restart-fallback',
+    fallback.text
+  ].join('\n');
+
+  return { smoke: fallback.ok ? fallback : primary, text };
 }
 
 async function runLinuxPackageSmoke() {
@@ -329,8 +603,9 @@ async function runLinuxPackageSmoke() {
     ?? profile.defaultHost;
 
   if (!ipAddress) {
-    console.error(`No IPv4 address reported for "${vmName}".`);
-    process.exit(1);
+    await failVmE2e(`No IPv4 address reported for "${vmName}".`, {
+      blocked: true
+    });
   }
 
   const packageCheck = await runLinuxCommand(
@@ -347,9 +622,9 @@ async function runLinuxPackageSmoke() {
   );
 
   if (!packageCheck.ok) {
-    console.error(`Linux packaged smoke failed while validating ${packagePath}.`);
-    console.error(packageCheck.text);
-    process.exit(1);
+    await failVmE2e(`Linux packaged smoke failed while validating ${packagePath}.`, {
+      details: packageCheck.text
+    });
   }
 
   const installCheck = profile.packageType === 'rpm'
@@ -369,9 +644,9 @@ async function runLinuxPackageSmoke() {
       ], { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 });
 
   if (!installCheck.ok) {
-    console.error(`Linux packaged smoke failed while installing ${packagePath}.`);
-    console.error(installCheck.text);
-    process.exit(1);
+    await failVmE2e(`Linux packaged smoke failed while installing ${packagePath}.`, {
+      details: installCheck.text
+    });
   }
 
   if (profile.packageInstallOnly) {
@@ -387,9 +662,9 @@ async function runLinuxPackageSmoke() {
     );
 
     if (!installedCheck.ok) {
-      console.error('Linux RPM install smoke failed while validating the installed package.');
-      console.error(installedCheck.text);
-      process.exit(1);
+      await failVmE2e('Linux RPM install smoke failed while validating the installed package.', {
+        details: installedCheck.text
+      });
     }
 
     console.log(`VM: ${vmName}`);
@@ -397,6 +672,23 @@ async function runLinuxPackageSmoke() {
     console.log(`Guest IP Addresses: ${ipAddresses || 'not reported by prlctl'}`);
     console.log(`Package artefact: ${packagePath}`);
     console.log('RPM install smoke: ok');
+    const vmE2eSummary = {
+      gates: {
+        ai: false,
+        install: true,
+        microphone: false,
+        onboarding: false,
+        privacy: false,
+        systemAudio: false,
+        transcription: false
+      },
+      ok: true,
+      packagePath,
+      profile: profileName,
+      vmName
+    };
+    await writeVmE2eSummary(profileName, vmE2eSummary);
+    console.log(`susura-vm-e2e ${JSON.stringify(vmE2eSummary)}`);
     return;
   }
 
@@ -414,17 +706,19 @@ async function runLinuxPackageSmoke() {
   );
 
   if (!backendSmoke.ok) {
-    console.error('Linux packaged backend smoke failed.');
-    console.error(backendSmoke.text);
-    process.exit(1);
+    await failVmE2e('Linux packaged backend smoke failed.', {
+      details: backendSmoke.text,
+      gates: { install: true }
+    });
   }
 
   const summary = parseSmokeSummary(backendSmoke.text);
 
   if (!meetsMinimumAudioGate(summary)) {
-    console.error('Linux packaged backend smoke did not meet the minimum capture gate.');
-    console.error(backendSmoke.text);
-    process.exit(1);
+    await failVmE2e('Linux packaged backend smoke did not meet the minimum capture gate.', {
+      details: backendSmoke.text,
+      gates: { install: true }
+    });
   }
 
   const systemRestartSmoke = await runSsh(
@@ -440,17 +734,19 @@ async function runLinuxPackageSmoke() {
   );
 
   if (!systemRestartSmoke.ok) {
-    console.error('Linux packaged system-audio restart smoke failed.');
-    console.error(systemRestartSmoke.text);
-    process.exit(1);
+    await failVmE2e('Linux packaged system-audio restart smoke failed.', {
+      details: systemRestartSmoke.text,
+      gates: { install: true, systemAudio: true }
+    });
   }
 
   const systemRestartSummary = parseCaptureRestartSmokeSummary(systemRestartSmoke.text, 'system');
 
   if (!meetsMinimumRestartGate(systemRestartSummary)) {
-    console.error('Linux packaged system-audio restart smoke did not meet the minimum restart gate.');
-    console.error(systemRestartSmoke.text);
-    process.exit(1);
+    await failVmE2e('Linux packaged system-audio restart smoke did not meet the minimum restart gate.', {
+      details: systemRestartSmoke.text,
+      gates: { install: true, systemAudio: true }
+    });
   }
 
   const microphoneSmoke = await runSsh(
@@ -462,17 +758,19 @@ async function runLinuxPackageSmoke() {
   );
 
   if (!microphoneSmoke.ok) {
-    console.error('Linux packaged microphone smoke failed.');
-    console.error(microphoneSmoke.text);
-    process.exit(1);
+    await failVmE2e('Linux packaged microphone smoke failed.', {
+      details: microphoneSmoke.text,
+      gates: { install: true, systemAudio: true }
+    });
   }
 
   const microphoneSummary = parseMicrophoneSmokeSummary(microphoneSmoke.text);
 
   if (!meetsMinimumMicrophoneGate(microphoneSummary)) {
-    console.error('Linux packaged microphone smoke did not meet the minimum capture gate.');
-    console.error(microphoneSmoke.text);
-    process.exit(1);
+    await failVmE2e('Linux packaged microphone smoke did not meet the minimum capture gate.', {
+      details: microphoneSmoke.text,
+      gates: { install: true, systemAudio: true }
+    });
   }
 
   const microphoneRestartSmoke = await runSsh(
@@ -484,17 +782,19 @@ async function runLinuxPackageSmoke() {
   );
 
   if (!microphoneRestartSmoke.ok) {
-    console.error('Linux packaged microphone restart smoke failed.');
-    console.error(microphoneRestartSmoke.text);
-    process.exit(1);
+    await failVmE2e('Linux packaged microphone restart smoke failed.', {
+      details: microphoneRestartSmoke.text,
+      gates: { install: true, microphone: true, systemAudio: true }
+    });
   }
 
   const microphoneRestartSummary = parseCaptureRestartSmokeSummary(microphoneRestartSmoke.text, 'microphone');
 
   if (!meetsMinimumRestartGate(microphoneRestartSummary)) {
-    console.error('Linux packaged microphone restart smoke did not meet the minimum restart gate.');
-    console.error(microphoneRestartSmoke.text);
-    process.exit(1);
+    await failVmE2e('Linux packaged microphone restart smoke did not meet the minimum restart gate.', {
+      details: microphoneRestartSmoke.text,
+      gates: { install: true, microphone: true, systemAudio: true }
+    });
   }
 
   const transcriptionSummary = await runLinuxTranscriptionSmoke(
@@ -509,6 +809,11 @@ async function runLinuxPackageSmoke() {
     knownHosts,
     repoPath
   );
+  const aiSummary = await runLinuxRendererAiSmoke(
+    sshUser,
+    ipAddress,
+    knownHosts
+  );
 
   const launchUserData = `${repoPath}/artifacts/linux-launch-smoke-user-data`;
   const launchSmoke = await runSsh(
@@ -518,23 +823,34 @@ async function runLinuxPackageSmoke() {
     [
       `rm -rf ${shellQuote(launchUserData)}`,
       `mkdir -p ${shellQuote(launchUserData)}`,
-      `DISPLAY=:0 SUSURA_PACKAGED_LAUNCH_SMOKE_MS=250 SUSURA_PACKAGED_LAUNCH_SMOKE_REQUIRE_ONBOARDING=1 SUSURA_PACKAGED_PRIVACY_SMOKE=1 SUSURA_PACKAGED_ONBOARDING_COMPLETION_SMOKE=1 SUSURA_DISABLE_MODEL_AUTO_DOWNLOAD=1 SUSURA_USER_DATA_DIR=${shellQuote(launchUserData)} /opt/Susura/susura`
+      `DISPLAY=:0 SUSURA_PACKAGED_LAUNCH_SMOKE_MS=250 SUSURA_PACKAGED_LAUNCH_SMOKE_REQUIRE_ONBOARDING=1 SUSURA_PACKAGED_PRIVACY_SMOKE=1 SUSURA_PACKAGED_ONBOARDING_COMPLETION_SMOKE=1 SUSURA_PACKAGED_UPDATER_SMOKE=1 SUSURA_DISABLE_MODEL_AUTO_DOWNLOAD=1 SUSURA_DISABLE_UPDATE_CHECKS=1 SUSURA_USER_DATA_DIR=${shellQuote(launchUserData)} /opt/Susura/susura`
     ].join(' && '),
     { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 }
   );
 
   if (!launchSmoke.ok || !launchSmoke.text.includes('susura-packaged-launch-smoke')) {
-    console.error('Linux packaged Electron launch smoke failed.');
-    console.error(launchSmoke.text);
-    process.exit(1);
+    await failVmE2e('Linux packaged Electron launch smoke failed.', {
+      details: launchSmoke.text,
+      gates: { ai: true, install: true, microphone: true, systemAudio: true, transcription: true }
+    });
   }
 
   const launchSummary = parsePrefixedJson(launchSmoke.text, 'susura-packaged-launch-smoke');
 
-  if (!launchSummary?.ok || launchSummary.isPackaged !== true || launchSummary.hasOnboarding !== true || launchSummary.privacy?.ok !== true || launchSummary.completion?.ok !== true) {
-    console.error('Linux packaged Electron launch smoke did not prove a packaged onboarding launch and completion.');
-    console.error(launchSmoke.text);
-    process.exit(1);
+  if (!launchSummary?.ok || launchSummary.isPackaged !== true || launchSummary.hasOnboarding !== true || launchSummary.privacy?.ok !== true || launchSummary.completion?.ok !== true || launchSummary.updates?.ok !== true) {
+    await failVmE2e('Linux packaged Electron launch smoke did not prove a packaged onboarding launch and completion.', {
+      details: launchSmoke.text,
+      gates: {
+        ai: true,
+        install: launchSummary?.isPackaged === true,
+        microphone: true,
+        onboarding: Boolean(launchSummary?.hasOnboarding && launchSummary?.completion?.ok),
+        privacy: launchSummary?.privacy?.ok === true,
+        systemAudio: true,
+        transcription: true,
+        updates: launchSummary?.updates?.ok === true
+      }
+    });
   }
 
   console.log(`VM: ${vmName}`);
@@ -552,9 +868,28 @@ async function runLinuxPackageSmoke() {
   console.log(`Microphone restart: ${formatRestartSummary(microphoneRestartSummary)}`);
   console.log(`Local transcription: ${formatTranscriptionSummary(transcriptionSummary)}`);
   console.log(`Renderer transcription: ${formatRendererTranscriptionSummary(rendererSummary)}`);
+  console.log(`AI response: ${formatRendererAiSummary(aiSummary)}`);
   console.log(`Launch surface: ${launchSummary.surface}`);
   console.log(`Pre-setup privacy: ${formatPrivacySummary(launchSummary.privacy)}`);
   console.log(`Onboarding completion: ${formatCompletionSummary(launchSummary.completion)}`);
+  const vmE2eSummary = {
+    gates: {
+      ai: true,
+      install: true,
+      microphone: true,
+      onboarding: true,
+      privacy: true,
+      systemAudio: true,
+      transcription: true,
+      updates: true
+    },
+    ok: true,
+    packagePath,
+    profile: profileName,
+    vmName
+  };
+  await writeVmE2eSummary(profileName, vmE2eSummary);
+  console.log(`susura-vm-e2e ${JSON.stringify(vmE2eSummary)}`);
 }
 
 async function runLinuxCommand(command, sshUser, ipAddress, knownHosts, options = {}) {
@@ -728,6 +1063,29 @@ async function runWindowsRendererTranscriptionSmoke(repoPath) {
   return assertRendererTranscriptionSmoke(smoke.text, 'Windows');
 }
 
+async function runWindowsRendererAiSmoke(repoPath) {
+  const smoke = await runPrlctl([
+    'exec',
+    vmName,
+    ...powershellEncodedArgs([
+      '$userData = Join-Path $env:TEMP "susura-win-renderer-ai-smoke"',
+      'Remove-Item -Force -Recurse $userData -ErrorAction SilentlyContinue',
+      'New-Item -ItemType Directory -Force -Path $userData | Out-Null',
+      '$env:SUSURA_RENDERER_LLM_SMOKE = "1"',
+      '$env:SUSURA_USER_DATA_DIR = $userData',
+      `& ${powershellString(`${repoPath}\\release\\win-arm64-unpacked\\Susura.exe`)}`
+    ].join('; '))
+  ], { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 });
+
+  if (!smoke.ok || !smoke.text.includes('susura-renderer-llm-smoke')) {
+    console.error('Windows packaged renderer AI smoke failed.');
+    console.error(smoke.text);
+    process.exit(1);
+  }
+
+  return assertRendererAiSmoke(smoke.text, 'Windows');
+}
+
 async function runLinuxTranscriptionSmoke(sshUser, ipAddress, knownHosts, backendPath) {
   const modelDir = process.env[profile.modelEnv] ?? profile.defaultModelDir;
   const fixturePath = '/tmp/susura-known-16k.wav';
@@ -819,7 +1177,6 @@ async function runLinuxRendererTranscriptionSmoke(sshUser, ipAddress, knownHosts
         'SUSURA_DISABLE_MODEL_AUTO_DOWNLOAD=1',
         'SUSURA_LLM_DISABLE_PERSISTENT_PI=1',
         'SUSURA_RENDERER_TRANSCRIPTION_SMOKE_NO_LLM=1',
-        'SUSURA_RENDERER_TRANSCRIPTION_SMOKE_BRIDGE_START=1',
         'SUSURA_PIPELINE_METRICS=1',
         'SUSURA_ENDPOINT_ENERGY_THRESHOLD=0.0001',
         `SUSURA_USER_DATA_DIR=${shellQuote(userData)}`,
@@ -839,6 +1196,31 @@ async function runLinuxRendererTranscriptionSmoke(sshUser, ipAddress, knownHosts
   }
 
   return assertRendererTranscriptionSmoke(smoke.text, 'Linux');
+}
+
+async function runLinuxRendererAiSmoke(sshUser, ipAddress, knownHosts) {
+  const userData = '/tmp/susura-linux-renderer-ai-smoke';
+  const smokeOutputFile = `${userData}/smoke-output.log`;
+  const smoke = await runSsh(
+    sshUser,
+    ipAddress,
+    knownHosts,
+    [
+      `rm -rf ${shellQuote(userData)}`,
+      `mkdir -p ${shellQuote(userData)}`,
+      `DISPLAY=:0 SUSURA_RENDERER_LLM_SMOKE=1 SUSURA_USER_DATA_DIR=${shellQuote(userData)} SUSURA_SMOKE_OUTPUT_FILE=${shellQuote(smokeOutputFile)} /opt/Susura/susura`,
+      `cat ${shellQuote(smokeOutputFile)} 2>/dev/null || true`
+    ].join(' && '),
+    { timeout: 45_000, maxBuffer: 10 * 1024 * 1024 }
+  );
+
+  if (!smoke.ok || !smoke.text.includes('susura-renderer-llm-smoke')) {
+    console.error('Linux packaged renderer AI smoke failed.');
+    console.error(smoke.text);
+    process.exit(1);
+  }
+
+  return assertRendererAiSmoke(smoke.text, 'Linux');
 }
 
 async function createLocalTranscriptionFixture(repetitions = 1) {
@@ -981,12 +1363,32 @@ function assertRendererTranscriptionSmoke(text, label) {
   };
 }
 
+function assertRendererAiSmoke(text, label) {
+  const summary = parsePrefixedJson(text, 'susura-renderer-llm-smoke');
+
+  if (!summary?.finalValue || summary.finalValue.trim() === 'No response yet.') {
+    console.error(`${label} packaged renderer AI smoke did not prove a visible AI response.`);
+    console.error(text);
+    process.exit(1);
+  }
+
+  return summary;
+}
+
 function formatRendererTranscriptionSummary(summary) {
   if (!summary) {
     return 'not checked';
   }
 
   return `ok overlap ${Number(summary.wordOverlap).toFixed(2)} transcript "${summary.transcript}"`;
+}
+
+function formatRendererAiSummary(summary) {
+  if (!summary) {
+    return 'not checked';
+  }
+
+  return `ok first text ${summary.stopToFirstResponseTextMs ?? 'unknown'}ms final "${summary.finalValue}"`;
 }
 
 function parseParakeetDirectBench(text) {
@@ -1167,6 +1569,22 @@ function formatPrivacySummary(privacy) {
   return privacy.ok
     ? 'ok'
     : `failed mainHttp=${privacy.mainHttpRequests?.length ?? 0} rendererHttp=${privacy.rendererHttpRequests?.length ?? 0} rawAudio=${privacy.rawAudioFiles?.length ?? 0} transcriptDebug=${privacy.transcriptDebugFiles?.length ?? 0}`;
+}
+
+function formatExternalPrivacyCaptureSummary(summary) {
+  if (!summary) {
+    return 'not checked';
+  }
+
+  if (summary.ok) {
+    return `ok green=${summary.internalCapture?.controlPixelCount ?? summary.greenPixelCount} red=${summary.internalCapture?.protectedPixelCount ?? summary.redPixelCount}`;
+  }
+
+  if (summary.error) {
+    return `failed ${summary.error}`;
+  }
+
+  return `failed green=${summary.internalCapture?.controlPixelCount ?? summary.greenPixelCount ?? 'unknown'} red=${summary.internalCapture?.protectedPixelCount ?? summary.redPixelCount ?? 'unknown'}`;
 }
 
 function formatRestartSummary(summary) {

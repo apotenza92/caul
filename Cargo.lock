@@ -4558,6 +4558,7 @@ dependencies = [
  "susura-macos-capture",
  "transcribe-rs",
  "wasapi",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

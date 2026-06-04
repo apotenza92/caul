@@ -43,6 +43,20 @@ function TooltipContent({
     typeof document !== "undefined"
     && document.documentElement.dataset.susuraSuppressTooltips === "true"
   ) {
+    const suppressStartedAt = Number(document.documentElement.dataset.susuraSuppressTooltipsAt ?? 0)
+
+    if (!Number.isFinite(suppressStartedAt) || Date.now() - suppressStartedAt > 1200) {
+      delete document.documentElement.dataset.susuraSuppressTooltips
+      delete document.documentElement.dataset.susuraSuppressTooltipsAt
+    } else {
+      return null
+    }
+  }
+
+  if (
+    typeof document !== "undefined"
+    && document.documentElement.dataset.susuraSuppressTooltips === "true"
+  ) {
     return null
   }
 

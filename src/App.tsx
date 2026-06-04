@@ -61,7 +61,9 @@ import {
   type PrivateOverlayState,
   type PromptTemplate,
   type PromptTemplateAttachment,
-  type PromptTemplateState
+  type PromptTemplateState,
+  type UpdateFrequency,
+  type UpdateStatus
 } from './foundation/desktopBridge';
 import { useLiveTranscription, type AiResponseSession, type TranscriptSession } from './hooks/useLiveTranscription';
 import { useRuntimeContext } from './hooks/useRuntimeContext';
@@ -753,7 +755,18 @@ export function App() {
     setPromptTemplates(starterPromptTemplates);
     setSelectedPromptTemplateIds(defaultSelectedPromptTemplateIds);
     setGeneralInstructions(defaultGeneralInstructions);
-    await getSettingsBridge()?.reset();
+    const reset = await getSettingsBridge()?.reset();
+    const promptTemplateState = await getSettingsBridge()?.promptTemplates?.list();
+
+    if (promptTemplateState) {
+      applyPromptTemplateState(promptTemplateState);
+    } else if (reset) {
+      applyPromptTemplateState({
+        ok: true,
+        selectedTemplateIds: defaultSelectedPromptTemplateIds,
+        templates: starterPromptTemplates
+      });
+    }
   }
 
   async function setPrivateOverlayHandleSize(size: PrivateOverlayHandleSize) {
@@ -1544,14 +1557,17 @@ function useSuppressTooltipsAfterOverlayOpen(isOverlayOpen: boolean) {
 
     wasOverlayOpenRef.current = isOverlayOpen;
     document.documentElement.dataset.susuraSuppressTooltips = 'true';
+    document.documentElement.dataset.susuraSuppressTooltipsAt = String(Date.now());
 
     const timeout = window.setTimeout(() => {
       delete document.documentElement.dataset.susuraSuppressTooltips;
+      delete document.documentElement.dataset.susuraSuppressTooltipsAt;
     }, overlayOpenTooltipSuppressionMs);
 
     return () => {
       window.clearTimeout(timeout);
       delete document.documentElement.dataset.susuraSuppressTooltips;
+      delete document.documentElement.dataset.susuraSuppressTooltipsAt;
     };
   }, [isOverlayOpen]);
 }
@@ -4268,6 +4284,37 @@ function getPromptTemplateDisplayName(template: PromptTemplate) {
   return template.name.trim() || 'Untitled';
 }
 
+function formatUpdateVersionLine(status: UpdateStatus | null) {
+  if (!status) {
+    return 'Updates: Loading update status.';
+  }
+
+  const channel = status.appChannel === 'beta'
+    ? 'beta'
+    : status.appChannel === 'dev'
+    ? 'dev'
+    : 'stable';
+
+  return `Updates: ${status.appName} ${status.appVersion} (${channel}).`;
+}
+
+function formatUpdateStatusLine(status: UpdateStatus | null) {
+  if (!status) {
+    return 'Last checked: Not available yet.';
+  }
+
+  if (!status.enabled) {
+    return 'Update checks are disabled for this build.';
+  }
+
+  const lastChecked = status.lastCheckedAt
+    ? new Date(status.lastCheckedAt).toLocaleString()
+    : 'Never';
+  const message = status.lastResult?.message ?? 'Automatic checks are ready.';
+
+  return `Last checked: ${lastChecked}. ${message}`;
+}
+
 function normalisePromptTemplateDraft(template: PromptTemplate) {
   return {
     ...template,
@@ -4722,12 +4769,23 @@ function createPromptTemplate({
 }
 
 function mergeStarterPromptTemplates(templates: PromptTemplate[]) {
-  const existingIds = new Set(templates.map((template) => template.id));
+  const starterTemplatesById = new Map(starterPromptTemplates.map((template) => [template.id, template]));
+  const customTemplates = templates.filter((template) => !starterTemplatesById.has(template.id));
 
   return [
-    ...templates,
-    ...starterPromptTemplates.filter((template) => !existingIds.has(template.id))
+    ...starterPromptTemplates,
+    ...customTemplates
   ];
+}
+
+function getCanonicalPromptTemplateState(state: PromptTemplateState): PromptTemplateState {
+  const templates = mergeStarterPromptTemplates(state.templates);
+
+  return {
+    ok: true,
+    selectedTemplateIds: getSelectedPromptTemplateIds(state, templates),
+    templates
+  };
 }
 
 function getSelectedPromptTemplateIds(state: PromptTemplateState, templates: PromptTemplate[]) {
@@ -4804,6 +4862,7 @@ function SettingsPage({
   const [isResetDialogOpen, setIsResetDialogOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<SettingsSection>('general');
   const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatus | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [selectedTranscriptionModelId, setSelectedTranscriptionModelId] = useState<LocalTranscriptionModelId>('parakeet');
   const hasInitialisedTranscriptionModelRef = useRef(false);
   const autoSelectingReadyModelRef = useRef<LocalTranscriptionModelId | null>(null);
@@ -4811,6 +4870,15 @@ function SettingsPage({
     { id: 'general', label: 'General' },
     { id: 'ai', label: 'Models' },
     { id: 'permissions', label: 'Permissions' }
+  ];
+  const updateFrequencyOptions: Array<{ value: UpdateFrequency; label: string }> = [
+    { value: 'never', label: 'Never' },
+    { value: 'startup', label: 'On startup' },
+    { value: 'hourly', label: 'Every hour' },
+    { value: 'sixHours', label: 'Every 6 hours' },
+    { value: 'twelveHours', label: 'Every 12 hours' },
+    { value: 'daily', label: 'Daily' },
+    { value: 'weekly', label: 'Weekly' }
   ];
 
   useEffect(() => {
@@ -4824,6 +4892,29 @@ function SettingsPage({
     });
 
     return () => {
+      unsubscribe?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    const updates = getSettingsBridge()?.updates;
+    const unsubscribe = updates?.onStatus?.((status) => {
+      setUpdateStatus(status);
+    });
+
+    updates?.status?.()
+      .then((status) => {
+        if (isMounted) {
+          setUpdateStatus(status);
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to load update status:', error);
+      });
+
+    return () => {
+      isMounted = false;
       unsubscribe?.();
     };
   }, []);
@@ -4960,6 +5051,89 @@ function SettingsPage({
                       />
                       <FieldLabel htmlFor="auto-collapse">Auto-collapse</FieldLabel>
                     </Field>
+                  </FieldGroup>
+                </FieldSet>
+
+                <FieldSet>
+                  <FieldLegend>Updates</FieldLegend>
+                  <FieldGroup>
+                    <div className="flex max-w-2xl flex-col items-start gap-3">
+                      <div className="grid w-full gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                        <Field>
+                          <FieldLabel htmlFor="update-frequency">Automatic checks</FieldLabel>
+                          <Select
+                            disabled={!updateStatus?.enabled || updateStatus.checking || updateStatus.downloading}
+                            name="update-frequency"
+                            value={updateStatus?.frequency ?? 'weekly'}
+                            onValueChange={(value) => void getSettingsBridge()?.updates?.setFrequency(value as UpdateFrequency)}
+                          >
+                            <div>
+                              <SelectTrigger id="update-frequency">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </div>
+                            <SelectContent>
+                              <SelectGroup>
+                                {updateFrequencyOptions.map((option) => (
+                                  <SelectItem key={option.value} value={option.value}>
+                                    {option.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectGroup>
+                            </SelectContent>
+                          </Select>
+                        </Field>
+                        <TooltipButton
+                          disabled={!updateStatus?.enabled || updateStatus.checking || updateStatus.downloading}
+                          onClick={() => void getSettingsBridge()?.updates?.checkNow()}
+                          size="default"
+                          tooltip="Check for updates"
+                          type="button"
+                          variant="outline"
+                        >
+                          {updateStatus?.checking ? <LoaderCircleIcon className="animate-spin" /> : <DownloadIcon />}
+                          Check for Updates
+                        </TooltipButton>
+                      </div>
+                      <div className={layout.settingsDescription} aria-live="polite">
+                        <p>{formatUpdateVersionLine(updateStatus)}</p>
+                        <p>{formatUpdateStatusLine(updateStatus)}</p>
+                      </div>
+                      {updateStatus?.availableUpdate ? (
+                        <div className="flex flex-wrap gap-2">
+                          <TooltipButton
+                            disabled={updateStatus.checking || updateStatus.downloading}
+                            onClick={() => void getSettingsBridge()?.updates?.downloadAndInstall()}
+                            size="default"
+                            tooltip="Download this update"
+                            type="button"
+                          >
+                            {updateStatus.downloading ? <LoaderCircleIcon className="animate-spin" /> : <DownloadIcon />}
+                            Download Update
+                          </TooltipButton>
+                          {updateStatus.lastResult?.status === 'ready' ? (
+                            <TooltipButton
+                              onClick={() => void getSettingsBridge()?.updates?.installDownloaded()}
+                              size="default"
+                              tooltip="Restart Susura and install the update"
+                              type="button"
+                              variant="outline"
+                            >
+                              Restart Now
+                            </TooltipButton>
+                          ) : null}
+                          <TooltipButton
+                            onClick={() => void getSettingsBridge()?.updates?.openDownloadPage()}
+                            size="default"
+                            tooltip="Open release page"
+                            type="button"
+                            variant="outline"
+                          >
+                            Release Page
+                          </TooltipButton>
+                        </div>
+                      ) : null}
+                    </div>
                   </FieldGroup>
                 </FieldSet>
 
