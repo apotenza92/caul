@@ -10,7 +10,7 @@ Make Caul release-ready on Windows ARM64 and Linux ARM64 first, using the local 
 
 - macOS: keep Apple Silicon macOS as the reference implementation and preserve the existing Swift Core Audio helper path.
 - Windows: target `Windows 11 ARM` first for local smoke coverage, with Windows x64 built in CI, packaged as NSIS installers.
-- Linux: target `Ubuntu 24.04.3 ARM64` first for local `.deb` smoke coverage and `Fedora 42 ARM64` for local `.rpm` smoke coverage, with Linux x64 built in CI. Linux is packaged as AppImage plus `.deb` and `.rpm`.
+- Linux: target `Ubuntu 24.04.3 ARM64` first for local AppImage and `.deb` smoke coverage, with Linux x64 built in CI. Linux ARM64 is packaged as AppImage plus `.deb`; Linux x64 is packaged as AppImage, `.deb` and `.rpm`.
 - Defer x64 release-smoke claims until there is dedicated x64 VM, hardware or cloud runner coverage.
 
 ## Architecture Work
@@ -27,7 +27,7 @@ Make Caul release-ready on Windows ARM64 and Linux ARM64 first, using the local 
 
 ## Packaging Work
 
-- Replace the placeholder `dist:win` and `dist:linux` scripts with real platform packaging commands. The scripts now target Windows ARM64/x64 NSIS and Linux ARM64/x64 AppImage, `.deb` and `.rpm`.
+- Replace the placeholder `dist:win` and `dist:linux` scripts with real platform packaging commands. The scripts now target Windows ARM64/x64 NSIS, Linux ARM64 AppImage and `.deb`, and Linux x64 AppImage, `.deb` and `.rpm`.
 - Make `electron-builder.config.cjs` platform-aware:
   - macOS bundles `caul-desktop-backend` and `CaulAudioHelper`.
   - Windows/Linux bundle `caul-desktop-backend`, Pi resources, model resources and icons, but not the Swift helper.
@@ -58,7 +58,7 @@ For each platform, packaged E2E must verify:
 - Raw audio is not written by default.
 - No provider call or hidden telemetry happens before explicit setup. Privacy smokes disable update checks with `CAUL_DISABLE_UPDATE_CHECKS=1`; normal packaged builds still default to weekly GitHub-backed update checks.
 
-The unified `vm:e2e` command runs macOS, Windows and Ubuntu Linux gates. Each gate emits a machine-parseable `caul-vm-e2e` summary and writes `artifacts/vm-e2e/<profile>.json` for passing, failing and VM-provisioning-blocked runs. `scripts/release.sh` warns when those summaries are missing or failing, and `CAUL_REQUIRE_VM_E2E=1` turns the warning into a hard release block. Fedora remains an RPM install/package gate through `vm:smoke:fedora`.
+The unified `vm:e2e` command runs macOS, Windows and Ubuntu Linux gates. Each gate emits a machine-parseable `caul-vm-e2e` summary and writes `artifacts/vm-e2e/<profile>.json` for passing, failing and VM-provisioning-blocked runs. `scripts/release.sh` warns when those summaries are missing or failing, and `CAUL_REQUIRE_VM_E2E=1` turns the warning into a hard release block. Linux RPM is currently published for x64 only.
 
 The backend also has bounded `smoke:desktop-system-audio`, `vm:backend-smoke:win` and `vm:backend-smoke:linux` commands for native system-audio smoke checks before the full packaged Electron E2E is automated. The Ubuntu VM backend smoke uses PipeWire capture and a bounded audio stimulus. The Windows VM backend smoke uses WASAPI loopback for the default render endpoint and includes `--windows-audio-diagnostics` output so missing or unusable VM audio endpoints fail with actionable context.
 

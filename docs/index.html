@@ -532,7 +532,6 @@
           linux: {
             appImageArm64: `https://github.com/${repo}/releases/latest/download/caul-arm64.AppImage`,
             debArm64: `https://github.com/${repo}/releases/latest/download/caul-arm64.deb`,
-            rpmArm64: `https://github.com/${repo}/releases/latest/download/caul-arm64.rpm`,
             appImageX64: `https://github.com/${repo}/releases/latest/download/caul-x64.AppImage`,
             debX64: `https://github.com/${repo}/releases/latest/download/caul-x64.deb`,
             rpmX64: `https://github.com/${repo}/releases/latest/download/caul-x64.rpm`
@@ -547,7 +546,6 @@
           linux: {
             appImageArm64: `https://github.com/${repo}/releases/latest/download/caul-beta-arm64.AppImage`,
             debArm64: `https://github.com/${repo}/releases/latest/download/caul-beta-arm64.deb`,
-            rpmArm64: `https://github.com/${repo}/releases/latest/download/caul-beta-arm64.rpm`,
             appImageX64: `https://github.com/${repo}/releases/latest/download/caul-beta-x64.AppImage`,
             debX64: `https://github.com/${repo}/releases/latest/download/caul-beta-x64.deb`,
             rpmX64: `https://github.com/${repo}/releases/latest/download/caul-beta-x64.rpm`
@@ -560,24 +558,22 @@
         }
       };
       const assetSizes = {
-        "caul-arm64.AppImage": 196425023,
-        "caul-arm64.deb": 129561944,
-        "caul-arm64.rpm": 129561944,
-        "caul-beta-arm64.AppImage": 196428377,
-        "caul-beta-arm64.deb": 129583424,
-        "caul-beta-arm64.rpm": 129583424,
-        "Caul-Beta-macos-arm64.zip": 191359697,
-        "Caul-Beta-windows-arm64-setup.exe": 143720983,
-        "Caul-Beta-windows-x64-setup.exe": 152480606,
-        "caul-beta-x64.AppImage": 195554514,
-        "caul-beta-x64.deb": 129668900,
-        "caul-beta-x64.rpm": 129668900,
-        "Caul-macos-arm64.zip": 191178473,
-        "Caul-windows-arm64-setup.exe": 143720180,
-        "Caul-windows-x64-setup.exe": 152482194,
-        "caul-x64.AppImage": 195550088,
-        "caul-x64.deb": 129671352,
-        "caul-x64.rpm": 129671352
+        "caul-arm64.AppImage": 196125349,
+        "caul-arm64.deb": 129210060,
+        "caul-beta-arm64.AppImage": 196154906,
+        "caul-beta-arm64.deb": 129230612,
+        "Caul-Beta-macos-arm64.zip": 190994244,
+        "Caul-Beta-windows-arm64-setup.exe": 143357738,
+        "Caul-Beta-windows-x64-setup.exe": 152243048,
+        "caul-beta-x64.AppImage": 195256517,
+        "caul-beta-x64.deb": 129297880,
+        "caul-beta-x64.rpm": 121138113,
+        "Caul-macos-arm64.zip": 190701766,
+        "Caul-windows-arm64-setup.exe": 143340581,
+        "Caul-windows-x64-setup.exe": 152225542,
+        "caul-x64.AppImage": 195227432,
+        "caul-x64.deb": 129315974,
+        "caul-x64.rpm": 121116809
       };
       const state = {
         channel: "stable",
@@ -657,7 +653,6 @@
               downloads.beta.linux = {
                 appImageArm64: `${base}/caul-beta-arm64.AppImage`,
                 debArm64: `${base}/caul-beta-arm64.deb`,
-                rpmArm64: `${base}/caul-beta-arm64.rpm`,
                 appImageX64: `${base}/caul-beta-x64.AppImage`,
                 debX64: `${base}/caul-beta-x64.deb`,
                 rpmX64: `${base}/caul-beta-x64.rpm`
@@ -714,6 +709,12 @@
         extraDownloadLinks.innerHTML = "";
         archToggle.style.display = state.platform === "mac" ? "none" : "flex";
         formatToggle.style.display = state.platform === "linux" ? "flex" : "none";
+        document.getElementById("format-rpm").style.display = state.platform === "linux" && state.arch !== "arm64" ? "inline-flex" : "none";
+
+        if (state.platform === "linux" && state.arch === "arm64" && state.linuxFormat === "rpm") {
+          state.linuxFormat = "appimage";
+          setActive(".format-btn", "format-appimage");
+        }
 
         if (!releaseAvailable[state.channel]) {
           downloadSection.style.display = "none";
