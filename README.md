@@ -7,11 +7,7 @@
 </a>
 <br><br>
 
-Susura is a simple, private way to use AI during live calls. It prioritises fast local transcription models where practical, and for now uses your existing ChatGPT subscription for the AI model.
-
-## Working Name
-
-Susura comes from the Romance-language root for whispering or murmuring. It is close to Italian `sussurra`, but easier to spell.
+Susura is named for the Romance-language root for whispering or murmuring: a simple, private way to use AI during live calls. It prioritises fast local transcription models where practical, and for now uses your existing ChatGPT subscription for the AI model.
 
 ## Audio Privacy Boundary
 
