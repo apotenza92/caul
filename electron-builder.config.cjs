@@ -2,14 +2,15 @@ const packageJson = require('./package.json');
 
 const version = packageJson.version;
 const isDevBuild = process.env.FORCE_DEV_BUILD === 'true';
+const isPrivateDevBuild = isDevBuild && process.env.FORCE_DEV_PRIVATE_BUILD === 'true';
 const isBeta = !isDevBuild && (process.env.FORCE_BETA_BUILD === 'true'
   || version.includes('-alpha')
   || version.includes('-beta')
   || version.includes('-rc'));
-const buildChannel = isDevBuild ? 'DEV' : isBeta ? 'BETA' : 'STABLE';
-const appDisplayName = isDevBuild ? 'Susura Dev' : isBeta ? 'Susura Beta' : 'Susura';
-const appId = isDevBuild ? 'dev.susura.app.dev' : isBeta ? 'dev.susura.app.beta' : 'dev.susura.app';
-const artifactPrefix = isDevBuild ? 'Susura-Dev' : isBeta ? 'Susura-Beta' : 'Susura';
+const buildChannel = isPrivateDevBuild ? 'DEV-PRIVATE' : isDevBuild ? 'DEV' : isBeta ? 'BETA' : 'STABLE';
+const appDisplayName = isPrivateDevBuild ? 'Susura Dev-Private' : isDevBuild ? 'Susura Dev' : isBeta ? 'Susura Beta' : 'Susura';
+const appId = isPrivateDevBuild ? 'dev.susura.app.dev-private' : isDevBuild ? 'dev.susura.app.dev' : isBeta ? 'dev.susura.app.beta' : 'dev.susura.app';
+const artifactPrefix = isPrivateDevBuild ? 'Susura-Dev-Private' : isDevBuild ? 'Susura-Dev' : isBeta ? 'Susura-Beta' : 'Susura';
 const devCodeSignIdentity = process.env.SUSURA_DEV_CODESIGN_IDENTITY
   ?? '0A2CD8B7803C6E7A4907B7CA517538115CA1A660';
 const packagePlatform = process.env.SUSURA_PACKAGE_PLATFORM ?? process.platform;
@@ -48,7 +49,7 @@ const macConfig = {
   entitlements: 'electron/SusuraRelease.entitlements',
   entitlementsInherit: 'electron/SusuraReleaseInherit.entitlements',
   extendInfo: {
-    ...(isDevBuild ? {} : { LSUIElement: true }),
+    ...((!isDevBuild || isPrivateDevBuild) ? { LSUIElement: true } : {}),
     NSAudioCaptureUsageDescription: `${appDisplayName} needs access to system audio so it can transcribe audio playing on this Mac.`,
     NSMicrophoneUsageDescription: `${appDisplayName} needs microphone access when microphone listening is enabled.`,
     NSScreenCaptureUsageDescription: `${appDisplayName} needs screen and system audio recording access to capture call audio from this Mac.`
@@ -96,7 +97,11 @@ module.exports = {
   afterPack: './scripts/after-pack.cjs',
   appId,
   productName: appDisplayName,
-  ...(isDevBuild ? {
+  ...(isPrivateDevBuild ? {
+    extraMetadata: {
+      name: 'susura-dev-private'
+    }
+  } : isDevBuild ? {
     extraMetadata: {
       name: 'susura-dev'
     }
@@ -106,7 +111,7 @@ module.exports = {
     }
   } : {}),
   directories: {
-    output: isDevBuild ? 'release-dev' : 'release'
+    output: isPrivateDevBuild ? 'release-dev-private' : isDevBuild ? 'release-dev' : 'release'
   },
   files: [
     'dist/**/*',

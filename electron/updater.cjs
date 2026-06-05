@@ -78,7 +78,7 @@ function createUpdaterService({
       return false;
     }
 
-    return forceEnabled || (app.isPackaged && !isDev && appChannel !== 'dev');
+    return forceEnabled || (app.isPackaged && !isDev && !isLocalDevChannel(appChannel));
   }
 
   function getFrequencyPath() {
@@ -384,6 +384,10 @@ function createUpdaterService({
   };
 }
 
+function isLocalDevChannel(channel) {
+  return channel === 'dev' || channel === 'dev-private';
+}
+
 function normaliseUpdateFrequency(value) {
   return updateFrequencies.includes(value) ? value : 'weekly';
 }
@@ -599,6 +603,7 @@ module.exports = {
   createUpdaterService,
   findTargetRelease,
   isUpdateSmokeDisabled,
+  isLocalDevChannel,
   normaliseUpdateFrequency,
   selectUpdateAsset,
   shouldCheckForUpdates,

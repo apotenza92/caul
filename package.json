@@ -1,6 +1,6 @@
 {
   "name": "susura",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "private": true,
   "description": "A private AI overlay for live calls and screen work.",
   "main": "electron/main.cjs",
@@ -29,7 +29,9 @@
     "dist:mac": "npm run package:prepare && electron-builder --config electron-builder.config.cjs --mac --publish=never",
     "dist:mac:arm": "npm run package:prepare && electron-builder --config electron-builder.config.cjs --mac --arm64 --publish=never",
     "dist:mac:dev": "cross-env FORCE_DEV_BUILD=true npm run package:prepare && cross-env FORCE_DEV_BUILD=true electron-builder --config electron-builder.config.cjs --mac dir --arm64 --publish=never",
+    "dist:mac:dev:private": "cross-env FORCE_DEV_BUILD=true FORCE_DEV_PRIVATE_BUILD=true npm run package:prepare && cross-env FORCE_DEV_BUILD=true FORCE_DEV_PRIVATE_BUILD=true electron-builder --config electron-builder.config.cjs --mac dir --arm64 --publish=never",
     "launch:mac:dev": "node scripts/launch-mac-dev-app.mjs",
+    "launch:mac:dev:private": "node scripts/launch-mac-dev-app.mjs --private",
     "dist:win": "npm run dist:win:arm64",
     "dist:win:arm64": "npm run package:prepare:win && node scripts/clean-package-output.mjs win arm64 && node scripts/prepare-windows-7za.mjs && cross-env USE_SYSTEM_7ZA=true SUSURA_PACKAGE_PLATFORM=win SUSURA_PACKAGE_ARCH=arm64 electron-builder --config electron-builder.config.cjs --win nsis --arm64 --publish=never",
     "dist:win:x64": "npm run package:prepare:win && node scripts/clean-package-output.mjs win x64 && cross-env SUSURA_PACKAGE_PLATFORM=win SUSURA_PACKAGE_ARCH=x64 electron-builder --config electron-builder.config.cjs --win nsis --x64 --publish=never",

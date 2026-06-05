@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
@@ -26,6 +26,8 @@ describe('App', () => {
   it('shows only the minimal listening form', async () => {
     render(<App />);
 
+    expect(await screen.findByText('Susura')).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe('Susura'));
     expect(screen.queryByRole('button', { name: 'Auto' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Manual' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Susura Settings' })).toBeInTheDocument();
@@ -50,6 +52,20 @@ describe('App', () => {
     expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
     expect(screen.queryByRole('separator', { name: 'Resize transcript and AI response panes' })).not.toBeInTheDocument();
     expect(screen.getByTestId('home-panels')).toHaveAttribute('data-panel-flow', 'side-by-side');
+  });
+
+  it('shows the running app flavour in the open window title', async () => {
+    installTestBridge({
+      runtimeContext: testRuntimeContext({
+        appChannel: 'dev',
+        appName: 'Susura Dev'
+      })
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText('Susura Dev')).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe('Susura Dev'));
   });
 
   it('opens settings as a modal page and closes it from either control', async () => {
@@ -1270,7 +1286,7 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Grant Microphone & System Audio' })).toBeInTheDocument();
   });
 
-  it('replaces Start Listening with Grant Permissions when a selected source is missing permission', async () => {
+  it('replaces Start Listening with Permissions when a selected source is missing permission', async () => {
     const user = userEvent.setup();
     const bridge = installTestBridge({
       permissions: [
@@ -1291,22 +1307,23 @@ describe('App', () => {
 
     render(<App />);
 
-    const permissionButton = await screen.findByRole('button', { name: 'Grant Permissions' });
+    const permissionButton = await screen.findByRole('button', { name: 'Permissions' });
 
     expect(permissionButton).toBeInTheDocument();
-    expect(permissionButton).toHaveTextContent('Grant Permissions');
+    expect(permissionButton).toHaveTextContent('Permissions');
     expect(permissionButton).toHaveClass('text-destructive');
     expect(screen.queryByRole('button', { name: 'Start Listening' })).not.toBeInTheDocument();
     await user.click(permissionButton);
 
     expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
-    await openSettingsSection(user, 'Permissions');
+    expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: 'Permissions' }))
+      .toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('button', { name: 'Grant Screen & System Audio Recording' })).toBeInTheDocument();
     expect(bridge.requestedPermissions).toEqual([]);
     expect(bridge.starts).toEqual([]);
   });
 
-  it('places Grant Permissions before source indicators and Auto Send in the horizontal home toolbar', async () => {
+  it('places Permissions before source indicators and Auto Send in the horizontal home toolbar', async () => {
     installTestBridge({
       permissions: [
         {
@@ -1338,14 +1355,14 @@ describe('App', () => {
 
     const toolbarQueries = within(transcriptSection as HTMLElement);
     const permissionButton = await waitFor(() => toolbarQueries.getByRole('button', {
-      name: 'Grant Permissions'
+      name: 'Permissions'
     }));
     const speakerButton = await waitFor(() => toolbarQueries.getByRole('button', { name: 'Speaker on' }));
     const autoSendButton = await waitFor(() => {
       return toolbarQueries.getByRole('button', { name: 'Auto Send' });
     });
 
-    expect(permissionButton).toHaveTextContent('Grant Permissions');
+    expect(permissionButton).toHaveTextContent('Permissions');
     expect(
       permissionButton.compareDocumentPosition(speakerButton) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
@@ -1445,7 +1462,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await screen.findByRole('button', { name: 'Grant Permissions' });
+    await screen.findByRole('button', { name: 'Permissions' });
 
     expect(bridge.requestedPermissions).toEqual([]);
     expect(window.localStorage.getItem('susura.initial-permission-requested')).toBeNull();
@@ -1831,7 +1848,7 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findByRole('button', { name: 'Prompt template' })).toHaveTextContent('CV, PD');
+    expect(await screen.findByRole('button', { name: 'Prompt template' })).toHaveTextContent('CV + PD');
     expect(screen.queryByText('Use my CV')).not.toBeInTheDocument();
     expect(screen.queryByText('Job description')).not.toBeInTheDocument();
 
@@ -2637,7 +2654,7 @@ describe('App', () => {
 
     expect(screen.getByRole('group', { name: 'Updates' })).toBeInTheDocument();
     expect(screen.getByLabelText('Automatic checks')).toHaveTextContent('Weekly');
-    expect(screen.getByText('Updates: Susura Beta 0.1.8 (beta).')).toBeInTheDocument();
+    expect(screen.getByText('Running app: Susura Beta 0.1.8. Update channel: Beta.')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Check for Updates' }));
 
@@ -2647,6 +2664,48 @@ describe('App', () => {
     await selectSetting(user, 'Automatic checks', 'Daily');
 
     expect(bridge.updateFrequencyChanges).toEqual(['daily']);
+  });
+
+  it('shows stable and dev app identity in update settings', async () => {
+    const user = userEvent.setup();
+
+    installTestBridge();
+    render(<App />);
+    await openSettings(user);
+    expect(await screen.findByText('Running app: Susura Beta 0.1.8. Update channel: Beta.')).toBeInTheDocument();
+    cleanup();
+
+    installTestBridge({
+      updateStatus: testUpdateStatus({
+        appChannel: 'stable',
+        appName: 'Susura'
+      })
+    });
+    render(<App />);
+    await openSettings(user);
+    expect(await screen.findByText('Running app: Susura 0.1.8. Update channel: Stable.')).toBeInTheDocument();
+    cleanup();
+
+    installTestBridge({
+      updateStatus: testUpdateStatus({
+        appChannel: 'dev',
+        appName: 'Susura Dev'
+      })
+    });
+    render(<App />);
+    await openSettings(user);
+    expect(await screen.findByText('Running app: Susura Dev 0.1.8. Update channel: Dev.')).toBeInTheDocument();
+    cleanup();
+
+    installTestBridge({
+      updateStatus: testUpdateStatus({
+        appChannel: 'dev-private',
+        appName: 'Susura Dev-Private'
+      })
+    });
+    render(<App />);
+    await openSettings(user);
+    expect(await screen.findByText('Running app: Susura Dev-Private 0.1.8. Update channel: Dev-Private.')).toBeInTheDocument();
   });
 
   it('shows update download progress outside the update action row', async () => {
@@ -3583,7 +3642,7 @@ async function openSettings(user: ReturnType<typeof userEvent.setup>) {
 }
 
 async function openSettingsSection(user: ReturnType<typeof userEvent.setup>, section: 'AI' | 'General' | 'Models' | 'Permissions') {
-  await user.click(screen.getByRole('button', { name: section }));
+  await user.click(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: section }));
 }
 
 async function openHome(user: ReturnType<typeof userEvent.setup>) {

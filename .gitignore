@@ -3,6 +3,7 @@ dist/
 dist-electron/
 release/
 release-dev/
+release-dev-private/
 .vite/
 .DS_Store
 *.af~lock~

@@ -14,7 +14,9 @@ afterEach(() => {
 function runLauncher(args = []) {
   const root = mkdtempSync(join(tmpdir(), 'susura-launcher-test-'));
   const home = join(root, 'home');
-  const appPath = join(root, 'release-dev', 'mac-arm64', 'Susura Dev.app');
+  const privateBuild = args.includes('--private');
+  const appName = privateBuild ? 'Susura Dev-Private' : 'Susura Dev';
+  const appPath = join(root, privateBuild ? 'release-dev-private' : 'release-dev', 'mac-arm64', `${appName}.app`);
   const bin = join(root, 'bin');
 
   mkdirSync(join(appPath, 'Contents'), { recursive: true });
@@ -77,6 +79,15 @@ describe('launch-mac-dev-app', () => {
     expect(log).not.toContain('tccutil reset');
   });
 
+  it('launches the private packaged dev app from its separate output', () => {
+    const { log, result } = runLauncher(['--private']);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(log).toContain('open -n ');
+    expect(log).toContain('release-dev-private/mac-arm64/Susura Dev-Private.app');
+    expect(log).not.toContain('release-dev/mac-arm64/Susura Dev.app');
+  });
+
   it('resets only the Susura Dev bundle permissions when requested', () => {
     const { log, result } = runLauncher(['--reset-permissions']);
 
@@ -93,5 +104,16 @@ describe('launch-mac-dev-app', () => {
     expect(log).toContain('killall tccd');
     expect(log).not.toContain('tccutil reset ScreenCapture\n');
     expect(log).not.toContain('tccutil reset AudioCapture\n');
+  });
+
+  it('resets only the private dev bundle permissions when requested', () => {
+    const { log, result } = runLauncher(['--private', '--reset-permissions']);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(log).toContain('tccutil reset Microphone dev.susura.app.dev-private');
+    expect(log).toContain('tccutil reset ScreenCapture dev.susura.app.dev-private');
+    expect(log).toContain('tccutil reset AudioCapture dev.susura.app.dev-private');
+    expect(log).toContain('release-dev-private/mac-arm64/Susura Dev-Private.app/Contents/MacOS/Susura Dev-Private');
+    expect(log).not.toContain('tccutil reset Microphone dev.susura.app.dev\n');
   });
 });

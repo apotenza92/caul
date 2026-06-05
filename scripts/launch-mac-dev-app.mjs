@@ -3,9 +3,11 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const appPath = join(process.cwd(), 'release-dev', 'mac-arm64', 'Susura Dev.app');
-const appExecutablePath = join(appPath, 'Contents', 'MacOS', 'Susura Dev');
-const bundleIds = ['dev.susura.app.dev'];
+const privateBuild = process.argv.includes('--private');
+const appName = privateBuild ? 'Susura Dev-Private' : 'Susura Dev';
+const appPath = join(process.cwd(), privateBuild ? 'release-dev-private' : 'release-dev', 'mac-arm64', `${appName}.app`);
+const appExecutablePath = join(appPath, 'Contents', 'MacOS', appName);
+const bundleIds = [privateBuild ? 'dev.susura.app.dev-private' : 'dev.susura.app.dev'];
 const captureServices = ['ScreenCapture', 'AudioCapture'];
 const launchServicesRegister = '/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister';
 const userDataDir = join(homedir(), 'Library', 'Application Support', 'susura-dev');
@@ -66,12 +68,16 @@ function run(command, args, options = {}) {
 
 if (!existsSync(appPath)) {
   console.error(`Missing ${appPath}`);
-  console.error('Run `npm run dist:mac:dev` first.');
+  console.error(`Run \`npm run ${privateBuild ? 'dist:mac:dev:private' : 'dist:mac:dev'}\` first.`);
   process.exit(1);
 }
 
-run('pkill', ['-x', 'Susura Dev'], { allowFailure: true });
-run('pkill', ['-f', '/Susura Dev.app/Contents/'], { allowFailure: true });
+for (const processName of ['Susura Dev', 'Susura Dev-Private']) {
+  run('pkill', ['-x', processName], { allowFailure: true });
+}
+for (const appBundleName of ['Susura Dev.app', 'Susura Dev-Private.app']) {
+  run('pkill', ['-f', `/${appBundleName}/Contents/`], { allowFailure: true });
+}
 
 if (fresh) {
   const temporaryModelsDir = join(homedir(), 'Library', 'Application Support', `susura-dev-models-${Date.now()}`);

@@ -389,6 +389,7 @@ export function App() {
   const surface = getSusuraSurface();
   const runtimeContext = useRuntimeContext();
   const isMac = runtimeContext?.isMac ?? isNavigatorMac();
+  const appWindowTitle = runtimeContext?.appName ?? 'Susura';
 
   useLayoutEffect(() => {
     document.documentElement.dataset.susuraSurface = surface;
@@ -397,6 +398,10 @@ export function App() {
       delete document.documentElement.dataset.susuraSurface;
     };
   }, [surface]);
+
+  useEffect(() => {
+    document.title = appWindowTitle;
+  }, [appWindowTitle]);
 
   if (surface === 'handle') {
     return <PrivateOverlayHandleSurface />;
@@ -408,6 +413,7 @@ export function App() {
 
   const transcription = useLiveTranscription();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('general');
   const [listenToMicrophone, setListenToMicrophone] = useState(defaultListenToMicrophone);
   const [listenToSystemAudio, setListenToSystemAudio] = useState(defaultListenToSystemAudio);
   const [sendToAiWhenListeningStops, setSendToAiWhenListeningStops] = useState(defaultSendToAiWhenListeningStops);
@@ -787,14 +793,23 @@ export function App() {
     return nextStatus;
   }
 
+  function openSettings(section: SettingsSection = 'general') {
+    setSettingsSection(section);
+    setIsSettingsOpen(true);
+  }
+
   return (
     <div className={layout.overlayWindowOuter}>
       <main className={layout.main}>
         <TooltipProvider>
         <PrivateOverlayWindowTitleBar
+          appTitle={appWindowTitle}
           isMac={isMac}
           isSettingsOpen={isSettingsOpen}
-          onToggleSettings={() => setIsSettingsOpen((isOpen) => !isOpen)}
+          onToggleSettings={() => {
+            setSettingsSection('general');
+            setIsSettingsOpen((isOpen) => !isOpen);
+          }}
         />
         <div
           className={layout.appBody}
@@ -825,7 +840,7 @@ export function App() {
               onDownloadTranscript={downloadTranscript}
               onOpenGeneralInstructions={() => setIsGeneralInstructionsDialogOpen(true)}
               onOpenPromptTemplateSettings={() => setIsPromptTemplateDialogOpen(true)}
-              onOpenPermissionSettings={() => setIsSettingsOpen(true)}
+              onOpenPermissionSettings={() => openSettings('permissions')}
               onSelectPromptTemplates={(ids) => void selectPromptTemplates(ids)}
               onSetListenToMicrophone={setListenToMicrophone}
               onSetListenToSystemAudio={setListenToSystemAudio}
@@ -841,6 +856,7 @@ export function App() {
               <SettingsPage
                 isBusy={isBusy}
                 isListening={isListening}
+                initialSection={settingsSection}
                 llmModel={llmModel}
                 llmReasoning={llmReasoning}
                 isMac={isMac}
@@ -1874,10 +1890,12 @@ function PrivateOverlayResizeHandles() {
 }
 
 function PrivateOverlayWindowTitleBar({
+  appTitle,
   isMac,
   isSettingsOpen,
   onToggleSettings
 }: {
+  appTitle: string;
   isMac: boolean;
   isSettingsOpen: boolean;
   onToggleSettings: () => void;
@@ -1979,14 +1997,14 @@ function PrivateOverlayWindowTitleBar({
   return (
     <header className={layout.windowTitleBar}>
       <div
-        aria-label="Move Susura window"
+        aria-label={`Move ${appTitle} window`}
         className={layout.windowTitleBarDragArea}
         onPointerCancel={handlePointerEnd}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerEnd}
       >
-        <span className={layout.windowTitleBarTitle}>Susura</span>
+        <span className={layout.windowTitleBarTitle}>{appTitle}</span>
       </div>
       {isMac ? (
         <button
@@ -2884,7 +2902,7 @@ function HomeActionToolbar({
       <div className={isVertical ? layout.sideToolbarRow : undefined}>
         {isBlockedByPermissions ? (
           <TooltipButton
-            aria-label="Grant Permissions"
+            aria-label="Permissions"
             className={isVertical ? layout.sideToolbarButton : `${layout.grantPermissionsButton} ${layout.compactToolbarButton}`}
             onClick={onOpenPermissionSettings}
             size="lg"
@@ -2894,7 +2912,7 @@ function HomeActionToolbar({
             variant="destructive"
           >
             <CircleAlertIcon />
-            <span className={isVertical ? layout.sideToolbarButtonLabel : layout.compactToolbarButtonLabel}>Grant Permissions</span>
+            <span className={isVertical ? layout.sideToolbarButtonLabel : layout.compactToolbarButtonLabel}>Permissions</span>
           </TooltipButton>
         ) : (
           <TooltipButton
@@ -4117,7 +4135,7 @@ function PromptTemplateSelector({
     ? 'No template'
     : selectedTemplates.length === 1
       ? selectedTemplates[0].name
-      : selectedTemplates.map((template) => template.name).join(', ');
+      : selectedTemplates.map((template) => template.name).join(' + ');
   const selectedTemplateTooltip = selectedTemplates.length === 0
     ? 'Selected prompt templates:\nNo template'
     : `Selected prompt templates:\n${selectedTemplates.map((template) => template.name).join('\n')}`;
@@ -4509,16 +4527,28 @@ function getPromptTemplateDisplayName(template: PromptTemplate) {
 
 function formatUpdateVersionLine(status: UpdateStatus | null) {
   if (!status) {
-    return 'Updates: Loading update status.';
+    return 'Running app: Loading update status.';
   }
 
-  const channel = status.appChannel === 'beta'
-    ? 'beta'
-    : status.appChannel === 'dev'
-    ? 'dev'
-    : 'stable';
+  const channel = formatAppChannelLabel(status.appChannel);
 
-  return `Updates: ${status.appName} ${status.appVersion} (${channel}).`;
+  return `Running app: ${status.appName} ${status.appVersion}. Update channel: ${channel}.`;
+}
+
+function formatAppChannelLabel(channel: string) {
+  if (channel === 'beta') {
+    return 'Beta';
+  }
+
+  if (channel === 'dev') {
+    return 'Dev';
+  }
+
+  if (channel === 'dev-private') {
+    return 'Dev-Private';
+  }
+
+  return 'Stable';
 }
 
 function formatUpdateStatusLine(status: UpdateStatus | null) {
@@ -5097,6 +5127,7 @@ function parseTranscriptStartedAt(transcript: string) {
 
 function SettingsPage({
   autoCollapse,
+  initialSection,
   isMac,
   isBusy,
   isListening,
@@ -5114,6 +5145,7 @@ function SettingsPage({
   setLlmReasoning
 }: {
   autoCollapse: boolean;
+  initialSection: SettingsSection;
   isMac: boolean;
   isBusy: boolean;
   isListening: boolean;
@@ -5131,7 +5163,7 @@ function SettingsPage({
   setLlmReasoning: (reasoning: LlmReasoning) => void;
 }) {
   const [isResetDialogOpen, setIsResetDialogOpen] = useState(false);
-  const [activeSection, setActiveSection] = useState<SettingsSection>('general');
+  const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection);
   const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatus | null>(null);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [selectedTranscriptionModelId, setSelectedTranscriptionModelId] = useState<LocalTranscriptionModelId>('parakeet');
@@ -5152,6 +5184,10 @@ function SettingsPage({
     { value: 'daily', label: 'Daily' },
     { value: 'weekly', label: 'Weekly' }
   ];
+
+  useEffect(() => {
+    setActiveSection(initialSection);
+  }, [initialSection]);
 
   useEffect(() => {
     void refreshOnboardingStatus();

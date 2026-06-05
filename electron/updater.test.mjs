@@ -6,6 +6,7 @@ const {
   compareVersions,
   findTargetRelease,
   isUpdateSmokeDisabled,
+  isLocalDevChannel,
   normaliseUpdateFrequency,
   selectUpdateAsset,
   shouldCheckForUpdates
@@ -22,6 +23,13 @@ describe('updater helpers', () => {
     expect(isUpdateSmokeDisabled({ SUSURA_DISABLE_UPDATE_CHECKS: '1' })).toBe(true);
     expect(isUpdateSmokeDisabled({ SUSURA_DISABLE_UPDATE_CHECKS: '0' })).toBe(false);
     expect(isUpdateSmokeDisabled({})).toBe(false);
+  });
+
+  it('treats standard and private dev channels as local builds', () => {
+    expect(isLocalDevChannel('dev')).toBe(true);
+    expect(isLocalDevChannel('dev-private')).toBe(true);
+    expect(isLocalDevChannel('beta')).toBe(false);
+    expect(isLocalDevChannel('stable')).toBe(false);
   });
 
   it('decides scheduled checks from persisted frequency and last check time', () => {

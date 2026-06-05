@@ -240,7 +240,8 @@ async function getPrivateWindowProtectionSummary() {
   const captureProbe = await getPrivateWindowCaptureProbeSummary();
   const windows = [
     ['overlay', privateOverlayWindow],
-    ['handle', privateOverlayHandleWindow]
+    ['handle', privateOverlayHandleWindow],
+    ...(shouldProtectAllAppWindows() ? [['onboarding', onboardingWindow]] : [])
   ].map(([name, window]) => {
     const exists = Boolean(window && !window.isDestroyed());
     const contentProtected = exists && typeof window.isContentProtected === 'function'
@@ -632,6 +633,10 @@ function getProjectRoot() {
 function getAppDisplayName() {
   const name = String(app.getName() || '').toLowerCase();
 
+  if (name.includes('dev-private')) {
+    return 'Susura Dev-Private';
+  }
+
   if (name.includes('dev')) {
     return 'Susura Dev';
   }
@@ -645,6 +650,10 @@ function getAppDisplayName() {
 
 function getAppChannel() {
   const name = String(app.getName() || '').toLowerCase();
+
+  if (name.includes('dev-private')) {
+    return 'dev-private';
+  }
 
   if (name.includes('dev')) {
     return 'dev';
@@ -4978,6 +4987,23 @@ function refreshPrivateWindowContentProtectionSoon(window) {
   }
 }
 
+function refreshDevPrivateAppWindowProtectionSoon(window) {
+  if (!window || window.isDestroyed() || !shouldProtectAllAppWindows()) {
+    return;
+  }
+
+  window.once('show', () => setPrivateWindowContentProtection(window, true));
+  window.webContents.once('did-finish-load', () => setPrivateWindowContentProtection(window, true));
+
+  for (const delayMs of [50, 250, 1000]) {
+    setTimeout(() => {
+      if (!window.isDestroyed()) {
+        setPrivateWindowContentProtection(window, true);
+      }
+    }, delayMs);
+  }
+}
+
 function applyPrivateWindowWorkspaceBehaviour(window) {
   if (typeof window.setHiddenInMissionControl === 'function') {
     try {
@@ -5008,6 +5034,10 @@ function shouldProtectPrivateWindowContent() {
   }
 
   return !isDev && getAppChannel() !== 'dev';
+}
+
+function shouldProtectAllAppWindows() {
+  return !isDev && getAppChannel() === 'dev-private';
 }
 
 function shouldUseOpaquePrivateWindowsForProtection() {
@@ -5102,6 +5132,12 @@ function createOnboardingWindow() {
       sandbox: false
     }
   });
+
+  if (shouldProtectAllAppWindows()) {
+    onboardingWindow.setSkipTaskbar(true);
+    setPrivateWindowContentProtection(onboardingWindow, true);
+    refreshDevPrivateAppWindowProtectionSoon(onboardingWindow);
+  }
 
   loadRendererSurface(onboardingWindow, 'onboarding');
   runPackagedLaunchSmokeIfRequested(onboardingWindow, 'onboarding');

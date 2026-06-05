@@ -43,3 +43,5 @@ Release validation uses Parallels VM E2E gates for macOS, Windows and Ubuntu Lin
 Use `npm run dev` for normal implementation work. It runs a source Electron/Vite loop and should stay screenshot-friendly, Dock-visible and non-private so UI issues can be inspected and marked up quickly.
 
 Use `npm run dist:mac:dev` plus `npm run launch:mac:dev` only for packaged-identity checks such as macOS permissions, onboarding freshness, signing, bundle identity, icon/release layout, packaged resources and packaged `userData` behaviour.
+
+Use `npm run dist:mac:dev:private` plus `npm run launch:mac:dev:private` when the packaged app itself needs to match the released Dockless privacy shape before pushing a release. This writes `Susura Dev-Private.app` to `release-dev-private/`, leaves the normal packaged dev output alone, and uses the separate `dev.susura.app.dev-private` identity so LaunchServices, Dock state and local TCC checks do not collide with the inspectable `Susura Dev.app`. The `Dev-Private` runtime is stricter than normal development: it is Dockless and applies screenshot protection to all app windows so local screenshots can verify privacy behaviour.

@@ -7,11 +7,13 @@ const configPath = require.resolve('../electron-builder.config.cjs');
 function loadConfig(env = {}) {
   const originalEnv = {
     FORCE_BETA_BUILD: process.env.FORCE_BETA_BUILD,
-    FORCE_DEV_BUILD: process.env.FORCE_DEV_BUILD
+    FORCE_DEV_BUILD: process.env.FORCE_DEV_BUILD,
+    FORCE_DEV_PRIVATE_BUILD: process.env.FORCE_DEV_PRIVATE_BUILD
   };
 
   delete process.env.FORCE_BETA_BUILD;
   delete process.env.FORCE_DEV_BUILD;
+  delete process.env.FORCE_DEV_PRIVATE_BUILD;
   Object.assign(process.env, env);
   delete require.cache[configPath];
 
@@ -49,5 +51,20 @@ describe('electron-builder macOS config', () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
 
     expect(loadConfig({ FORCE_DEV_BUILD: 'true' }).mac.extendInfo.LSUIElement).toBeUndefined();
+    expect(loadConfig({ FORCE_DEV_BUILD: 'true' }).directories.output).toBe('release-dev');
+  });
+
+  it('can build a Dockless private packaged dev macOS app separately', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const config = loadConfig({
+      FORCE_DEV_BUILD: 'true',
+      FORCE_DEV_PRIVATE_BUILD: 'true'
+    });
+
+    expect(config.mac.extendInfo.LSUIElement).toBe(true);
+    expect(config.directories.output).toBe('release-dev-private');
+    expect(config.appId).toBe('dev.susura.app.dev-private');
+    expect(config.productName).toBe('Susura Dev-Private');
   });
 });
