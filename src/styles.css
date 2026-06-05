@@ -269,6 +269,17 @@ textarea,
     opacity: 1;
   }
 
+  .susura-mac-quit-button svg {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease;
+  }
+
+  .susura-mac-quit-button:hover svg,
+  .susura-mac-quit-button:focus-visible svg {
+    opacity: 1;
+  }
+
   .susura-handle-button {
     --handle-surface: oklch(1 0 0 / 100%);
     --handle-surface-closed: oklch(1 0 0 / 42%);

@@ -38,7 +38,7 @@ import {
   TooltipTrigger
 } from '@/components/ui/tooltip';
 import { Textarea } from '@/components/ui/textarea';
-import { ArrowUpIcon, CheckCircle2Icon, ChevronDownIcon, ChevronRightIcon, CircleAlertIcon, CopyIcon, DownloadIcon, FastForwardIcon, FileIcon, FileInputIcon, FileTextIcon, ImageIcon, InfoIcon, ListChecksIcon, LoaderCircleIcon, LogOutIcon, MicIcon, MicOffIcon, PaperclipIcon, PencilIcon, PlayIcon, SearchIcon, SendIcon, SettingsIcon, SquareIcon, Trash2Icon, Volume2Icon, VolumeXIcon, XCircleIcon, XIcon } from 'lucide-react';
+import { ArrowUpIcon, CheckCircle2Icon, ChevronDownIcon, ChevronRightIcon, CircleAlertIcon, CopyIcon, DownloadIcon, FastForwardIcon, FileIcon, FileInputIcon, FileTextIcon, ImageIcon, InfoIcon, ListChecksIcon, LoaderCircleIcon, LogOutIcon, MicIcon, MicOffIcon, PaperclipIcon, PencilIcon, PlayIcon, PowerIcon, SearchIcon, SendIcon, SettingsIcon, SquareIcon, Trash2Icon, Volume2Icon, VolumeXIcon, XCircleIcon, XIcon } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import susuraAppIconUrl from '../assets/icons/icon-rounded.png?url';
 import susuraBetaAppIconUrl from '../assets/icons/beta/icon-rounded.png?url';
@@ -85,11 +85,13 @@ const layout = {
   windowTitleBar: 'relative z-[60] flex h-8 select-none items-center justify-center border-b border-border/70 bg-background/95 text-muted-foreground',
   windowTitleBarDragArea: 'absolute inset-0 flex min-w-0 cursor-default items-center justify-center px-12 active:cursor-default',
   windowTitleBarTitle: 'truncate text-sm font-medium text-foreground',
-  windowTitleBarButton: 'absolute right-1 top-1/2 z-10 size-7 -translate-y-1/2 cursor-default text-muted-foreground hover:text-foreground',
+  windowTitleBarButton: 'absolute right-9 top-1/2 z-10 size-7 -translate-y-1/2 cursor-default text-muted-foreground hover:text-foreground',
+  windowTitleBarQuitButton: 'absolute right-1 top-1/2 z-10 size-7 -translate-y-1/2 cursor-default text-muted-foreground hover:text-foreground',
   windowTitleBarSettingsButton: 'absolute top-1/2 z-[70] flex size-7 -translate-y-1/2 items-center justify-center rounded-md bg-transparent p-0 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
   windowTitleBarSettingsButtonMac: 'right-1.5',
   windowTitleBarSettingsButtonDesktop: 'left-1.5',
   windowTitleBarMacCloseButton: 'susura-mac-close-button absolute left-3 top-1/2 z-10 size-[14px] -translate-y-1/2 cursor-default rounded-full border-[0.5px] border-[#FB1626] bg-[#FF5C60] p-0 shadow-none hover:bg-[#FF5C60] active:bg-[#D94D4F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF5C60]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+  windowTitleBarMacQuitButton: 'susura-mac-quit-button absolute left-8 top-1/2 z-10 flex size-[14px] -translate-y-1/2 cursor-default items-center justify-center rounded-full border-[0.5px] border-[#9B48D6] bg-[#BF5AF2] p-0 text-[#4F167D] shadow-none hover:bg-[#BF5AF2] active:bg-[#9B48D6] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#BF5AF2]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background [&_svg]:size-2.5 [&_svg]:stroke-[3]',
   page: 'h-full min-h-0 overflow-hidden',
   form: 'h-full w-full',
   contentTopToolbar: 'grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto]',
@@ -1353,6 +1355,18 @@ function TranscriptionModelRow({
   const recommendedTooltip = getRecommendedTranscriptionModelTooltip(status);
   const selectedModelLabel = getLocalTranscriptionModelLabel(selectedModelId);
   const downloadProgress = getLocalModelDownloadProgressLabel(status?.parakeet.progress);
+  const renderRecommendedBadge = () => (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="shrink-0 rounded-full border border-amber-500/35 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 shadow-sm dark:border-amber-400/35 dark:bg-amber-400/10 dark:text-amber-300">
+          Recommended
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>
+        {recommendedTooltip}
+      </TooltipContent>
+    </Tooltip>
+  );
 
   return (
     <div className="grid min-h-10 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
@@ -1362,31 +1376,25 @@ function TranscriptionModelRow({
           value={selectedModelId}
           onValueChange={(value) => onSelectModel(value as LocalTranscriptionModelId)}
         >
-          <SelectTrigger aria-label="Transcription model" className="w-[9.5rem] min-w-0" title={selectedModelLabel}>
-            <SelectValue />
+          <SelectTrigger aria-label="Transcription model" className="w-[14rem] min-w-0" title={selectedModelLabel}>
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="truncate">{selectedModelLabel}</span>
+              {showRecommendedBadge ? renderRecommendedBadge() : null}
+            </span>
           </SelectTrigger>
-          <SelectContent className="min-w-56">
+          <SelectContent className="min-w-72">
             <SelectGroup>
               {localTranscriptionModelOptions.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
-                  {option.label}
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate">{option.label}</span>
+                    {option.value === recommendedModelId ? renderRecommendedBadge() : null}
+                  </span>
                 </SelectItem>
               ))}
             </SelectGroup>
           </SelectContent>
         </Select>
-        {showRecommendedBadge ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="shrink-0 rounded-full border border-amber-500/35 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 shadow-sm dark:border-amber-400/35 dark:bg-amber-400/10 dark:text-amber-300">
-                Recommended
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>
-              {recommendedTooltip}
-            </TooltipContent>
-          </Tooltip>
-        ) : null}
       </div>
       <div className="flex min-w-0 items-center justify-end gap-2">
         {isDownloading ? (
@@ -1900,6 +1908,7 @@ function PrivateOverlayWindowTitleBar({
   isSettingsOpen: boolean;
   onToggleSettings: () => void;
 }) {
+  const [isQuitConfirmationOpen, setIsQuitConfirmationOpen] = useState(false);
   const dragStateRef = useRef<{
     didStartDrag: boolean;
     isDragging: boolean;
@@ -1994,56 +2003,121 @@ function PrivateOverlayWindowTitleBar({
     });
   }
 
-  return (
-    <header className={layout.windowTitleBar}>
-      <div
-        aria-label={`Move ${appTitle} window`}
-        className={layout.windowTitleBarDragArea}
-        onPointerCancel={handlePointerEnd}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerEnd}
-      >
-        <span className={layout.windowTitleBarTitle}>{appTitle}</span>
+  function confirmQuit() {
+    setIsQuitConfirmationOpen(false);
+    void getSettingsBridge()?.quit?.();
+  }
+
+  const quitConfirmationContent = (
+    <PopoverContent
+      align={isMac ? 'start' : 'end'}
+      className="w-56 gap-3"
+      side="bottom"
+      sideOffset={8}
+    >
+      <div className="space-y-1">
+        <h2 className="text-sm font-medium text-foreground">Quit Susura?</h2>
+        <p className="text-xs text-muted-foreground">
+          This will stop Susura and close the app completely.
+        </p>
       </div>
-      {isMac ? (
-        <button
-          aria-label="Hide Susura app"
-          className={layout.windowTitleBarMacCloseButton}
-          data-platform="macos"
-          onClick={() => void getPrivateOverlayBridge()?.hide()}
-          title="Hide Susura app"
-          type="button"
-        />
-      ) : (
-        <Button
-          aria-label="Hide Susura app"
-          className={layout.windowTitleBarButton}
-          data-platform="desktop"
-          onClick={() => void getPrivateOverlayBridge()?.hide()}
-          size="icon"
-          title="Hide Susura app"
-          type="button"
-          variant="ghost"
-        >
-          <XIcon />
+      <div className="flex justify-end gap-2">
+        <Button onClick={() => setIsQuitConfirmationOpen(false)} size="sm" type="button" variant="outline">
+          Cancel
         </Button>
-      )}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            aria-label="Susura Settings"
-            aria-pressed={isSettingsOpen}
-            className={`${layout.windowTitleBarSettingsButton} ${isMac ? layout.windowTitleBarSettingsButtonMac : layout.windowTitleBarSettingsButtonDesktop} ${isSettingsOpen ? 'bg-muted text-foreground' : ''}`}
-            onClick={onToggleSettings}
-            type="button"
-          >
-            <SettingsIcon className="mx-auto size-4" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">Open Susura settings</TooltipContent>
-      </Tooltip>
-    </header>
+        <Button onClick={confirmQuit} size="sm" type="button" variant="destructive">
+          Quit Susura
+        </Button>
+      </div>
+    </PopoverContent>
+  );
+
+  return (
+    <>
+      <header className={layout.windowTitleBar}>
+        <div
+          aria-label={`Move ${appTitle} window`}
+          className={layout.windowTitleBarDragArea}
+          onPointerCancel={handlePointerEnd}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerEnd}
+        >
+          <span className={layout.windowTitleBarTitle}>{appTitle}</span>
+        </div>
+        {isMac ? (
+          <>
+            <button
+              aria-label="Hide Susura app"
+              className={layout.windowTitleBarMacCloseButton}
+              data-platform="macos"
+              onClick={() => void getPrivateOverlayBridge()?.hide()}
+              title="Hide Susura app"
+              type="button"
+            />
+            <Popover open={isQuitConfirmationOpen} onOpenChange={setIsQuitConfirmationOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  aria-label="Quit Susura"
+                  className={layout.windowTitleBarMacQuitButton}
+                  data-platform="macos"
+                  title="Quit Susura completely"
+                  type="button"
+                >
+                  <PowerIcon />
+                </button>
+              </PopoverTrigger>
+              {quitConfirmationContent}
+            </Popover>
+          </>
+        ) : (
+          <>
+            <Button
+              aria-label="Hide Susura app"
+              className={layout.windowTitleBarButton}
+              data-platform="desktop"
+              onClick={() => void getPrivateOverlayBridge()?.hide()}
+              size="icon"
+              title="Hide Susura app"
+              type="button"
+              variant="ghost"
+            >
+              <XIcon />
+            </Button>
+            <Popover open={isQuitConfirmationOpen} onOpenChange={setIsQuitConfirmationOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  aria-label="Quit Susura"
+                  className={layout.windowTitleBarQuitButton}
+                  data-platform="desktop"
+                  size="icon"
+                  title="Quit Susura completely"
+                  type="button"
+                  variant="ghost"
+                >
+                  <PowerIcon />
+                </Button>
+              </PopoverTrigger>
+              {quitConfirmationContent}
+            </Popover>
+          </>
+        )}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              aria-label="Susura Settings"
+              aria-pressed={isSettingsOpen}
+              className={`${layout.windowTitleBarSettingsButton} ${isMac ? layout.windowTitleBarSettingsButtonMac : layout.windowTitleBarSettingsButtonDesktop} ${isSettingsOpen ? 'bg-muted text-foreground' : ''}`}
+              onClick={onToggleSettings}
+              type="button"
+            >
+              <SettingsIcon className="mx-auto size-4" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Open Susura settings</TooltipContent>
+        </Tooltip>
+      </header>
+    </>
   );
 }
 

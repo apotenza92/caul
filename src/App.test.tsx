@@ -375,11 +375,11 @@ describe('App', () => {
 
     const modelSelect = await screen.findByLabelText('Transcription model');
     expect(modelSelect).toHaveTextContent('Parakeet v3');
-    expect(modelSelect).toHaveClass('w-[9.5rem]', 'min-w-0');
+    expect(modelSelect).toHaveClass('w-[14rem]', 'min-w-0');
     expect(modelSelect).not.toHaveClass('flex-1');
     expect(modelSelect).not.toHaveClass('w-44');
     expect(modelSelect).toHaveAttribute('title', 'Parakeet v3');
-    expect(screen.getByText('Recommended')).toBeInTheDocument();
+    expect(within(modelSelect).getByText('Recommended')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Use' })).toBeInTheDocument();
 
     await waitFor(() => expect(bridge.parakeetDownloads).toBe(1));
@@ -914,6 +914,9 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Hide Susura app' })).not.toHaveClass('hover:bg-red-400');
     expect(screen.getByRole('button', { name: 'Hide Susura app' }).className).not.toContain('shadow-[inset');
     expect(screen.getByRole('button', { name: 'Hide Susura app' }).querySelector('svg')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Quit Susura' })).toHaveAttribute('data-platform', 'macos');
+    expect(screen.getByRole('button', { name: 'Quit Susura' })).toHaveClass('left-8', 'size-[14px]', 'cursor-default', 'rounded-full', 'border-[0.5px]', 'border-[#9B48D6]', 'bg-[#BF5AF2]');
+    expect(screen.getByRole('button', { name: 'Quit Susura' }).querySelector('svg')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Susura Settings' })).toHaveClass('right-1.5');
     expect(screen.getByRole('button', { name: 'Susura Settings' })).not.toHaveClass('left-1.5');
     expect(screen.getByRole('button', { name: 'Susura Settings' })).toHaveClass('size-7', 'bg-transparent');
@@ -934,13 +937,45 @@ describe('App', () => {
       expect(screen.getByRole('button', { name: 'Hide Susura app' })).toHaveAttribute('data-platform', 'desktop');
     });
 
-    expect(screen.getByRole('button', { name: 'Hide Susura app' })).toHaveClass('right-1');
+    expect(screen.getByRole('button', { name: 'Hide Susura app' })).toHaveClass('right-9');
     expect(screen.getByRole('button', { name: 'Hide Susura app' })).toHaveClass('cursor-default');
     expect(screen.getByRole('button', { name: 'Hide Susura app' }).querySelector('svg')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Quit Susura' })).toHaveAttribute('data-platform', 'desktop');
+    expect(screen.getByRole('button', { name: 'Quit Susura' })).toHaveClass('right-1');
+    expect(screen.getByRole('button', { name: 'Quit Susura' }).querySelector('svg')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Susura Settings' })).toHaveClass('left-1.5');
     expect(screen.getByRole('button', { name: 'Susura Settings' })).not.toHaveClass('right-1.5');
     expect(screen.getByRole('button', { name: 'Susura Settings' })).toHaveClass('size-7', 'bg-transparent');
     expect(screen.getByRole('button', { name: 'Susura Settings' })).not.toHaveClass('border-border');
+  });
+
+  it('requires confirmation before quitting from the titlebar', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge({
+      runtimeContext: testRuntimeContext({
+        isMac: false,
+        platform: 'win32'
+      })
+    });
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Quit Susura' }));
+
+    expect(await screen.findByRole('heading', { name: 'Quit Susura?' })).toBeInTheDocument();
+    expect(bridge.quits).toBe(0);
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: 'Quit Susura?' })).not.toBeInTheDocument();
+    });
+    expect(bridge.quits).toBe(0);
+
+    await user.click(screen.getByRole('button', { name: 'Quit Susura' }));
+    await user.click(screen.getAllByRole('button', { name: 'Quit Susura' }).at(-1)!);
+
+    expect(bridge.quits).toBe(1);
   });
 
   it.each([
@@ -3711,6 +3746,7 @@ function installTestBridge(overrides: {
   const requestedPermissions: string[] = [];
   let promptTemplateState = overrides.promptTemplateState ?? testPromptTemplateState();
   let settingsResets = 0;
+  let quits = 0;
   let relaunches = 0;
   const savedPiModels: string[] = [];
   const selectedLocalTranscriptionModels: string[] = [];
@@ -4099,7 +4135,11 @@ function installTestBridge(overrides: {
 
         return { ok: true };
       },
-      quit: async () => ({ ok: true }),
+      quit: async () => {
+        quits += 1;
+
+        return { ok: true };
+      },
       relaunch: async () => {
         relaunches += 1;
 
@@ -4225,6 +4265,9 @@ function installTestBridge(overrides: {
     },
     get settingsResets() {
       return settingsResets;
+    },
+    get quits() {
+      return quits;
     },
     get relaunches() {
       return relaunches;

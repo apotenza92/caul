@@ -5059,7 +5059,7 @@ function createPrivateOverlayWindow() {
     minWidth: minimumOverlayWindowSize.width + (overlayWindowResizeOutset * 2),
     minHeight: minimumOverlayWindowSize.height + (overlayWindowResizeOutset * 2),
     useContentSize: true,
-    show: true,
+    show: false,
     frame: false,
     transparent: !shouldUseOpaquePrivateWindowsForProtection(),
     backgroundColor: shouldUseOpaquePrivateWindowsForProtection() ? '#111111' : '#00000000',
@@ -5083,6 +5083,26 @@ function createPrivateOverlayWindow() {
   persistPrivateOverlayWindowState(privateOverlayWindow);
   loadRendererSurface(privateOverlayWindow, null);
   runPackagedLaunchSmokeIfRequested(privateOverlayWindow, 'private-overlay');
+
+  privateOverlayWindow.on('blur', () => {
+    setTimeout(() => {
+      const window = privateOverlayWindow;
+
+      if (isQuitting || !window || window.isDestroyed() || !window.isVisible() || window.isFocused()) {
+        return;
+      }
+
+      if (
+        onboardingWindow
+        && !onboardingWindow.isDestroyed()
+        && onboardingWindow.isFocused()
+      ) {
+        return;
+      }
+
+      hidePrivateOverlayWindow();
+    }, 0);
+  });
 
   privateOverlayWindow.on('closed', () => {
     if (mainWindow === privateOverlayWindow) {
