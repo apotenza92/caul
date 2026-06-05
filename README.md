@@ -7,8 +7,4 @@
 </a>
 <br><br>
 
-Susura is named from the Latin root for whispering or murmuring: a simple, private way to use AI during live calls. It prioritises fast local transcription models where practical, and for now uses your existing ChatGPT subscription for the AI model.
-
-## Audio Privacy Boundary
-
-Susura hot-prepares selected audio sources at app startup to make Start listening feel immediate. That means microphone or system-audio streams may be opened while the app is idle, depending on the selected sources and macOS permissions. The Rust backend drops all frames while idle and must not emit transcript chunks or send provider requests until the user clicks Start listening. The project is open source so this boundary remains inspectable.
+Named from the Latin root for whispering or murmuring, Susura is fast, private AI for live calls, with local transcription first and your existing ChatGPT subscription for the AI model.

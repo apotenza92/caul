@@ -19,6 +19,7 @@ Susura is a calm, private desktop assistant for live calls and screen work. The 
 
 - Read `docs/README.md` before making architectural changes.
 - Do not claim features exist before they are implemented.
+- Keep the main `README.md` description and `docs/index.html` download page subtitle in sync.
 - Do not add a plugin architecture until the macOS audio workflow is proven.
 - Do not vendor or copy competitor code unless licence compatibility is explicitly checked.
 - Keep sensitive behaviour inspectable, especially audio capture, screen-adjacent context, local storage and provider calls.
