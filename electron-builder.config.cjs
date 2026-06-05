@@ -48,6 +48,7 @@ const macConfig = {
   entitlements: 'electron/SusuraRelease.entitlements',
   entitlementsInherit: 'electron/SusuraReleaseInherit.entitlements',
   extendInfo: {
+    ...(isDevBuild ? {} : { LSUIElement: true }),
     NSAudioCaptureUsageDescription: `${appDisplayName} needs access to system audio so it can transcribe audio playing on this Mac.`,
     NSMicrophoneUsageDescription: `${appDisplayName} needs microphone access when microphone listening is enabled.`,
     NSScreenCaptureUsageDescription: `${appDisplayName} needs screen and system audio recording access to capture call audio from this Mac.`
