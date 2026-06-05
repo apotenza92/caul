@@ -7,14 +7,14 @@ const helperInfoPlistPath = join(
   'native',
   'macos-audio-helper',
   'Sources',
-  'SusuraAudioHelper',
+  'CaulAudioHelper',
   'Info.plist'
 );
 const helperEntitlementsPath = join(
   process.cwd(),
   'native',
   'macos-audio-helper',
-  'SusuraAudioHelper.entitlements'
+  'CaulAudioHelper.entitlements'
 );
 
 describe('macOS audio helper Info.plist', () => {

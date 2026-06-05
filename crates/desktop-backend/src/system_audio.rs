@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::mpsc::Receiver;
 
 use base64::Engine;
-use susura_audio_core::{AudioLevel, AudioSource};
+use caul_audio_core::{AudioLevel, AudioSource};
 
 #[derive(Clone, Debug, PartialEq)]
 #[allow(dead_code)]
@@ -48,7 +48,7 @@ impl RunningSystemAudio {
 #[allow(dead_code)]
 enum PlatformRunningSystemAudio {
     #[cfg(target_os = "macos")]
-    Macos(susura_macos_capture::RunningCapture),
+    Macos(caul_macos_capture::RunningCapture),
     #[cfg(target_os = "windows")]
     Wasapi {
         stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -181,7 +181,7 @@ mod platform {
         transcribe_parakeet: bool,
     ) -> Result<(PlatformRunningSystemAudio, Receiver<SystemAudioUpdate>), Box<dyn std::error::Error>>
     {
-        let (capture, receiver) = susura_macos_capture::RunningCapture::start_system_audio(
+        let (capture, receiver) = caul_macos_capture::RunningCapture::start_system_audio(
             repository_root,
             transcribe_parakeet,
         )?;
@@ -190,21 +190,21 @@ mod platform {
         thread::spawn(move || {
             for update in receiver {
                 let mapped = match update {
-                    susura_macos_capture::CaptureUpdate::Started {
+                    caul_macos_capture::CaptureUpdate::Started {
                         sample_rate_hz,
                         channels,
                     } => SystemAudioUpdate::Started {
                         sample_rate_hz,
                         channels,
                     },
-                    susura_macos_capture::CaptureUpdate::Stopped => SystemAudioUpdate::Stopped,
-                    susura_macos_capture::CaptureUpdate::Stage(message) => {
+                    caul_macos_capture::CaptureUpdate::Stopped => SystemAudioUpdate::Stopped,
+                    caul_macos_capture::CaptureUpdate::Stage(message) => {
                         SystemAudioUpdate::Stage(message)
                     }
-                    susura_macos_capture::CaptureUpdate::SystemLevel(level) => {
+                    caul_macos_capture::CaptureUpdate::SystemLevel(level) => {
                         SystemAudioUpdate::Level(level)
                     }
-                    susura_macos_capture::CaptureUpdate::AudioFrame {
+                    caul_macos_capture::CaptureUpdate::AudioFrame {
                         sample_rate_hz,
                         channels,
                         pcm16_base64,
@@ -213,19 +213,19 @@ mod platform {
                         channels,
                         pcm16_base64,
                     },
-                    susura_macos_capture::CaptureUpdate::TranscriptionCompleted(text) => {
+                    caul_macos_capture::CaptureUpdate::TranscriptionCompleted(text) => {
                         SystemAudioUpdate::TranscriptionCompleted(text)
                     }
-                    susura_macos_capture::CaptureUpdate::TranscriptionPartial(text) => {
+                    caul_macos_capture::CaptureUpdate::TranscriptionPartial(text) => {
                         SystemAudioUpdate::TranscriptionPartial(text)
                     }
-                    susura_macos_capture::CaptureUpdate::SpeechStarted => {
+                    caul_macos_capture::CaptureUpdate::SpeechStarted => {
                         SystemAudioUpdate::SpeechStarted
                     }
-                    susura_macos_capture::CaptureUpdate::SpeechStopped => {
+                    caul_macos_capture::CaptureUpdate::SpeechStopped => {
                         SystemAudioUpdate::SpeechStopped
                     }
-                    susura_macos_capture::CaptureUpdate::Error(message) => {
+                    caul_macos_capture::CaptureUpdate::Error(message) => {
                         SystemAudioUpdate::Error(message)
                     }
                 };

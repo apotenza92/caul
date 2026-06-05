@@ -1,6 +1,6 @@
 # LLM First Chunk Optimisation Plan
 
-Susura should optimise for the time from the user stopping listening to the first useful LLM text appearing in the response box. Slower app startup is acceptable when it reliably reduces this interactive latency.
+Caul should optimise for the time from the user stopping listening to the first useful LLM text appearing in the response box. Slower app startup is acceptable when it reliably reduces this interactive latency.
 
 ## Primary Metric
 
@@ -89,11 +89,11 @@ The most promising next product change is a guarded speculative mode:
 
 ## Guarded Speculative Dispatch
 
-The first guarded implementation is available behind `VITE_SUSURA_SPECULATIVE_LLM=1`. It is off by default.
+The first guarded implementation is available behind `VITE_CAUL_SPECULATIVE_LLM=1`. It is off by default.
 
 Behaviour:
 
-- A speculative request starts only after confirmed transcript text is stable for `VITE_SUSURA_SPECULATIVE_LLM_DELAY_MS`, default `500ms`.
+- A speculative request starts only after confirmed transcript text is stable for `VITE_CAUL_SPECULATIVE_LLM_DELAY_MS`, default `500ms`.
 - Speculative `llm-response-delta` events are keyed by request id and stay hidden while listening.
 - Stop listening reuses and reveals the speculative request only if transcript, model and reasoning still match.
 - If the transcript changed, Stop listening starts a normal visible request.
@@ -236,7 +236,7 @@ Current target gates:
 ## First Implementation Tasks
 
 - Add a dedicated `npm run bench:llm-first-chunk` command.
-- Make the benchmark run multiple Electron renderer smoke samples and parse `susura-renderer-llm-smoke`.
+- Make the benchmark run multiple Electron renderer smoke samples and parse `caul-renderer-llm-smoke`.
 - Add low-level Pi RPC variants for startup and session strategy.
 - Add model and reasoning matrix support through environment variables.
 - Emit a summary sorted by median `stop_to_first_visible_llm_chunk_ms`.

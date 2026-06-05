@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 
-const durationMs = Number(process.env.SUSURA_LOCAL_PARAKEET_HELPER_SMOKE_MS ?? 60_000);
-const helperPath = 'native/macos-audio-helper/.build/debug/SusuraAudioHelper';
+const durationMs = Number(process.env.CAUL_LOCAL_PARAKEET_HELPER_SMOKE_MS ?? 60_000);
+const helperPath = 'native/macos-audio-helper/.build/debug/CaulAudioHelper';
 let lineBuffer = '';
 let captureStarted = false;
 let parakeetStarted = false;
@@ -13,7 +13,7 @@ const stages = [];
 const speech = spawn(process.execPath, ['scripts/browser-speech-audio.mjs'], {
   env: {
     ...process.env,
-    SUSURA_BROWSER_SPEECH_MS: String(Math.max(16_000, durationMs - 8_000))
+    CAUL_BROWSER_SPEECH_MS: String(Math.max(16_000, durationMs - 8_000))
   },
   stdio: 'inherit'
 });
@@ -73,7 +73,7 @@ const summary = {
   errors
 };
 
-console.log(`susura-local-parakeet-helper-smoke ${JSON.stringify(summary)}`);
+console.log(`caul-local-parakeet-helper-smoke ${JSON.stringify(summary)}`);
 
 if (!captureStarted || !parakeetStarted || completedCount < 1 || errors.length > 0 || code !== 0) {
   process.exit(1);

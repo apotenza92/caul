@@ -1,17 +1,17 @@
 import { spawn } from 'node:child_process';
 
-const durationMs = Number(process.env.SUSURA_MUTED_BROWSER_AUDIO_SMOKE_MS ?? 6_000);
-const helperPath = 'native/macos-audio-helper/.build/debug/SusuraAudioHelper';
-const speechDetectionMarginDecibels = Number(process.env.SUSURA_MUTED_SPEECH_MARGIN_DECIBELS ?? 15);
-const speechDetectionFloorDecibels = Number(process.env.SUSURA_MUTED_SPEECH_FLOOR_DECIBELS ?? -35);
+const durationMs = Number(process.env.CAUL_MUTED_BROWSER_AUDIO_SMOKE_MS ?? 6_000);
+const helperPath = 'native/macos-audio-helper/.build/debug/CaulAudioHelper';
+const speechDetectionMarginDecibels = Number(process.env.CAUL_MUTED_SPEECH_MARGIN_DECIBELS ?? 15);
+const speechDetectionFloorDecibels = Number(process.env.CAUL_MUTED_SPEECH_FLOOR_DECIBELS ?? -35);
 
 const baseline = await runCapture();
 const speech = spawn(process.execPath, ['scripts/browser-speech-audio.mjs'], {
   env: {
     ...process.env,
-    SUSURA_BROWSER_SPEECH_MS: String(durationMs + 4_000),
-    SUSURA_BROWSER_SPEECH_MUTED: 'true',
-    SUSURA_BROWSER_SPEECH_TEXT: 'Susura muted browser speech should not enter the system audio capture path.'
+    CAUL_BROWSER_SPEECH_MS: String(durationMs + 4_000),
+    CAUL_BROWSER_SPEECH_MUTED: 'true',
+    CAUL_BROWSER_SPEECH_TEXT: 'Caul muted browser speech should not enter the system audio capture path.'
   },
   stdio: 'inherit'
 });
@@ -32,7 +32,7 @@ const summary = {
   speechDetected
 };
 
-console.log(`susura-muted-browser-system-audio-smoke ${JSON.stringify(summary)}`);
+console.log(`caul-muted-browser-system-audio-smoke ${JSON.stringify(summary)}`);
 
 if (
   !baseline.started ||

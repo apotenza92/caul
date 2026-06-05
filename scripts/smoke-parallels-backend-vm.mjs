@@ -6,15 +6,15 @@ const execFileAsync = promisify(execFile);
 const profiles = {
   linux: {
     defaultName: 'Ubuntu 24.04.3 ARM64',
-    envName: 'SUSURA_LINUX_VM_NAME',
-    repoEnv: 'SUSURA_LINUX_VM_REPO',
-    defaultRepo: '/home/parallels/susura-cross-platform',
-    userEnv: 'SUSURA_LINUX_VM_SSH_USER',
+    envName: 'CAUL_LINUX_VM_NAME',
+    repoEnv: 'CAUL_LINUX_VM_REPO',
+    defaultRepo: '/home/parallels/caul-cross-platform',
+    userEnv: 'CAUL_LINUX_VM_SSH_USER',
     defaultUser: 'parallels',
-    knownHostsEnv: 'SUSURA_LINUX_VM_KNOWN_HOSTS',
-    defaultKnownHosts: '/tmp/susura_known_hosts',
+    knownHostsEnv: 'CAUL_LINUX_VM_KNOWN_HOSTS',
+    defaultKnownHosts: '/tmp/caul_known_hosts',
     command(repo) {
-      return `cd ${shellQuote(repo)} && /home/parallels/.cargo/bin/cargo run -p susura-desktop-backend -- --stream-system-audio --duration 3 --smoke-summary`;
+      return `cd ${shellQuote(repo)} && /home/parallels/.cargo/bin/cargo run -p caul-desktop-backend -- --stream-system-audio --duration 3 --smoke-summary`;
     },
     prerequisiteCommand(repo) {
       return `test -f ${shellQuote(`${repo}/Cargo.toml`)} && test -x /home/parallels/.cargo/bin/cargo`;
@@ -22,12 +22,12 @@ const profiles = {
   },
   win: {
     defaultName: 'Windows 11 ARM',
-    envName: 'SUSURA_WINDOWS_VM_NAME',
-    repoEnv: 'SUSURA_WINDOWS_VM_REPO',
-    defaultRepo: 'C:\\Users\\alex\\susura-cross-platform',
-    cargoEnv: 'SUSURA_WINDOWS_VM_CARGO',
+    envName: 'CAUL_WINDOWS_VM_NAME',
+    repoEnv: 'CAUL_WINDOWS_VM_REPO',
+    defaultRepo: 'C:\\Users\\alex\\caul-cross-platform',
+    cargoEnv: 'CAUL_WINDOWS_VM_CARGO',
     defaultCargo: 'C:\\WINDOWS\\system32\\config\\systemprofile\\.cargo\\bin\\cargo.exe',
-    rustcEnv: 'SUSURA_WINDOWS_VM_RUSTC',
+    rustcEnv: 'CAUL_WINDOWS_VM_RUSTC',
     defaultRustc: 'C:\\WINDOWS\\system32\\config\\systemprofile\\.cargo\\bin\\rustc.exe',
     command(repo) {
       const cargo = process.env[this.cargoEnv] ?? this.defaultCargo;
@@ -36,9 +36,9 @@ const profiles = {
 
       return [
         `cd /d ${cmdQuote(repo)}`,
-        `start "Susura audio stimulus" /MIN powershell.exe -NoProfile -ExecutionPolicy Bypass -File ${cmdQuote(stimulusScript)}`,
+        `start "Caul audio stimulus" /MIN powershell.exe -NoProfile -ExecutionPolicy Bypass -File ${cmdQuote(stimulusScript)}`,
         'powershell.exe -NoProfile -Command "Start-Sleep -Seconds 1"',
-        `set RUSTC=${rustc}&& ${cmdQuote(cargo)} run --target aarch64-pc-windows-msvc -p susura-desktop-backend -- --stream-system-audio --duration 3 --smoke-summary`
+        `set RUSTC=${rustc}&& ${cmdQuote(cargo)} run --target aarch64-pc-windows-msvc -p caul-desktop-backend -- --stream-system-audio --duration 3 --smoke-summary`
       ].join(' && ');
     },
     prerequisiteCommand(repo) {
@@ -51,7 +51,7 @@ const profiles = {
         `if not exist ${cmdQuote(cargo)} (echo missing ${cargo} && exit /b 2)`,
         `if not exist ${cmdQuote(rustc)} (echo missing ${rustc} && exit /b 2)`,
         `${cmdQuote(rustc)} -vV | findstr /C:"host: aarch64-pc-windows-msvc" >nul || (echo Rust host must be aarch64-pc-windows-msvc && ${cmdQuote(rustc)} -vV && exit /b 2)`,
-        'echo susura-backend-smoke-ready'
+        'echo caul-backend-smoke-ready'
       ].join(' && ');
     }
   }

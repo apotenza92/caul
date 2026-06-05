@@ -1,10 +1,10 @@
-# Susura Knowledge Base
+# Caul Knowledge Base
 
 This folder is the durable project memory for future agents and contributors. Keep it compact, current and decisionful.
 
 ## Public Download Page
 
-`docs/index.html` is the live Susura download page source. The GitHub repository is public, and the download page is visitable at `https://apotenza92.github.io/susura/`.
+`docs/index.html` is the live Caul download page source. The GitHub repository is public, and the download page is visitable at `https://apotenza92.github.io/caul/`.
 
 The `Publish Download Page` workflow mirrors only the static download page and icon assets into the public `apotenza92.github.io` site repo, keeping the published site independent from the source tree layout.
 
@@ -12,7 +12,7 @@ The page currently offers stable and beta downloads for Apple Silicon macOS, Win
 
 ## Updates
 
-Packaged stable and beta apps include GitHub-backed update checks. Stable builds stay on stable releases. Beta builds track the newest release across stable and prerelease tags while preserving the beta app identity. Automatic checks default to weekly and can be changed from `Settings > General > Updates`. Release privacy smokes disable update checks with `SUSURA_DISABLE_UPDATE_CHECKS=1` so expected GitHub release traffic is not counted as hidden pre-setup network activity.
+Packaged stable and beta apps include GitHub-backed update checks. Stable builds stay on stable releases. Beta builds track the newest release across stable and prerelease tags while preserving the beta app identity. Automatic checks default to weekly and can be changed from `Settings > General > Updates`. Release privacy smokes disable update checks with `CAUL_DISABLE_UPDATE_CHECKS=1` so expected GitHub release traffic is not counted as hidden pre-setup network activity.
 
 ## Reading Guide
 
@@ -44,4 +44,4 @@ Use `npm run dev` for normal implementation work. It runs a source Electron/Vite
 
 Use `npm run dist:mac:dev` plus `npm run launch:mac:dev` only for packaged-identity checks such as macOS permissions, onboarding freshness, signing, bundle identity, icon/release layout, packaged resources and packaged `userData` behaviour.
 
-Use `npm run dist:mac:dev:private` plus `npm run launch:mac:dev:private` when the packaged app itself needs to match the released Dockless privacy shape before pushing a release. This writes `Susura Dev-Private.app` to `release-dev-private/`, leaves the normal packaged dev output alone, and uses the separate `dev.susura.app.dev-private` identity so LaunchServices, Dock state and local TCC checks do not collide with the inspectable `Susura Dev.app`. The `Dev-Private` runtime is stricter than normal development: it is Dockless and applies screenshot protection to all app windows so local screenshots can verify privacy behaviour.
+Use `npm run dist:mac:dev:private` plus `npm run launch:mac:dev:private` when the packaged app itself needs to match the released Dockless privacy shape before pushing a release. This writes `Caul Dev-Private.app` to `release-dev-private/`, leaves the normal packaged dev output alone, and uses the separate `dev.caul.app.dev-private` identity so LaunchServices, Dock state and local TCC checks do not collide with the inspectable `Caul Dev.app`. The `Dev-Private` runtime is stricter than normal development: it is Dockless and applies screenshot protection to all app windows so local screenshots can verify privacy behaviour.

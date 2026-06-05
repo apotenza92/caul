@@ -3,23 +3,23 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-const runs = Number(process.env.SUSURA_LLM_BRIDGE_BENCH_RUNS ?? 3);
-const timeoutMs = Number(process.env.SUSURA_LLM_BRIDGE_BENCH_TIMEOUT_MS ?? 45_000);
-const transcript = process.env.SUSURA_LLM_BRIDGE_BENCH_TRANSCRIPT
+const runs = Number(process.env.CAUL_LLM_BRIDGE_BENCH_RUNS ?? 3);
+const timeoutMs = Number(process.env.CAUL_LLM_BRIDGE_BENCH_TIMEOUT_MS ?? 45_000);
+const transcript = process.env.CAUL_LLM_BRIDGE_BENCH_TRANSCRIPT
   ?? 'What is the refund policy for annual plans?';
-const codexThinking = process.env.SUSURA_BENCH_LLM_THINKING ?? 'low';
-const piThinking = process.env.SUSURA_BENCH_LLM_THINKING ?? 'low';
-const sharedModel = process.env.SUSURA_LLM_BRIDGE_BENCH_MODEL ?? 'gpt-5.4-mini';
-const piSharedModel = process.env.SUSURA_LLM_BRIDGE_BENCH_PI_MODEL ?? `openai-codex/${sharedModel}`;
+const codexThinking = process.env.CAUL_BENCH_LLM_THINKING ?? 'low';
+const piThinking = process.env.CAUL_BENCH_LLM_THINKING ?? 'low';
+const sharedModel = process.env.CAUL_LLM_BRIDGE_BENCH_MODEL ?? 'gpt-5.4-mini';
+const piSharedModel = process.env.CAUL_LLM_BRIDGE_BENCH_PI_MODEL ?? `openai-codex/${sharedModel}`;
 const systemPrompt = [
-  'You are Susura, a live-call answer engine.',
+  'You are Caul, a live-call answer engine.',
   'Use only the transcript supplied by the caller.',
   'Do not inspect files, search, call tools, create todo lists, or mention local context.',
   'Return only one concise final answer sentence.',
   'If the transcript does not contain enough information, say: I need the policy details to answer that accurately.'
 ].join(' ');
 const userPrompt = `Transcript: ${transcript}`;
-const isolatedCodexDir = await mkdtemp(path.join(tmpdir(), 'susura-codex-bridge-'));
+const isolatedCodexDir = await mkdtemp(path.join(tmpdir(), 'caul-codex-bridge-'));
 
 const variants = [
   {
@@ -91,13 +91,13 @@ for (const variant of variants) {
   for (let index = 0; index < runs; index += 1) {
     const result = await runVariant(variant, index + 1);
     results.push(result);
-    console.log(`susura-llm-bridge-bench-run ${JSON.stringify(result)}`);
+    console.log(`caul-llm-bridge-bench-run ${JSON.stringify(result)}`);
   }
 }
 
 const summaries = summarise(results);
 for (const summary of summaries) {
-  console.log(`susura-llm-bridge-bench-summary ${JSON.stringify(summary)}`);
+  console.log(`caul-llm-bridge-bench-summary ${JSON.stringify(summary)}`);
 }
 
 const usable = summaries
@@ -105,7 +105,7 @@ const usable = summaries
   .sort((a, b) => a.medianFirstAssistantMs - b.medianFirstAssistantMs);
 
 if (usable.length > 0) {
-  console.log(`susura-llm-bridge-bench-best ${JSON.stringify(usable[0])}`);
+  console.log(`caul-llm-bridge-bench-best ${JSON.stringify(usable[0])}`);
 }
 
 function codexArgs(model, options = {}) {

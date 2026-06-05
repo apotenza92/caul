@@ -9,7 +9,7 @@ const packageJson = require('../package.json');
 
 const root = process.cwd();
 const releaseDir = path.join(root, 'release');
-const arch = process.argv[2] ?? process.env.SUSURA_PACKAGE_ARCH ?? 'arm64';
+const arch = process.argv[2] ?? process.env.CAUL_PACKAGE_ARCH ?? 'arm64';
 const debArchitecture = arch === 'x64' ? 'amd64' : arch;
 const isBeta = process.env.FORCE_BETA_BUILD === 'true'
   || packageJson.version.includes('-alpha')
@@ -17,14 +17,14 @@ const isBeta = process.env.FORCE_BETA_BUILD === 'true'
   || packageJson.version.includes('-rc');
 const electronBuilderArch = arch === 'x64' ? 'x86_64' : arch;
 const appDirName = arch === 'x64' ? 'linux-unpacked' : `linux-${arch}-unpacked`;
-const appImageSourcePath = path.join(releaseDir, `susura${isBeta ? '-beta' : ''}-${electronBuilderArch}.AppImage`);
-const appImageOutputPath = path.join(releaseDir, `susura${isBeta ? '-beta' : ''}-${arch}.AppImage`);
+const appImageSourcePath = path.join(releaseDir, `caul${isBeta ? '-beta' : ''}-${electronBuilderArch}.AppImage`);
+const appImageOutputPath = path.join(releaseDir, `caul${isBeta ? '-beta' : ''}-${arch}.AppImage`);
 const appDir = path.join(releaseDir, appDirName);
 const packageDir = path.join(releaseDir, `deb-${arch}`);
-const outputPath = path.join(releaseDir, `susura${isBeta ? '-beta' : ''}-${arch}.deb`);
-const appDisplayName = isBeta ? 'Susura Beta' : 'Susura';
-const packageName = isBeta ? 'susura-beta' : 'susura';
-const executableName = isBeta ? 'susura-beta' : 'susura';
+const outputPath = path.join(releaseDir, `caul${isBeta ? '-beta' : ''}-${arch}.deb`);
+const appDisplayName = isBeta ? 'Caul Beta' : 'Caul';
+const packageName = isBeta ? 'caul-beta' : 'caul';
+const executableName = isBeta ? 'caul-beta' : 'caul';
 const installDir = path.join(packageDir, 'opt', appDisplayName);
 const controlDir = path.join(packageDir, 'DEBIAN');
 const maintainer = 'Alex Potenza <apotenza92@users.noreply.github.com>';
@@ -90,7 +90,7 @@ Exec="/opt/${appDisplayName}/${executableName}" %U
 Terminal=false
 Type=Application
 Icon=${packageName}
-StartupWMClass=Susura
+StartupWMClass=Caul
 Comment=${packageJson.description}
 Categories=Utility;
 `
@@ -107,7 +107,7 @@ Architecture: ${debArchitecture}
 Maintainer: ${maintainer}
 Installed-Size: ${installedSize}
 Depends: ${dependencies.join(', ')}
-Homepage: https://github.com/apotenza92/susura
+Homepage: https://github.com/apotenza92/caul
 Description: ${packageJson.description}
 `
 );

@@ -6,17 +6,17 @@ const execFileAsync = promisify(execFile);
 const profiles = {
   fedora: {
     defaultName: 'Fedora 42 ARM64',
-    envName: 'SUSURA_FEDORA_VM_NAME',
+    envName: 'CAUL_FEDORA_VM_NAME',
     probe: ['/usr/bin/uname', '-a']
   },
   linux: {
     defaultName: 'Ubuntu 24.04.3 ARM64',
-    envName: 'SUSURA_LINUX_VM_NAME',
+    envName: 'CAUL_LINUX_VM_NAME',
     probe: ['/usr/bin/uname', '-a']
   },
   win: {
     defaultName: 'Windows 11 ARM',
-    envName: 'SUSURA_WINDOWS_VM_NAME',
+    envName: 'CAUL_WINDOWS_VM_NAME',
     probe: ['cmd.exe', '/c', 'ver']
   }
 };

@@ -1357,11 +1357,11 @@ impl EndpointConfig {
     fn from_environment() -> Self {
         let mut config = Self::default();
 
-        if let Some(end_silence_ms) = env_u64("SUSURA_ENDPOINT_END_SILENCE_MS") {
+        if let Some(end_silence_ms) = env_u64("CAUL_ENDPOINT_END_SILENCE_MS") {
             config.end_silence_samples = ms_to_samples(end_silence_ms) as usize;
         }
 
-        if let Some(energy_threshold) = env_f32("SUSURA_ENDPOINT_ENERGY_THRESHOLD") {
+        if let Some(energy_threshold) = env_f32("CAUL_ENDPOINT_ENERGY_THRESHOLD") {
             config.energy_threshold = energy_threshold.max(0.0);
         }
 
@@ -1799,7 +1799,7 @@ fn run_transcription_worker(
 }
 
 fn dump_segment_audio_if_requested(segment: &SpeechSegment, event_tx: &Sender<BackendEvent>) {
-    let Ok(directory) = std::env::var("SUSURA_DUMP_UTTERANCE_DIR") else {
+    let Ok(directory) = std::env::var("CAUL_DUMP_UTTERANCE_DIR") else {
         return;
     };
 
@@ -1842,7 +1842,7 @@ fn emit_metric(
 }
 
 fn pipeline_metrics_enabled() -> bool {
-    std::env::var("SUSURA_PIPELINE_METRICS").is_ok_and(|value| value == "1" || value == "true")
+    std::env::var("CAUL_PIPELINE_METRICS").is_ok_and(|value| value == "1" || value == "true")
 }
 
 fn env_u64(name: &str) -> Option<u64> {
@@ -1858,13 +1858,13 @@ fn env_f32(name: &str) -> Option<f32> {
 }
 
 fn preload_local_transcription_enabled() -> bool {
-    std::env::var("SUSURA_PRELOAD_LOCAL_TRANSCRIPTION")
-        .or_else(|_| std::env::var("SUSURA_PRELOAD_PARAKEET"))
+    std::env::var("CAUL_PRELOAD_LOCAL_TRANSCRIPTION")
+        .or_else(|_| std::env::var("CAUL_PRELOAD_PARAKEET"))
         .is_ok_and(|value| value == "1" || value == "true")
 }
 
 fn expected_speech_end_ms() -> Option<u64> {
-    std::env::var("SUSURA_BENCH_EXPECTED_SPEECH_END_MS")
+    std::env::var("CAUL_BENCH_EXPECTED_SPEECH_END_MS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
 }
@@ -1877,7 +1877,7 @@ enum LocalTranscriptionModel {
 
 impl LocalTranscriptionModel {
     fn from_environment() -> Self {
-        match std::env::var("SUSURA_TRANSCRIPTION_MODEL")
+        match std::env::var("CAUL_TRANSCRIPTION_MODEL")
             .unwrap_or_else(|_| "parakeet".to_string())
             .as_str()
         {
@@ -2092,7 +2092,7 @@ fn words(text: &str) -> Vec<String> {
 }
 
 fn ensure_parakeet_model() -> Result<PathBuf, Box<dyn std::error::Error>> {
-    if let Ok(path) = std::env::var("SUSURA_PARAKEET_MODEL_DIR") {
+    if let Ok(path) = std::env::var("CAUL_PARAKEET_MODEL_DIR") {
         let path = PathBuf::from(path);
         validate_parakeet_dir(&path)?;
         return Ok(path);
@@ -2127,7 +2127,7 @@ fn validate_parakeet_dir(path: &Path) -> Result<(), Box<dyn std::error::Error>> 
 }
 
 fn ensure_moonshine_tiny_model() -> Result<PathBuf, Box<dyn std::error::Error>> {
-    if let Ok(path) = std::env::var("SUSURA_MOONSHINE_MODEL_DIR") {
+    if let Ok(path) = std::env::var("CAUL_MOONSHINE_MODEL_DIR") {
         let path = PathBuf::from(path);
         validate_moonshine_tiny_dir(&path)?;
         return Ok(path);
@@ -2158,7 +2158,7 @@ fn validate_moonshine_tiny_dir(path: &Path) -> Result<(), Box<dyn std::error::Er
 }
 
 fn model_root() -> PathBuf {
-    if let Ok(path) = std::env::var("SUSURA_MODEL_ROOT") {
+    if let Ok(path) = std::env::var("CAUL_MODEL_ROOT") {
         return PathBuf::from(path);
     }
 
@@ -2166,7 +2166,7 @@ fn model_root() -> PathBuf {
     PathBuf::from(home)
         .join("Library")
         .join("Application Support")
-        .join("Susura")
+        .join("Caul")
         .join("models")
 }
 

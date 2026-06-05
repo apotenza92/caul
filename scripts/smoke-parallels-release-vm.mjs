@@ -6,27 +6,27 @@ import { promisify } from 'node:util';
 import sharp from 'sharp';
 
 const execFileAsync = promisify(execFile);
-const transcriptionExpectedPhrase = 'Susura release transcription smoke. Local transcription emits confirmed text.';
+const transcriptionExpectedPhrase = 'Caul release transcription smoke. Local transcription emits confirmed text.';
 
 const profiles = {
   fedora: {
     os: 'linux',
     packageType: 'rpm',
     defaultName: 'Fedora 42 ARM64',
-    envName: 'SUSURA_FEDORA_VM_NAME',
-    packageEnv: 'SUSURA_FEDORA_PACKAGE_PATH',
-    repoEnv: 'SUSURA_FEDORA_VM_REPO',
-    defaultRepo: '/root/susura-rpm-build',
-    defaultPackagePath: '/root/susura-rpm-build/release/susura-arm64.rpm',
-    userEnv: 'SUSURA_FEDORA_VM_SSH_USER',
+    envName: 'CAUL_FEDORA_VM_NAME',
+    packageEnv: 'CAUL_FEDORA_PACKAGE_PATH',
+    repoEnv: 'CAUL_FEDORA_VM_REPO',
+    defaultRepo: '/root/caul-rpm-build',
+    defaultPackagePath: '/root/caul-rpm-build/release/caul-arm64.rpm',
+    userEnv: 'CAUL_FEDORA_VM_SSH_USER',
     defaultUser: 'alex',
-    hostEnv: 'SUSURA_FEDORA_VM_SSH_HOST',
+    hostEnv: 'CAUL_FEDORA_VM_SSH_HOST',
     defaultHost: '10.211.55.16',
-    knownHostsEnv: 'SUSURA_FEDORA_VM_KNOWN_HOSTS',
-    defaultKnownHosts: '/tmp/susura_fedora_known_hosts',
-    modelEnv: 'SUSURA_FEDORA_PARAKEET_MODEL_DIR',
+    knownHostsEnv: 'CAUL_FEDORA_VM_KNOWN_HOSTS',
+    defaultKnownHosts: '/tmp/caul_fedora_known_hosts',
+    modelEnv: 'CAUL_FEDORA_PARAKEET_MODEL_DIR',
     defaultModelDir: '/home/alex/.local/share/com.pais.handy/models/parakeet-tdt-0.6b-v3-int8',
-    installEnv: 'SUSURA_FEDORA_INSTALL_COMMAND',
+    installEnv: 'CAUL_FEDORA_INSTALL_COMMAND',
     defaultInstallCommand: 'dnf install -y',
     packageInstallOnly: true,
     transport: 'prlctl'
@@ -35,28 +35,28 @@ const profiles = {
     os: 'linux',
     packageType: 'deb',
     defaultName: 'Ubuntu 24.04.3 ARM64',
-    envName: 'SUSURA_LINUX_VM_NAME',
-    packageEnv: 'SUSURA_LINUX_PACKAGE_PATH',
-    repoEnv: 'SUSURA_LINUX_VM_REPO',
-    defaultRepo: '/home/parallels/susura-cross-platform',
-    defaultPackagePath: '/home/parallels/susura-cross-platform/release/susura-arm64.deb',
-    userEnv: 'SUSURA_LINUX_VM_SSH_USER',
+    envName: 'CAUL_LINUX_VM_NAME',
+    packageEnv: 'CAUL_LINUX_PACKAGE_PATH',
+    repoEnv: 'CAUL_LINUX_VM_REPO',
+    defaultRepo: '/home/parallels/caul-cross-platform',
+    defaultPackagePath: '/home/parallels/caul-cross-platform/release/caul-arm64.deb',
+    userEnv: 'CAUL_LINUX_VM_SSH_USER',
     defaultUser: 'parallels',
-    hostEnv: 'SUSURA_LINUX_VM_SSH_HOST',
+    hostEnv: 'CAUL_LINUX_VM_SSH_HOST',
     defaultHost: '10.211.55.12',
-    knownHostsEnv: 'SUSURA_LINUX_VM_KNOWN_HOSTS',
-    defaultKnownHosts: '/tmp/susura_known_hosts',
-    modelEnv: 'SUSURA_LINUX_PARAKEET_MODEL_DIR',
+    knownHostsEnv: 'CAUL_LINUX_VM_KNOWN_HOSTS',
+    defaultKnownHosts: '/tmp/caul_known_hosts',
+    modelEnv: 'CAUL_LINUX_PARAKEET_MODEL_DIR',
     defaultModelDir: '/home/parallels/.local/share/com.pais.handy/models/parakeet-tdt-0.6b-v3-int8'
   },
   win: {
     defaultName: 'Windows 11 ARM',
-    envName: 'SUSURA_WINDOWS_VM_NAME',
-    packageEnv: 'SUSURA_WINDOWS_PACKAGE_PATH',
-    repoEnv: 'SUSURA_WINDOWS_VM_REPO',
-    defaultRepo: 'C:\\Users\\alex\\susura-cross-platform',
-    defaultPackagePath: 'C:\\Users\\alex\\susura-cross-platform\\release\\win-arm64-unpacked',
-    modelEnv: 'SUSURA_WINDOWS_PARAKEET_MODEL_DIR',
+    envName: 'CAUL_WINDOWS_VM_NAME',
+    packageEnv: 'CAUL_WINDOWS_PACKAGE_PATH',
+    repoEnv: 'CAUL_WINDOWS_VM_REPO',
+    defaultRepo: 'C:\\Users\\alex\\caul-cross-platform',
+    defaultPackagePath: 'C:\\Users\\alex\\caul-cross-platform\\release\\win-arm64-unpacked',
+    modelEnv: 'CAUL_WINDOWS_PARAKEET_MODEL_DIR',
     defaultModelDir: 'C:\\Users\\alex\\AppData\\Roaming\\com.pais.handy\\models\\parakeet-tdt-0.6b-v3-int8'
   }
 };
@@ -120,7 +120,7 @@ async function failVmE2e(message, {
     console.error(details);
   }
 
-  console.error(`susura-vm-e2e ${JSON.stringify(summary)}`);
+  console.error(`caul-vm-e2e ${JSON.stringify(summary)}`);
   process.exit(1);
 }
 
@@ -177,7 +177,7 @@ if (!ready) {
 }
 
 if (!packagePath) {
-  await failVmE2e(`${profile.packageEnv} must point to a packaged Susura artefact before vm:smoke:${profileName} can run.`, {
+  await failVmE2e(`${profile.packageEnv} must point to a packaged Caul artefact before vm:smoke:${profileName} can run.`, {
     blocked: true,
     details: 'This smoke is intentionally packaged-app gated, not a Vite-only reachability check.'
   });
@@ -202,7 +202,7 @@ process.exit(1);
 
 async function runWindowsPackageSmoke() {
   const repoPath = process.env[profile.repoEnv] ?? profile.defaultRepo;
-  const backendPath = `${repoPath}\\release\\win-arm64-unpacked\\resources\\bin\\susura-desktop-backend.exe`;
+  const backendPath = `${repoPath}\\release\\win-arm64-unpacked\\resources\\bin\\caul-desktop-backend.exe`;
   const packageCheck = await runPrlctl([
     'exec',
     vmName,
@@ -211,7 +211,7 @@ async function runWindowsPackageSmoke() {
     [
       `if not exist ${cmdQuote(packagePath)} (echo missing ${packagePath} && exit /b 2)`,
       `if not exist ${cmdQuote(backendPath)} (echo missing ${backendPath} && exit /b 2)`,
-      `if exist ${cmdQuote(packagePath)}\\Susura.exe (echo unpacked package ready) else (for %F in (${cmdQuote(packagePath)}) do @if %~zF LEQ 0 (echo empty ${packagePath} && exit /b 2))`
+      `if exist ${cmdQuote(packagePath)}\\Caul.exe (echo unpacked package ready) else (for %F in (${cmdQuote(packagePath)}) do @if %~zF LEQ 0 (echo empty ${packagePath} && exit /b 2))`
     ].join(' && ')
   ]);
 
@@ -307,35 +307,35 @@ async function runWindowsPackageSmoke() {
     'exec',
     vmName,
     ...powershellEncodedArgs([
-      '$userData = Join-Path $env:TEMP "susura-win-launch-smoke"',
+      '$userData = Join-Path $env:TEMP "caul-win-launch-smoke"',
       'Remove-Item -Force -Recurse $userData -ErrorAction SilentlyContinue',
       'New-Item -ItemType Directory -Force -Path $userData | Out-Null',
       '$smokeOutputFile = Join-Path $userData "smoke-output.log"',
-      '$env:SUSURA_PACKAGED_LAUNCH_SMOKE_MS = "250"',
-      '$env:SUSURA_PACKAGED_LAUNCH_SMOKE_REQUIRE_ONBOARDING = "1"',
-      '$env:SUSURA_PACKAGED_PRIVACY_SMOKE = "1"',
-      '$env:SUSURA_PACKAGED_ONBOARDING_COMPLETION_SMOKE = "1"',
-      '$env:SUSURA_PACKAGED_UPDATER_SMOKE = "1"',
-      '$env:SUSURA_DISABLE_MODEL_AUTO_DOWNLOAD = "1"',
-      '$env:SUSURA_DISABLE_UPDATE_CHECKS = "1"',
-      '$env:SUSURA_USER_DATA_DIR = $userData',
-      '$env:SUSURA_SMOKE_OUTPUT_FILE = $smokeOutputFile',
-      `$process = Start-Process -PassThru -FilePath ${powershellString(`${repoPath}\\release\\win-arm64-unpacked\\Susura.exe`)}`,
+      '$env:CAUL_PACKAGED_LAUNCH_SMOKE_MS = "250"',
+      '$env:CAUL_PACKAGED_LAUNCH_SMOKE_REQUIRE_ONBOARDING = "1"',
+      '$env:CAUL_PACKAGED_PRIVACY_SMOKE = "1"',
+      '$env:CAUL_PACKAGED_ONBOARDING_COMPLETION_SMOKE = "1"',
+      '$env:CAUL_PACKAGED_UPDATER_SMOKE = "1"',
+      '$env:CAUL_DISABLE_MODEL_AUTO_DOWNLOAD = "1"',
+      '$env:CAUL_DISABLE_UPDATE_CHECKS = "1"',
+      '$env:CAUL_USER_DATA_DIR = $userData',
+      '$env:CAUL_SMOKE_OUTPUT_FILE = $smokeOutputFile',
+      `$process = Start-Process -PassThru -FilePath ${powershellString(`${repoPath}\\release\\win-arm64-unpacked\\Caul.exe`)}`,
       '$deadline = (Get-Date).AddSeconds(20)',
-      'while ((Get-Date) -lt $deadline) { if ((Test-Path $smokeOutputFile) -and ((Get-Content $smokeOutputFile -Raw) -match "susura-packaged-launch-smoke")) { break }; Start-Sleep -Milliseconds 250 }',
+      'while ((Get-Date) -lt $deadline) { if ((Test-Path $smokeOutputFile) -and ((Get-Content $smokeOutputFile -Raw) -match "caul-packaged-launch-smoke")) { break }; Start-Sleep -Milliseconds 250 }',
       'if (!$process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }',
       'if (Test-Path $smokeOutputFile) { Get-Content $smokeOutputFile }'
     ].join('; '))
   ], { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 });
 
-  if (!launchSmoke.ok || !launchSmoke.text.includes('susura-packaged-launch-smoke')) {
+  if (!launchSmoke.ok || !launchSmoke.text.includes('caul-packaged-launch-smoke')) {
     await failVmE2e('Windows packaged Electron launch smoke failed.', {
       details: launchSmoke.text,
       gates: { ai: true, install: true, microphone: true, systemAudio: true, transcription: true }
     });
   }
 
-  const launchSummary = parsePrefixedJson(launchSmoke.text, 'susura-packaged-launch-smoke');
+  const launchSummary = parsePrefixedJson(launchSmoke.text, 'caul-packaged-launch-smoke');
   const launchPrivacyLeakFree = launchSummary?.privacy
     && (launchSummary.privacy.mainHttpRequests?.length ?? 0) === 0
     && (launchSummary.privacy.rendererHttpRequests?.length ?? 0) === 0
@@ -400,7 +400,7 @@ async function runWindowsPackageSmoke() {
     vmName
   };
   await writeVmE2eSummary(profileName, vmE2eSummary);
-  console.log(`susura-vm-e2e ${JSON.stringify(vmE2eSummary)}`);
+  console.log(`caul-vm-e2e ${JSON.stringify(vmE2eSummary)}`);
 }
 
 async function runWindowsSystemAudioSmoke(backendPath) {
@@ -455,26 +455,26 @@ async function runWindowsSystemAudioSmoke(backendPath) {
 }
 
 async function runWindowsExternalPrivacyCaptureSmoke(repoPath) {
-  const capturePath = path.join(tmpdir(), `susura-win-privacy-${Date.now()}.png`);
+  const capturePath = path.join(tmpdir(), `caul-win-privacy-${Date.now()}.png`);
   const probe = await runPrlctl([
     'exec',
     vmName,
     '--current-user',
     ...powershellEncodedArgs([
-      '$userData = Join-Path $env:TEMP ("susura-external-privacy-" + [Guid]::NewGuid().ToString("N"))',
+      '$userData = Join-Path $env:TEMP ("caul-external-privacy-" + [Guid]::NewGuid().ToString("N"))',
       'New-Item -ItemType Directory -Force -Path $userData | Out-Null',
       '$smokeOutputFile = Join-Path $userData "smoke-output.log"',
-      '$env:SUSURA_WINDOWS_EXTERNAL_CAPTURE_PROBE = "1"',
-      '$env:SUSURA_WINDOWS_EXTERNAL_CAPTURE_PROBE_MS = "12000"',
-      '$env:SUSURA_SMOKE_OUTPUT_FILE = $smokeOutputFile',
-      `$process = Start-Process -PassThru -FilePath ${powershellString(`${repoPath}\\release\\win-arm64-unpacked\\Susura.exe`)}`,
+      '$env:CAUL_WINDOWS_EXTERNAL_CAPTURE_PROBE = "1"',
+      '$env:CAUL_WINDOWS_EXTERNAL_CAPTURE_PROBE_MS = "12000"',
+      '$env:CAUL_SMOKE_OUTPUT_FILE = $smokeOutputFile',
+      `$process = Start-Process -PassThru -FilePath ${powershellString(`${repoPath}\\release\\win-arm64-unpacked\\Caul.exe`)}`,
       '$deadline = (Get-Date).AddSeconds(8)',
-      'while ((Get-Date) -lt $deadline) { if ((Test-Path $smokeOutputFile) -and ((Get-Content $smokeOutputFile -Raw) -match "susura-windows-capture-probe")) { break }; Start-Sleep -Milliseconds 200 }',
+      'while ((Get-Date) -lt $deadline) { if ((Test-Path $smokeOutputFile) -and ((Get-Content $smokeOutputFile -Raw) -match "caul-windows-capture-probe")) { break }; Start-Sleep -Milliseconds 200 }',
       'if (Test-Path $smokeOutputFile) { Get-Content $smokeOutputFile }',
       'Write-Output ("PROBE_PID " + $process.Id)'
     ].join('; '))
   ], { timeout: 12_000, maxBuffer: 10 * 1024 * 1024 });
-  const probeSummary = parsePrefixedJson(probe.text, 'susura-windows-capture-probe');
+  const probeSummary = parsePrefixedJson(probe.text, 'caul-windows-capture-probe');
 
   if (!probe.ok || !probeSummary?.ok) {
     return {
@@ -614,7 +614,7 @@ async function runLinuxPackageSmoke() {
       linuxPackageMetadataCheck(packagePath),
       profile.packageInstallOnly
         ? null
-        : `test -x ${shellQuote(`${repoPath}/release/linux-arm64-unpacked/resources/bin/susura-desktop-backend`)}`
+        : `test -x ${shellQuote(`${repoPath}/release/linux-arm64-unpacked/resources/bin/caul-desktop-backend`)}`
     ].filter(Boolean).join(' && '),
     sshUser,
     ipAddress,
@@ -652,9 +652,9 @@ async function runLinuxPackageSmoke() {
   if (profile.packageInstallOnly) {
     const installedCheck = await runLinuxCommand(
       [
-        'rpm -q susura',
-        "rpm -ql susura | grep -q '/opt/Susura/resources/bin/susura-desktop-backend$'",
-        'test -x /opt/Susura/resources/bin/susura-desktop-backend'
+        'rpm -q caul',
+        "rpm -ql caul | grep -q '/opt/Caul/resources/bin/caul-desktop-backend$'",
+        'test -x /opt/Caul/resources/bin/caul-desktop-backend'
       ].join(' && '),
       sshUser,
       ipAddress,
@@ -688,17 +688,17 @@ async function runLinuxPackageSmoke() {
       vmName
     };
     await writeVmE2eSummary(profileName, vmE2eSummary);
-    console.log(`susura-vm-e2e ${JSON.stringify(vmE2eSummary)}`);
+    console.log(`caul-vm-e2e ${JSON.stringify(vmE2eSummary)}`);
     return;
   }
 
-  const backendPath = `${repoPath}/release/linux-arm64-unpacked/resources/bin/susura-desktop-backend`;
+  const backendPath = `${repoPath}/release/linux-arm64-unpacked/resources/bin/caul-desktop-backend`;
   const backendSmoke = await runSsh(
     sshUser,
     ipAddress,
     knownHosts,
     [
-      linuxToneStimulusCommand('/tmp/susura-pw-play.log'),
+      linuxToneStimulusCommand('/tmp/caul-pw-play.log'),
       'sleep 0.3',
       `${shellQuote(backendPath)} --stream-system-audio --duration 3 --smoke-summary`
     ].join(' && '),
@@ -726,7 +726,7 @@ async function runLinuxPackageSmoke() {
     ipAddress,
     knownHosts,
     [
-      linuxToneStimulusCommand('/tmp/susura-pw-play-restart.log'),
+      linuxToneStimulusCommand('/tmp/caul-pw-play-restart.log'),
       'sleep 0.3',
       `${shellQuote(backendPath)} --capture-restart-smoke --source system --duration 2`
     ].join(' && '),
@@ -823,19 +823,19 @@ async function runLinuxPackageSmoke() {
     [
       `rm -rf ${shellQuote(launchUserData)}`,
       `mkdir -p ${shellQuote(launchUserData)}`,
-      `DISPLAY=:0 SUSURA_PACKAGED_LAUNCH_SMOKE_MS=250 SUSURA_PACKAGED_LAUNCH_SMOKE_REQUIRE_ONBOARDING=1 SUSURA_PACKAGED_PRIVACY_SMOKE=1 SUSURA_PACKAGED_ONBOARDING_COMPLETION_SMOKE=1 SUSURA_PACKAGED_UPDATER_SMOKE=1 SUSURA_DISABLE_MODEL_AUTO_DOWNLOAD=1 SUSURA_DISABLE_UPDATE_CHECKS=1 SUSURA_USER_DATA_DIR=${shellQuote(launchUserData)} /opt/Susura/susura`
+      `DISPLAY=:0 CAUL_PACKAGED_LAUNCH_SMOKE_MS=250 CAUL_PACKAGED_LAUNCH_SMOKE_REQUIRE_ONBOARDING=1 CAUL_PACKAGED_PRIVACY_SMOKE=1 CAUL_PACKAGED_ONBOARDING_COMPLETION_SMOKE=1 CAUL_PACKAGED_UPDATER_SMOKE=1 CAUL_DISABLE_MODEL_AUTO_DOWNLOAD=1 CAUL_DISABLE_UPDATE_CHECKS=1 CAUL_USER_DATA_DIR=${shellQuote(launchUserData)} /opt/Caul/caul`
     ].join(' && '),
     { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 }
   );
 
-  if (!launchSmoke.ok || !launchSmoke.text.includes('susura-packaged-launch-smoke')) {
+  if (!launchSmoke.ok || !launchSmoke.text.includes('caul-packaged-launch-smoke')) {
     await failVmE2e('Linux packaged Electron launch smoke failed.', {
       details: launchSmoke.text,
       gates: { ai: true, install: true, microphone: true, systemAudio: true, transcription: true }
     });
   }
 
-  const launchSummary = parsePrefixedJson(launchSmoke.text, 'susura-packaged-launch-smoke');
+  const launchSummary = parsePrefixedJson(launchSmoke.text, 'caul-packaged-launch-smoke');
 
   if (!launchSummary?.ok || launchSummary.isPackaged !== true || launchSummary.hasOnboarding !== true || launchSummary.privacy?.ok !== true || launchSummary.completion?.ok !== true || launchSummary.updates?.ok !== true) {
     await failVmE2e('Linux packaged Electron launch smoke did not prove a packaged onboarding launch and completion.', {
@@ -889,7 +889,7 @@ async function runLinuxPackageSmoke() {
     vmName
   };
   await writeVmE2eSummary(profileName, vmE2eSummary);
-  console.log(`susura-vm-e2e ${JSON.stringify(vmE2eSummary)}`);
+  console.log(`caul-vm-e2e ${JSON.stringify(vmE2eSummary)}`);
 }
 
 async function runLinuxCommand(command, sshUser, ipAddress, knownHosts, options = {}) {
@@ -901,9 +901,9 @@ async function runLinuxCommand(command, sshUser, ipAddress, knownHosts, options 
 }
 
 async function runPrlctlShell(command, options = {}) {
-  const scriptName = `.susura-prlctl-${process.pid}-${Date.now()}.sh`;
+  const scriptName = `.caul-prlctl-${process.pid}-${Date.now()}.sh`;
   const hostScriptPath = path.join(process.cwd(), scriptName);
-  const guestScriptPath = `/media/psf/susura/${scriptName}`;
+  const guestScriptPath = `/media/psf/caul/${scriptName}`;
 
   await writeFile(hostScriptPath, `#!/usr/bin/env bash\nset -euo pipefail\n${command}\n`);
 
@@ -922,16 +922,16 @@ async function runPrlctlShell(command, options = {}) {
 function linuxPackageMetadataCheck(packagePath) {
   if (profile.packageType === 'rpm') {
     return [
-      `rpm -qp --queryformat '%{NAME}\\n' ${shellQuote(packagePath)} | grep -qx susura`,
+      `rpm -qp --queryformat '%{NAME}\\n' ${shellQuote(packagePath)} | grep -qx caul`,
       `rpm -qp --queryformat '%{ARCH}\\n' ${shellQuote(packagePath)} | grep -Eq '^(aarch64|x86_64)$'`,
-      `rpm -qpl ${shellQuote(packagePath)} | grep -q '/opt/Susura/resources/bin/susura-desktop-backend$'`
+      `rpm -qpl ${shellQuote(packagePath)} | grep -q '/opt/Caul/resources/bin/caul-desktop-backend$'`
     ].join(' && ');
   }
 
   return [
-    `dpkg-deb -f ${shellQuote(packagePath)} Package | grep -qx susura`,
+    `dpkg-deb -f ${shellQuote(packagePath)} Package | grep -qx caul`,
     `dpkg-deb -f ${shellQuote(packagePath)} Architecture | grep -qx arm64`,
-    `dpkg-deb -c ${shellQuote(packagePath)} | grep -q '/opt/Susura/resources/bin/susura-desktop-backend$'`
+    `dpkg-deb -c ${shellQuote(packagePath)} | grep -q '/opt/Caul/resources/bin/caul-desktop-backend$'`
   ].join(' && ');
 }
 
@@ -956,7 +956,7 @@ async function runSsh(user, host, knownHosts, command, options = {}) {
 
 async function runWindowsTranscriptionSmoke(repoPath, backendPath) {
   const modelDir = process.env[profile.modelEnv] ?? profile.defaultModelDir;
-  const fixturePath = '%TEMP%\\susura-known-16k.wav';
+  const fixturePath = '%TEMP%\\caul-known-16k.wav';
   const smoke = await runPrlctl([
     'exec',
     vmName,
@@ -965,14 +965,14 @@ async function runWindowsTranscriptionSmoke(repoPath, backendPath) {
     '-Command',
     [
       '$ErrorActionPreference = "Stop"',
-      '$wav = Join-Path $env:TEMP "susura-known-16k.wav"',
+      '$wav = Join-Path $env:TEMP "caul-known-16k.wav"',
       'Add-Type -AssemblyName System.Speech',
       '$voice = New-Object System.Speech.Synthesis.SpeechSynthesizer',
       '$format = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(16000, [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen, [System.Speech.AudioFormat.AudioChannel]::Mono)',
       '$voice.SetOutputToWaveFile($wav, $format)',
       `$voice.Speak(${powershellString(transcriptionExpectedPhrase)})`,
       '$voice.Dispose()',
-      `$env:SUSURA_PARAKEET_MODEL_DIR = ${powershellString(modelDir)}`,
+      `$env:CAUL_PARAKEET_MODEL_DIR = ${powershellString(modelDir)}`,
       `& ${powershellString(backendPath)} --transcribe-parakeet-wav $wav`
     ].join('; ')
   ], { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 });
@@ -988,11 +988,11 @@ async function runWindowsTranscriptionSmoke(repoPath, backendPath) {
 
 async function runWindowsRendererTranscriptionSmoke(repoPath) {
   const modelDir = process.env[profile.modelEnv] ?? profile.defaultModelDir;
-  const userData = '$env:TEMP\\susura-win-renderer-transcription-smoke';
-  const appPath = `${repoPath}\\release\\win-arm64-unpacked\\Susura.exe`;
+  const userData = '$env:TEMP\\caul-win-renderer-transcription-smoke';
+  const appPath = `${repoPath}\\release\\win-arm64-unpacked\\Caul.exe`;
   const prepScript = [
     '$ErrorActionPreference = [System.Management.Automation.ActionPreference]::Stop',
-    `$userData = ${powershellString('$env:TEMP\\susura-win-renderer-transcription-smoke')}`,
+    `$userData = ${powershellString('$env:TEMP\\caul-win-renderer-transcription-smoke')}`,
     '$userData = $ExecutionContext.InvokeCommand.ExpandString($userData)',
     'Remove-Item -Force -Recurse $userData -ErrorAction SilentlyContinue',
     'New-Item -ItemType Directory -Force -Path (Join-Path $userData "models") | Out-Null',
@@ -1020,7 +1020,7 @@ async function runWindowsRendererTranscriptionSmoke(repoPath) {
     vmName,
     ...powershellEncodedArgs([
       'Start-Sleep -Seconds 8',
-      '$wav = Join-Path $env:TEMP "susura-renderer-known-16k.wav"',
+      '$wav = Join-Path $env:TEMP "caul-renderer-known-16k.wav"',
       '$player = New-Object System.Media.SoundPlayer $wav',
       '$player.PlaySync()'
     ].join('; '))
@@ -1036,17 +1036,17 @@ async function runWindowsRendererTranscriptionSmoke(repoPath) {
     'exec',
     vmName,
     ...powershellEncodedArgs([
-      '$userData = Join-Path $env:TEMP "susura-win-renderer-transcription-smoke"',
+      '$userData = Join-Path $env:TEMP "caul-win-renderer-transcription-smoke"',
       '$smokeOutputFile = Join-Path $userData "smoke-output.log"',
-      '$env:SUSURA_RENDERER_TRANSCRIPTION_SMOKE_MS = "26000"',
-      '$env:SUSURA_DISABLE_MODEL_AUTO_DOWNLOAD = "1"',
-      '$env:SUSURA_LLM_DISABLE_PERSISTENT_PI = "1"',
-      '$env:SUSURA_RENDERER_TRANSCRIPTION_SMOKE_NO_LLM = "1"',
-      '$env:SUSURA_USER_DATA_DIR = $userData',
-      '$env:SUSURA_SMOKE_OUTPUT_FILE = $smokeOutputFile',
+      '$env:CAUL_RENDERER_TRANSCRIPTION_SMOKE_MS = "26000"',
+      '$env:CAUL_DISABLE_MODEL_AUTO_DOWNLOAD = "1"',
+      '$env:CAUL_LLM_DISABLE_PERSISTENT_PI = "1"',
+      '$env:CAUL_RENDERER_TRANSCRIPTION_SMOKE_NO_LLM = "1"',
+      '$env:CAUL_USER_DATA_DIR = $userData',
+      '$env:CAUL_SMOKE_OUTPUT_FILE = $smokeOutputFile',
       `$process = Start-Process -PassThru -FilePath ${powershellString(appPath)}`,
       '$deadline = (Get-Date).AddSeconds(70)',
-      'while ((Get-Date) -lt $deadline) { if ((Test-Path $smokeOutputFile) -and ((Get-Content $smokeOutputFile -Raw).Contains("susura-renderer-transcription-smoke "))) { break }; Start-Sleep -Milliseconds 500 }',
+      'while ((Get-Date) -lt $deadline) { if ((Test-Path $smokeOutputFile) -and ((Get-Content $smokeOutputFile -Raw).Contains("caul-renderer-transcription-smoke "))) { break }; Start-Sleep -Milliseconds 500 }',
       'if (!$process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }',
       'if (Test-Path $smokeOutputFile) { Get-Content $smokeOutputFile }'
     ].join('; '))
@@ -1054,7 +1054,7 @@ async function runWindowsRendererTranscriptionSmoke(repoPath) {
 
   await playPromise;
 
-  if (!smoke.ok || !smoke.text.includes('susura-renderer-transcription-smoke')) {
+  if (!smoke.ok || !smoke.text.includes('caul-renderer-transcription-smoke')) {
     console.error('Windows packaged renderer transcription smoke failed.');
     console.error(smoke.text);
     process.exit(1);
@@ -1068,16 +1068,16 @@ async function runWindowsRendererAiSmoke(repoPath) {
     'exec',
     vmName,
     ...powershellEncodedArgs([
-      '$userData = Join-Path $env:TEMP "susura-win-renderer-ai-smoke"',
+      '$userData = Join-Path $env:TEMP "caul-win-renderer-ai-smoke"',
       'Remove-Item -Force -Recurse $userData -ErrorAction SilentlyContinue',
       'New-Item -ItemType Directory -Force -Path $userData | Out-Null',
-      '$env:SUSURA_RENDERER_LLM_SMOKE = "1"',
-      '$env:SUSURA_USER_DATA_DIR = $userData',
-      `& ${powershellString(`${repoPath}\\release\\win-arm64-unpacked\\Susura.exe`)}`
+      '$env:CAUL_RENDERER_LLM_SMOKE = "1"',
+      '$env:CAUL_USER_DATA_DIR = $userData',
+      `& ${powershellString(`${repoPath}\\release\\win-arm64-unpacked\\Caul.exe`)}`
     ].join('; '))
   ], { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 });
 
-  if (!smoke.ok || !smoke.text.includes('susura-renderer-llm-smoke')) {
+  if (!smoke.ok || !smoke.text.includes('caul-renderer-llm-smoke')) {
     console.error('Windows packaged renderer AI smoke failed.');
     console.error(smoke.text);
     process.exit(1);
@@ -1088,7 +1088,7 @@ async function runWindowsRendererAiSmoke(repoPath) {
 
 async function runLinuxTranscriptionSmoke(sshUser, ipAddress, knownHosts, backendPath) {
   const modelDir = process.env[profile.modelEnv] ?? profile.defaultModelDir;
-  const fixturePath = '/tmp/susura-known-16k.wav';
+  const fixturePath = '/tmp/caul-known-16k.wav';
   const localFixture = await createLocalTranscriptionFixture();
   const copy = await execFileAsync('scp', [
     '-o',
@@ -1116,7 +1116,7 @@ async function runLinuxTranscriptionSmoke(sshUser, ipAddress, knownHosts, backen
     knownHosts,
     [
       `test -d ${shellQuote(modelDir)}`,
-      `SUSURA_PARAKEET_MODEL_DIR=${shellQuote(modelDir)} ${shellQuote(backendPath)} --transcribe-parakeet-wav ${shellQuote(fixturePath)}`
+      `CAUL_PARAKEET_MODEL_DIR=${shellQuote(modelDir)} ${shellQuote(backendPath)} --transcribe-parakeet-wav ${shellQuote(fixturePath)}`
     ].join(' && '),
     { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 }
   );
@@ -1139,7 +1139,7 @@ async function runLinuxRendererTranscriptionSmoke(sshUser, ipAddress, knownHosts
   const modelDir = process.env[profile.modelEnv] ?? profile.defaultModelDir;
   const userData = `${repoPath}/artifacts/linux-renderer-transcription-smoke-user-data`;
   const localFixture = await createLocalTranscriptionFixture(1);
-  const fixturePath = '/tmp/susura-renderer-known-16k.wav';
+  const fixturePath = '/tmp/caul-renderer-known-16k.wav';
 
   const copy = await execFileAsync('scp', [
     '-o',
@@ -1170,18 +1170,18 @@ async function runLinuxRendererTranscriptionSmoke(sshUser, ipAddress, knownHosts
       `mkdir -p ${shellQuote(`${userData}/models`)}`,
       `ln -s ${shellQuote(modelDir)} ${shellQuote(`${userData}/models/parakeet-tdt-0.6b-v3-int8`)}`,
       `printf '%s\\n' ${shellQuote(JSON.stringify(setupStateSeed()))} > ${shellQuote(`${userData}/setup-state.json`)}`,
-      `((sleep 8; wpctl set-mute @DEFAULT_AUDIO_SINK@ 0 >/tmp/susura-renderer-pw-play.log 2>&1 || true; wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.70 >>/tmp/susura-renderer-pw-play.log 2>&1 || true; deadline=$((SECONDS + 55)); while [ "$SECONDS" -lt "$deadline" ]; do timeout 18 pw-play ${shellQuote(fixturePath)} >>/tmp/susura-renderer-pw-play.log 2>&1 || true; sleep 1; done) &)`,
+      `((sleep 8; wpctl set-mute @DEFAULT_AUDIO_SINK@ 0 >/tmp/caul-renderer-pw-play.log 2>&1 || true; wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.70 >>/tmp/caul-renderer-pw-play.log 2>&1 || true; deadline=$((SECONDS + 55)); while [ "$SECONDS" -lt "$deadline" ]; do timeout 18 pw-play ${shellQuote(fixturePath)} >>/tmp/caul-renderer-pw-play.log 2>&1 || true; sleep 1; done) &)`,
       [
         'DISPLAY=:0',
-        'SUSURA_RENDERER_TRANSCRIPTION_SMOKE_MS=65000',
-        'SUSURA_DISABLE_MODEL_AUTO_DOWNLOAD=1',
-        'SUSURA_LLM_DISABLE_PERSISTENT_PI=1',
-        'SUSURA_RENDERER_TRANSCRIPTION_SMOKE_NO_LLM=1',
-        'SUSURA_PIPELINE_METRICS=1',
-        'SUSURA_ENDPOINT_ENERGY_THRESHOLD=0.0001',
-        `SUSURA_USER_DATA_DIR=${shellQuote(userData)}`,
-        `SUSURA_RENDERER_TRANSCRIPTION_EXPECTED=${shellQuote(transcriptionExpectedPhrase)}`,
-        '/opt/Susura/susura'
+        'CAUL_RENDERER_TRANSCRIPTION_SMOKE_MS=65000',
+        'CAUL_DISABLE_MODEL_AUTO_DOWNLOAD=1',
+        'CAUL_LLM_DISABLE_PERSISTENT_PI=1',
+        'CAUL_RENDERER_TRANSCRIPTION_SMOKE_NO_LLM=1',
+        'CAUL_PIPELINE_METRICS=1',
+        'CAUL_ENDPOINT_ENERGY_THRESHOLD=0.0001',
+        `CAUL_USER_DATA_DIR=${shellQuote(userData)}`,
+        `CAUL_RENDERER_TRANSCRIPTION_EXPECTED=${shellQuote(transcriptionExpectedPhrase)}`,
+        '/opt/Caul/caul'
       ].join(' ')
     ].join(' && '),
     { timeout: 90_000, maxBuffer: 20 * 1024 * 1024 }
@@ -1189,7 +1189,7 @@ async function runLinuxRendererTranscriptionSmoke(sshUser, ipAddress, knownHosts
 
   await localFixture.cleanup();
 
-  if (!smoke.ok || !smoke.text.includes('susura-renderer-transcription-smoke')) {
+  if (!smoke.ok || !smoke.text.includes('caul-renderer-transcription-smoke')) {
     console.error('Linux packaged renderer transcription smoke failed.');
     console.error(smoke.text);
     process.exit(1);
@@ -1199,7 +1199,7 @@ async function runLinuxRendererTranscriptionSmoke(sshUser, ipAddress, knownHosts
 }
 
 async function runLinuxRendererAiSmoke(sshUser, ipAddress, knownHosts) {
-  const userData = '/tmp/susura-linux-renderer-ai-smoke';
+  const userData = '/tmp/caul-linux-renderer-ai-smoke';
   const smokeOutputFile = `${userData}/smoke-output.log`;
   const smoke = await runSsh(
     sshUser,
@@ -1208,13 +1208,13 @@ async function runLinuxRendererAiSmoke(sshUser, ipAddress, knownHosts) {
     [
       `rm -rf ${shellQuote(userData)}`,
       `mkdir -p ${shellQuote(userData)}`,
-      `DISPLAY=:0 SUSURA_RENDERER_LLM_SMOKE=1 SUSURA_USER_DATA_DIR=${shellQuote(userData)} SUSURA_SMOKE_OUTPUT_FILE=${shellQuote(smokeOutputFile)} /opt/Susura/susura`,
+      `DISPLAY=:0 CAUL_RENDERER_LLM_SMOKE=1 CAUL_USER_DATA_DIR=${shellQuote(userData)} CAUL_SMOKE_OUTPUT_FILE=${shellQuote(smokeOutputFile)} /opt/Caul/caul`,
       `cat ${shellQuote(smokeOutputFile)} 2>/dev/null || true`
     ].join(' && '),
     { timeout: 45_000, maxBuffer: 10 * 1024 * 1024 }
   );
 
-  if (!smoke.ok || !smoke.text.includes('susura-renderer-llm-smoke')) {
+  if (!smoke.ok || !smoke.text.includes('caul-renderer-llm-smoke')) {
     console.error('Linux packaged renderer AI smoke failed.');
     console.error(smoke.text);
     process.exit(1);
@@ -1224,7 +1224,7 @@ async function runLinuxRendererAiSmoke(sshUser, ipAddress, knownHosts) {
 }
 
 async function createLocalTranscriptionFixture(repetitions = 1) {
-  const directory = await mkdtemp(path.join(tmpdir(), 'susura-transcription-fixture-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'caul-transcription-fixture-'));
   const aiffPath = path.join(directory, 'known.aiff');
   const wavPath = path.join(directory, 'known-16k.wav');
   const phrase = Array.from({ length: repetitions }, () => transcriptionExpectedPhrase).join(' ');
@@ -1275,7 +1275,7 @@ function windowsSpeechPlaybackScript(repetitions = 1) {
 
   return [
     '$ErrorActionPreference = "Stop"',
-    '$wav = Join-Path $env:TEMP "susura-renderer-known-16k.wav"',
+    '$wav = Join-Path $env:TEMP "caul-renderer-known-16k.wav"',
     'Add-Type -AssemblyName System.Speech',
     '$voice = New-Object System.Speech.Synthesis.SpeechSynthesizer',
     '$format = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(16000, [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen, [System.Speech.AudioFormat.AudioChannel]::Mono)',
@@ -1304,7 +1304,7 @@ function windowsSpeechPrepareAndPlayScript(repetitions = 1, options = {}) {
       ];
 
   return [
-    '$wav = Join-Path $env:TEMP "susura-renderer-known-16k.wav"',
+    '$wav = Join-Path $env:TEMP "caul-renderer-known-16k.wav"',
     'Add-Type -AssemblyName System.Speech',
     '$voice = New-Object System.Speech.Synthesis.SpeechSynthesizer',
     '$format = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(16000, [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen, [System.Speech.AudioFormat.AudioChannel]::Mono)',
@@ -1333,7 +1333,7 @@ function assertTranscriptionSmoke(text, label) {
 }
 
 function assertRendererTranscriptionSmoke(text, label) {
-  const summary = parsePrefixedJson(text, 'susura-renderer-transcription-smoke');
+  const summary = parsePrefixedJson(text, 'caul-renderer-transcription-smoke');
   const transcript = summary?.longestOutput || summary?.renderedOutput || '';
   const wordOverlap = scoreTranscript(transcriptionExpectedPhrase, transcript);
   const transcriptWords = normaliseWords(transcript);
@@ -1364,7 +1364,7 @@ function assertRendererTranscriptionSmoke(text, label) {
 }
 
 function assertRendererAiSmoke(text, label) {
-  const summary = parsePrefixedJson(text, 'susura-renderer-llm-smoke');
+  const summary = parsePrefixedJson(text, 'caul-renderer-llm-smoke');
 
   if (!summary?.finalValue || summary.finalValue.trim() === 'No response yet.') {
     console.error(`${label} packaged renderer AI smoke did not prove a visible AI response.`);
@@ -1444,7 +1444,7 @@ function powershellString(value) {
 function linuxToneStimulusCommand(logPath) {
   const script = [
     'import math, struct, wave',
-    "path = '/tmp/susura-audio-stimulus.wav'",
+    "path = '/tmp/caul-audio-stimulus.wav'",
     'rate = 48000',
     'seconds = 6',
     'chords = [',
@@ -1473,7 +1473,7 @@ function linuxToneStimulusCommand(logPath) {
 
   return [
     `python3 -c ${shellQuote(script)}`,
-    `(timeout 7 pw-play /tmp/susura-audio-stimulus.wav >${shellQuote(logPath)} 2>&1 &)`
+    `(timeout 7 pw-play /tmp/caul-audio-stimulus.wav >${shellQuote(logPath)} 2>&1 &)`
   ].join(' && ');
 }
 

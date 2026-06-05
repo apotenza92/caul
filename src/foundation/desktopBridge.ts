@@ -307,29 +307,29 @@ export type SettingsBridge = {
 };
 
 export function getCaptureBridge(): CaptureBridge | null {
-  return window.susura?.capture ?? null;
+  return window.caul?.capture ?? null;
 }
 
 export function getSystemAudioBridge(): SystemAudioBridge | null {
-  return window.susura?.systemAudio ?? null;
+  return window.caul?.systemAudio ?? null;
 }
 
 export function getTranscriptionBridge(): TranscriptionBridge | null {
-  return window.susura?.transcription ?? null;
+  return window.caul?.transcription ?? null;
 }
 
 export function getLlmBridge(): LlmBridge | null {
-  return window.susura?.llm ?? null;
+  return window.caul?.llm ?? null;
 }
 
 export function getPermissionsBridge(): PermissionsBridge | null {
-  return window.susura?.permissions ?? null;
+  return window.caul?.permissions ?? null;
 }
 
 export function getPrivateOverlayBridge(): PrivateOverlayBridge | null {
-  return window.susura?.privateOverlay ?? null;
+  return window.caul?.privateOverlay ?? null;
 }
 
 export function getSettingsBridge(): SettingsBridge | null {
-  return window.susura?.settings ?? null;
+  return window.caul?.settings ?? null;
 }

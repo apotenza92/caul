@@ -4,16 +4,16 @@ import http from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-const phrase = process.env.SUSURA_KNOWN_TEXT_PHRASE
-  ?? 'Susura verifies steady browser speech. The quiet garden holds a blue book on a wooden table. Streaming text should grow without clearing.';
-const durationMs = Number(process.env.SUSURA_RENDERER_TRANSCRIPTION_SMOKE_MS ?? 45_000);
+const phrase = process.env.CAUL_KNOWN_TEXT_PHRASE
+  ?? 'Caul verifies steady browser speech. The quiet garden holds a blue book on a wooden table. Streaming text should grow without clearing.';
+const durationMs = Number(process.env.CAUL_RENDERER_TRANSCRIPTION_SMOKE_MS ?? 45_000);
 const devServerPort = await getAvailablePort();
 const debuggingPort = await getAvailablePort();
 const devServerUrl = `http://127.0.0.1:${devServerPort}`;
-const userDataDir = mkdtempSync(path.join(tmpdir(), 'susura-renderer-smoke-'));
-const minWordOverlap = Number(process.env.SUSURA_KNOWN_TEXT_MIN_WORD_OVERLAP ?? 0.32);
-const muteSystemOutput = process.env.SUSURA_SMOKE_MUTE_SYSTEM_OUTPUT !== 'false';
-const speechVolume = process.env.SUSURA_BROWSER_SPEECH_VOLUME ?? (muteSystemOutput ? '0.85' : '0.02');
+const userDataDir = mkdtempSync(path.join(tmpdir(), 'caul-renderer-smoke-'));
+const minWordOverlap = Number(process.env.CAUL_KNOWN_TEXT_MIN_WORD_OVERLAP ?? 0.32);
+const muteSystemOutput = process.env.CAUL_SMOKE_MUTE_SYSTEM_OUTPUT !== 'false';
+const speechVolume = process.env.CAUL_BROWSER_SPEECH_VOLUME ?? (muteSystemOutput ? '0.85' : '0.02');
 let originalAudioSettings = null;
 let output = '';
 
@@ -40,8 +40,8 @@ try {
     env: {
       ...process.env,
       VITE_DEV_SERVER_URL: devServerUrl,
-      SUSURA_RENDERER_TRANSCRIPTION_SMOKE_MS: String(durationMs),
-      SUSURA_USER_DATA_DIR: userDataDir
+      CAUL_RENDERER_TRANSCRIPTION_SMOKE_MS: String(durationMs),
+      CAUL_USER_DATA_DIR: userDataDir
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
@@ -61,10 +61,10 @@ try {
   const speech = spawn(process.execPath, ['scripts/browser-speech-audio.mjs'], {
     env: {
       ...process.env,
-      SUSURA_BROWSER_DEBUG_PORT: String(debuggingPort),
-      SUSURA_BROWSER_SPEECH_MS: String(Math.max(16_000, durationMs - 8_000)),
-      SUSURA_BROWSER_SPEECH_TEXT: phrase,
-      SUSURA_BROWSER_SPEECH_VOLUME: speechVolume
+      CAUL_BROWSER_DEBUG_PORT: String(debuggingPort),
+      CAUL_BROWSER_SPEECH_MS: String(Math.max(16_000, durationMs - 8_000)),
+      CAUL_BROWSER_SPEECH_TEXT: phrase,
+      CAUL_BROWSER_SPEECH_VOLUME: speechVolume
     },
     stdio: 'inherit'
   });
@@ -77,8 +77,8 @@ try {
 
   const smokeLine = output
     .split('\n')
-    .find((line) => line.includes('susura-renderer-transcription-smoke'));
-  const summary = smokeLine ? JSON.parse(smokeLine.replace(/^.*susura-renderer-transcription-smoke /, '')) : null;
+    .find((line) => line.includes('caul-renderer-transcription-smoke'));
+  const summary = smokeLine ? JSON.parse(smokeLine.replace(/^.*caul-renderer-transcription-smoke /, '')) : null;
   const transcript = summary?.longestOutput || summary?.renderedOutput || '';
   const wordOverlap = scoreTranscript(phrase, transcript);
   const coreAudioStarted = summary?.stages?.includes('Core Audio capture started') ?? false;
@@ -96,7 +96,7 @@ try {
     summary
   };
 
-  console.log(`susura-known-text-result ${JSON.stringify(result)}`);
+  console.log(`caul-known-text-result ${JSON.stringify(result)}`);
 
   if (
     !summary?.detected ||

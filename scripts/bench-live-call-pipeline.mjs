@@ -4,15 +4,15 @@ import http from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-const phrase = process.env.SUSURA_BENCH_PHRASE
+const phrase = process.env.CAUL_BENCH_PHRASE
   ?? 'What is the refund policy for annual plans?';
-const minWordOverlap = Number(process.env.SUSURA_BENCH_MIN_WORD_OVERLAP ?? 0.45);
+const minWordOverlap = Number(process.env.CAUL_BENCH_MIN_WORD_OVERLAP ?? 0.45);
 const devServerPort = await getAvailablePort();
 const debuggingPort = await getAvailablePort();
 const devServerUrl = `http://127.0.0.1:${devServerPort}`;
-const userDataDir = await mkdtemp(path.join(tmpdir(), 'susura-live-call-bench-'));
-const fixtureDir = await mkdtemp(path.join(tmpdir(), 'susura-live-call-audio-'));
-const utteranceDumpDir = await mkdtemp(path.join(tmpdir(), 'susura-live-call-utterances-'));
+const userDataDir = await mkdtemp(path.join(tmpdir(), 'caul-live-call-bench-'));
+const fixtureDir = await mkdtemp(path.join(tmpdir(), 'caul-live-call-audio-'));
+const utteranceDumpDir = await mkdtemp(path.join(tmpdir(), 'caul-live-call-utterances-'));
 const aiffPath = path.join(fixtureDir, 'fixture.aiff');
 const wavPath = path.join(fixtureDir, 'fixture.wav');
 let originalAudioSettings = null;
@@ -34,8 +34,8 @@ await writeFile(path.join(fixtureDir, 'fixture.txt'), phrase, 'utf8');
 await run('say', ['-o', aiffPath, phrase]);
 await run('afconvert', ['-f', 'WAVE', '-d', 'LEI16', aiffPath, wavPath]);
 const fixtureDurationMs = await readAudioDurationMs(wavPath);
-const speechStartDelayMs = Number(process.env.SUSURA_BENCH_SPEECH_START_DELAY_MS ?? 500);
-const durationMs = Number(process.env.SUSURA_BENCH_DURATION_MS ?? 40_000);
+const speechStartDelayMs = Number(process.env.CAUL_BENCH_SPEECH_START_DELAY_MS ?? 500);
+const durationMs = Number(process.env.CAUL_BENCH_DURATION_MS ?? 40_000);
 
 const vite = spawn('node', ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', String(devServerPort)], {
   stdio: ['ignore', 'pipe', 'pipe']
@@ -53,12 +53,12 @@ try {
     env: {
       ...process.env,
       VITE_DEV_SERVER_URL: devServerUrl,
-      SUSURA_RENDERER_TRANSCRIPTION_SMOKE_MS: String(durationMs),
-      SUSURA_USER_DATA_DIR: userDataDir,
-      SUSURA_PIPELINE_METRICS: '1',
-      SUSURA_PRELOAD_PARAKEET: '1',
-      SUSURA_BENCH_TRANSCRIPTION_EVENT_LOG: '1',
-      SUSURA_DUMP_UTTERANCE_DIR: utteranceDumpDir
+      CAUL_RENDERER_TRANSCRIPTION_SMOKE_MS: String(durationMs),
+      CAUL_USER_DATA_DIR: userDataDir,
+      CAUL_PIPELINE_METRICS: '1',
+      CAUL_PRELOAD_PARAKEET: '1',
+      CAUL_BENCH_TRANSCRIPTION_EVENT_LOG: '1',
+      CAUL_DUMP_UTTERANCE_DIR: utteranceDumpDir
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
@@ -81,7 +81,7 @@ try {
 
   await Promise.race([
     readyToPlay,
-    wait(Number(process.env.SUSURA_BENCH_READY_TIMEOUT_MS ?? 20_000))
+    wait(Number(process.env.CAUL_BENCH_READY_TIMEOUT_MS ?? 20_000))
   ]);
   await wait(speechStartDelayMs);
 
@@ -90,11 +90,11 @@ try {
   speech = spawn(process.execPath, ['scripts/browser-speech-audio.mjs'], {
     env: {
       ...process.env,
-      SUSURA_BROWSER_DEBUG_PORT: String(debuggingPort),
-      SUSURA_BROWSER_MEDIA_URL: `file://${wavPath}`,
-      SUSURA_BROWSER_SPEECH_MS: String(fixtureDurationMs + 4_000),
-      SUSURA_BROWSER_SPEECH_VOLUME: process.env.SUSURA_BROWSER_SPEECH_VOLUME ?? '0.85',
-      SUSURA_BROWSER_SPEECH_LOOP: 'false'
+      CAUL_BROWSER_DEBUG_PORT: String(debuggingPort),
+      CAUL_BROWSER_MEDIA_URL: `file://${wavPath}`,
+      CAUL_BROWSER_SPEECH_MS: String(fixtureDurationMs + 4_000),
+      CAUL_BROWSER_SPEECH_VOLUME: process.env.CAUL_BROWSER_SPEECH_VOLUME ?? '0.85',
+      CAUL_BROWSER_SPEECH_LOOP: 'false'
     },
     stdio: 'inherit'
   });
@@ -106,8 +106,8 @@ try {
 
   const smokeLine = output
     .split('\n')
-    .find((line) => line.includes('susura-renderer-transcription-smoke'));
-  const summary = smokeLine ? JSON.parse(smokeLine.replace(/^.*susura-renderer-transcription-smoke /, '')) : null;
+    .find((line) => line.includes('caul-renderer-transcription-smoke'));
+  const summary = smokeLine ? JSON.parse(smokeLine.replace(/^.*caul-renderer-transcription-smoke /, '')) : null;
   const completedEvents = summary?.completedEvents ?? [];
   const completedTranscript = completedEvents.map((event) => event.text).filter(Boolean).join('\n');
   const transcript = completedTranscript || summary?.longestOutput || summary?.renderedOutput || '';
@@ -125,9 +125,9 @@ try {
   });
 
   for (const metric of metrics.filter((metric) => metric.name !== 'frame_received_at')) {
-    console.log(`susura-live-call-bench-metric ${JSON.stringify(metric)}`);
+    console.log(`caul-live-call-bench-metric ${JSON.stringify(metric)}`);
   }
-  console.log(`susura-live-call-bench ${JSON.stringify(benchmark)}`);
+  console.log(`caul-live-call-bench ${JSON.stringify(benchmark)}`);
 
   if (
     electronCode !== 0 ||
@@ -149,13 +149,13 @@ try {
 }
 
 function observeElectronLine(line) {
-  if (!line.includes('susura-transcription-event')) {
+  if (!line.includes('caul-transcription-event')) {
     return;
   }
 
   let event;
   try {
-    event = JSON.parse(line.replace(/^.*susura-transcription-event /, ''));
+    event = JSON.parse(line.replace(/^.*caul-transcription-event /, ''));
   } catch {
     return;
   }

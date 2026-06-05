@@ -18,26 +18,26 @@ const { createStopFlushController } = require('./transcriptionStopFlush.cjs');
 const { createUpdaterService } = require('./updater.cjs');
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
-const smokeExitMs = Number(process.env.SUSURA_SMOKE_EXIT_MS ?? 0);
-const systemAudioSmokeMs = Number(process.env.SUSURA_SYSTEM_AUDIO_SMOKE_MS ?? 0);
-const localParakeetSmokeMs = Number(process.env.SUSURA_LOCAL_PARAKEET_SMOKE_MS ?? 0);
-const rendererTranscriptionSmokeMs = Number(process.env.SUSURA_RENDERER_TRANSCRIPTION_SMOKE_MS ?? 0);
-const rendererTranscriptionSmokeNoLlm = process.env.SUSURA_RENDERER_TRANSCRIPTION_SMOKE_NO_LLM === '1';
-const rendererTranscriptionSmokeBridgeStart = process.env.SUSURA_RENDERER_TRANSCRIPTION_SMOKE_BRIDGE_START === '1';
-const rendererLlmSmoke = process.env.SUSURA_RENDERER_LLM_SMOKE === '1';
-const rendererRealLlmSmoke = process.env.SUSURA_RENDERER_REAL_LLM_SMOKE === '1';
-const onboardingSmokeDir = process.env.SUSURA_ONBOARDING_SMOKE_DIR;
-const resourceSmokeMs = Number(process.env.SUSURA_RESOURCE_SMOKE_MS ?? 0);
-const resourceSmokeMaxWorkingSetMb = Number(process.env.SUSURA_RESOURCE_SMOKE_MAX_WORKING_SET_MB ?? 450);
-const packagedLaunchSmokeMs = Number(process.env.SUSURA_PACKAGED_LAUNCH_SMOKE_MS ?? 0);
-const packagedLaunchSmokeRequiresOnboarding = process.env.SUSURA_PACKAGED_LAUNCH_SMOKE_REQUIRE_ONBOARDING === '1';
-const packagedLaunchSmokeWaitMs = Number(process.env.SUSURA_PACKAGED_LAUNCH_SMOKE_WAIT_MS ?? (packagedLaunchSmokeRequiresOnboarding ? 5000 : 1000));
-const packagedUpdaterSmoke = process.env.SUSURA_PACKAGED_UPDATER_SMOKE === '1';
-const packagedPrivacySmoke = process.env.SUSURA_PACKAGED_PRIVACY_SMOKE === '1';
-const packagedOnboardingCompletionSmoke = process.env.SUSURA_PACKAGED_ONBOARDING_COMPLETION_SMOKE === '1';
-const windowsExternalCaptureProbe = process.env.SUSURA_WINDOWS_EXTERNAL_CAPTURE_PROBE === '1';
-const smokeOutputFile = process.env.SUSURA_SMOKE_OUTPUT_FILE;
-const piLlmBridgeMode = String(process.env.SUSURA_PI_LLM_BRIDGE ?? '').trim().toLowerCase();
+const smokeExitMs = Number(process.env.CAUL_SMOKE_EXIT_MS ?? 0);
+const systemAudioSmokeMs = Number(process.env.CAUL_SYSTEM_AUDIO_SMOKE_MS ?? 0);
+const localParakeetSmokeMs = Number(process.env.CAUL_LOCAL_PARAKEET_SMOKE_MS ?? 0);
+const rendererTranscriptionSmokeMs = Number(process.env.CAUL_RENDERER_TRANSCRIPTION_SMOKE_MS ?? 0);
+const rendererTranscriptionSmokeNoLlm = process.env.CAUL_RENDERER_TRANSCRIPTION_SMOKE_NO_LLM === '1';
+const rendererTranscriptionSmokeBridgeStart = process.env.CAUL_RENDERER_TRANSCRIPTION_SMOKE_BRIDGE_START === '1';
+const rendererLlmSmoke = process.env.CAUL_RENDERER_LLM_SMOKE === '1';
+const rendererRealLlmSmoke = process.env.CAUL_RENDERER_REAL_LLM_SMOKE === '1';
+const onboardingSmokeDir = process.env.CAUL_ONBOARDING_SMOKE_DIR;
+const resourceSmokeMs = Number(process.env.CAUL_RESOURCE_SMOKE_MS ?? 0);
+const resourceSmokeMaxWorkingSetMb = Number(process.env.CAUL_RESOURCE_SMOKE_MAX_WORKING_SET_MB ?? 450);
+const packagedLaunchSmokeMs = Number(process.env.CAUL_PACKAGED_LAUNCH_SMOKE_MS ?? 0);
+const packagedLaunchSmokeRequiresOnboarding = process.env.CAUL_PACKAGED_LAUNCH_SMOKE_REQUIRE_ONBOARDING === '1';
+const packagedLaunchSmokeWaitMs = Number(process.env.CAUL_PACKAGED_LAUNCH_SMOKE_WAIT_MS ?? (packagedLaunchSmokeRequiresOnboarding ? 5000 : 1000));
+const packagedUpdaterSmoke = process.env.CAUL_PACKAGED_UPDATER_SMOKE === '1';
+const packagedPrivacySmoke = process.env.CAUL_PACKAGED_PRIVACY_SMOKE === '1';
+const packagedOnboardingCompletionSmoke = process.env.CAUL_PACKAGED_ONBOARDING_COMPLETION_SMOKE === '1';
+const windowsExternalCaptureProbe = process.env.CAUL_WINDOWS_EXTERNAL_CAPTURE_PROBE === '1';
+const smokeOutputFile = process.env.CAUL_SMOKE_OUTPUT_FILE;
+const piLlmBridgeMode = String(process.env.CAUL_PI_LLM_BRIDGE ?? '').trim().toLowerCase();
 
 const defaultAppWindowSize = {
   width: 960,
@@ -64,7 +64,7 @@ function emitSmokeLine(line) {
     fsSync.mkdirSync(path.dirname(smokeOutputFile), { recursive: true });
     fsSync.appendFileSync(smokeOutputFile, `${line}${os.EOL}`);
   } catch (error) {
-    console.error(`susura-smoke-output failed ${error.message}`);
+    console.error(`caul-smoke-output failed ${error.message}`);
   }
 }
 const defaultHandleSizePreset = 'medium';
@@ -365,7 +365,7 @@ async function runWindowsCaptureProtectionProbe() {
 
 async function runWindowsExternalCaptureProtectionProbe() {
   if (process.platform !== 'win32') {
-    emitSmokeLine(`susura-windows-capture-probe ${JSON.stringify({
+    emitSmokeLine(`caul-windows-capture-probe ${JSON.stringify({
       error: 'Windows capture protection probe only runs on Windows.',
       ok: false
     })}`);
@@ -390,7 +390,7 @@ async function runWindowsExternalCaptureProtectionProbe() {
     y: workArea.y + 24,
     ...windowSize
   };
-  const holdMs = Number(process.env.SUSURA_WINDOWS_EXTERNAL_CAPTURE_PROBE_MS ?? 8000);
+  const holdMs = Number(process.env.CAUL_WINDOWS_EXTERNAL_CAPTURE_PROBE_MS ?? 8000);
   const protectedWindow = createCaptureProbeWindow(protectedBounds, '#ff0000', true);
   const controlWindow = createCaptureProbeWindow(controlBounds, '#00ff00', false);
 
@@ -409,7 +409,7 @@ async function runWindowsExternalCaptureProtectionProbe() {
   await wait(250);
   const internalCapture = await runWindowsVisibleCaptureAnalysis(display, protectedBounds, controlBounds, scaleFactor, windowSize);
 
-  emitSmokeLine(`susura-windows-capture-probe ${JSON.stringify({
+  emitSmokeLine(`caul-windows-capture-probe ${JSON.stringify({
     controlBounds,
     display: {
       id: display.id,
@@ -634,18 +634,18 @@ function getAppDisplayName() {
   const name = String(app.getName() || '').toLowerCase();
 
   if (name.includes('dev-private')) {
-    return 'Susura Dev-Private';
+    return 'Caul Dev-Private';
   }
 
   if (name.includes('dev')) {
-    return 'Susura Dev';
+    return 'Caul Dev';
   }
 
   if (name.includes('beta')) {
-    return 'Susura Beta';
+    return 'Caul Beta';
   }
 
-  return 'Susura';
+  return 'Caul';
 }
 
 function getAppChannel() {
@@ -671,7 +671,7 @@ function getUpdaterService() {
     updaterService = createUpdaterService({
       appChannel: getAppChannel(),
       appName: getAppDisplayName(),
-      forceEnabled: process.env.SUSURA_FORCE_UPDATE_CHECKS === '1',
+      forceEnabled: process.env.CAUL_FORCE_UPDATE_CHECKS === '1',
       isDev,
       onBeforeInstallDownloadedUpdate: prepareForDownloadedUpdateInstall
     });
@@ -704,8 +704,8 @@ function getBundledScriptPath(name) {
     : path.join(__dirname, '..', 'scripts', name);
 }
 
-if (process.env.SUSURA_USER_DATA_DIR) {
-  app.setPath('userData', process.env.SUSURA_USER_DATA_DIR);
+if (process.env.CAUL_USER_DATA_DIR) {
+  app.setPath('userData', process.env.CAUL_USER_DATA_DIR);
 }
 
 function getWindowStatePath() {
@@ -2149,7 +2149,7 @@ function writeTranscriptDebugLog(stage, payload = {}) {
     ...payload
   };
 
-  console.log(`susura-transcript-debug ${JSON.stringify(entry)}`);
+  console.log(`caul-transcript-debug ${JSON.stringify(entry)}`);
 
   try {
     if (!transcriptDebugLogPath) {
@@ -2160,29 +2160,29 @@ function writeTranscriptDebugLog(stage, payload = {}) {
 
     fsSync.appendFileSync(transcriptDebugLogPath, `${JSON.stringify(entry)}\n`);
   } catch (error) {
-    console.error(`susura-transcript-debug-write-failed ${error.message}`);
+    console.error(`caul-transcript-debug-write-failed ${error.message}`);
   }
 }
 
 function isTranscriptDebugLogEnabled() {
-  return process.env.SUSURA_TRANSCRIPT_DEBUG_LOG === '1' || getAppChannel() === 'dev';
+  return process.env.CAUL_TRANSCRIPT_DEBUG_LOG === '1' || getAppChannel() === 'dev';
 }
 
 function emitTranscriptionEvent(event) {
-  if (process.env.SUSURA_BENCH_TRANSCRIPTION_EVENT_LOG === '1' && event.name !== 'frame_received_at') {
-    console.log(`susura-transcription-event ${JSON.stringify(event)}`);
+  if (process.env.CAUL_BENCH_TRANSCRIPTION_EVENT_LOG === '1' && event.name !== 'frame_received_at') {
+    console.log(`caul-transcription-event ${JSON.stringify(event)}`);
   }
 
   writeTranscriptDebugLog('electron.emit_transcription_event', { event });
 
   BrowserWindow.getAllWindows().forEach((window) => {
-    window.webContents.send('susura:transcription-event', event);
+    window.webContents.send('caul:transcription-event', event);
   });
 }
 
 function emitLlmStatus() {
   BrowserWindow.getAllWindows().forEach((window) => {
-    window.webContents.send('susura:llm-status', {
+    window.webContents.send('caul:llm-status', {
       ok: true,
       ready: llmWarmStatus === 'ready',
       status: llmWarmStatus
@@ -2632,7 +2632,7 @@ function buildTranscriptionRecommendation() {
     + (cpuCores * 10)
     + Math.min(45, probe.score)
   );
-  const parakeetLooksGood = totalMemoryGb >= 12 && cpuCores >= 6 && parakeetScore >= 140;
+  const parakeetLooksGood = totalMemoryGb >= 8 && cpuCores >= 4 && parakeetScore >= 95;
   const moonshineLooksGood = totalMemoryGb >= 4 && cpuCores >= 2 && moonshineScore >= 70;
   const recommended = parakeetLooksGood ? 'local-parakeet' : 'local-moonshine-tiny';
   const recommendedModel = parakeetLooksGood
@@ -2649,7 +2649,7 @@ function buildTranscriptionRecommendation() {
         : 'Lightest available local option.'
     };
 
-  const autoDownloadModel = process.env.SUSURA_DISABLE_MODEL_AUTO_DOWNLOAD !== '1';
+  const autoDownloadModel = process.env.CAUL_DISABLE_MODEL_AUTO_DOWNLOAD !== '1';
 
   return {
     ok: true,
@@ -2703,7 +2703,7 @@ function emitParakeetStatus() {
   const status = getParakeetStatus();
 
   BrowserWindow.getAllWindows().forEach((window) => {
-    window.webContents.send('susura:parakeet-status', status);
+    window.webContents.send('caul:parakeet-status', status);
   });
 }
 
@@ -3099,7 +3099,7 @@ function openPiSetup(mode = 'login') {
 
   return {
     ok: false,
-    message: 'Pi model setup is handled inside Susura. Sign in with ChatGPT first.'
+    message: 'Pi model setup is handled inside Caul. Sign in with ChatGPT first.'
   };
 }
 
@@ -3375,7 +3375,7 @@ async function shouldShowOnboarding() {
 
 function getAudioHelperCommand(args) {
   if (app.isPackaged) {
-    const bundledPath = getBundledExecutablePath('SusuraAudioHelper');
+    const bundledPath = getBundledExecutablePath('CaulAudioHelper');
 
     if (fsSync.existsSync(bundledPath)) {
       return {
@@ -3386,8 +3386,8 @@ function getAudioHelperCommand(args) {
   }
 
   const packagePath = path.join(__dirname, '..', 'native', 'macos-audio-helper');
-  const releaseBinaryPath = path.join(packagePath, '.build', 'release', 'SusuraAudioHelper');
-  const debugBinaryPath = path.join(packagePath, '.build', 'debug', 'SusuraAudioHelper');
+  const releaseBinaryPath = path.join(packagePath, '.build', 'release', 'CaulAudioHelper');
+  const debugBinaryPath = path.join(packagePath, '.build', 'debug', 'CaulAudioHelper');
   const binaryPath = fsSync.existsSync(releaseBinaryPath) ? releaseBinaryPath : debugBinaryPath;
 
   if (fsSync.existsSync(binaryPath)) {
@@ -3399,7 +3399,7 @@ function getAudioHelperCommand(args) {
 
   return {
     command: 'swift',
-    args: ['run', '--package-path', packagePath, 'SusuraAudioHelper', ...args]
+    args: ['run', '--package-path', packagePath, 'CaulAudioHelper', ...args]
   };
 }
 
@@ -3410,17 +3410,17 @@ function getSystemAudioHelperCommand() {
 }
 
 function getAudioHelperEnvironment() {
-  const bundledPath = getBundledExecutablePath('SusuraAudioHelper');
+  const bundledPath = getBundledExecutablePath('CaulAudioHelper');
 
   return fsSync.existsSync(bundledPath)
-    ? { SUSURA_AUDIO_HELPER_PATH: bundledPath }
+    ? { CAUL_AUDIO_HELPER_PATH: bundledPath }
     : {};
 }
 
 function getDesktopBackendCommand(args) {
   const backendName = process.platform === 'win32'
-    ? 'susura-desktop-backend.exe'
-    : 'susura-desktop-backend';
+    ? 'caul-desktop-backend.exe'
+    : 'caul-desktop-backend';
 
   if (app.isPackaged) {
     const bundledPath = getBundledExecutablePath(backendName);
@@ -3446,7 +3446,7 @@ function getDesktopBackendCommand(args) {
 
   return {
     command: 'cargo',
-    args: ['run', '-p', 'susura-desktop-backend', '--', ...args]
+    args: ['run', '-p', 'caul-desktop-backend', '--', ...args]
   };
 }
 
@@ -3604,9 +3604,9 @@ function startLocalTranscriptionWarmDaemon() {
     env: {
       ...process.env,
       ...getAudioHelperEnvironment(),
-      SUSURA_MODEL_ROOT: getParakeetModelRoot(),
-      SUSURA_PRELOAD_LOCAL_TRANSCRIPTION: '1',
-      SUSURA_TRANSCRIPTION_MODEL: modelId
+      CAUL_MODEL_ROOT: getParakeetModelRoot(),
+      CAUL_PRELOAD_LOCAL_TRANSCRIPTION: '1',
+      CAUL_TRANSCRIPTION_MODEL: modelId
     },
     stdio: ['pipe', 'pipe', 'pipe']
   });
@@ -3684,7 +3684,7 @@ function prepareLocalTranscriptionCapture(options) {
 }
 
 function shouldWarmLocalTranscriptionOnStartup() {
-  return process.env.SUSURA_DISABLE_PARAKEET_WARMUP !== '1'
+  return process.env.CAUL_DISABLE_PARAKEET_WARMUP !== '1'
     && validateLocalTranscriptionModel()
     && process.platform === 'darwin'
     && smokeExitMs === 0
@@ -3694,7 +3694,7 @@ function shouldWarmLocalTranscriptionOnStartup() {
 }
 
 async function shouldPrepareLocalTranscriptionOnStartup() {
-  if (process.env.SUSURA_DISABLE_TRANSCRIPTION_HOT_PREPARE === '1') {
+  if (process.env.CAUL_DISABLE_TRANSCRIPTION_HOT_PREPARE === '1') {
     return false;
   }
 
@@ -3923,7 +3923,7 @@ class PersistentPiRpcBridge {
       await this.newSession();
 
       if (rendererRealLlmSmoke) {
-        console.log(`susura-llm-timing ${JSON.stringify({
+        console.log(`caul-llm-timing ${JSON.stringify({
           event: 'pi_rpc_prompt_start',
           atMs: Date.now() - requestStartedAt,
           pid: this.child?.pid
@@ -3956,7 +3956,7 @@ class PersistentPiRpcBridge {
       '--thinking', this.thinking
     ];
 
-    if (process.env.SUSURA_PI_SESSION_DIR_MODE === 'app') {
+    if (process.env.CAUL_PI_SESSION_DIR_MODE === 'app') {
       const sessionDir = path.join(app.getPath('userData'), 'pi-sessions');
       fsSync.mkdirSync(sessionDir, { recursive: true });
       args.push('--session-dir', sessionDir);
@@ -3980,7 +3980,7 @@ class PersistentPiRpcBridge {
     this.child.once('exit', (code) => this.handleExit(new Error(`Pi RPC exited with code ${code}.`)));
 
     if (rendererRealLlmSmoke) {
-      console.log(`susura-llm-timing ${JSON.stringify({
+      console.log(`caul-llm-timing ${JSON.stringify({
         event: 'pi_rpc_spawned',
         atMs: 0,
         pid: this.child.pid
@@ -4049,7 +4049,7 @@ class PersistentPiRpcBridge {
   }
 
   nextCommandId() {
-    const id = `susura-${this.nextId}`;
+    const id = `caul-${this.nextId}`;
     this.nextId += 1;
 
     return id;
@@ -4092,7 +4092,7 @@ class PersistentPiRpcBridge {
 
       if (delta) {
         if (rendererRealLlmSmoke && request.output.length === 0) {
-          console.log(`susura-llm-timing ${JSON.stringify({
+          console.log(`caul-llm-timing ${JSON.stringify({
             event: 'pi_rpc_text_delta',
             atMs: Date.now() - request.startedAt
           })}`);
@@ -4143,7 +4143,7 @@ async function requestLlmResponse(transcript, options = {}) {
   }
 
   if (rendererRealLlmSmoke) {
-    console.log(`susura-llm-timing ${JSON.stringify({
+    console.log(`caul-llm-timing ${JSON.stringify({
       event: 'electron_request_started',
       atMs: 0,
       trace
@@ -4153,7 +4153,7 @@ async function requestLlmResponse(transcript, options = {}) {
   emitTranscriptionEvent({ type: 'llm-query', requestId, text: trimmedTranscript });
   const text = await runPiTextRequest(trimmedTranscript, { ...options, attachments }, (delta) => {
     if (rendererRealLlmSmoke) {
-      console.log(`susura-llm-timing ${JSON.stringify({
+      console.log(`caul-llm-timing ${JSON.stringify({
         event: 'electron_delta_emit',
         atMs: Date.now() - requestStartedAt,
         chars: delta.length
@@ -4178,8 +4178,8 @@ function normaliseLlmRequestAttachments(attachments) {
 }
 
 function formatLlmTranscript(transcript) {
-  const windowChars = Number(process.env.SUSURA_LLM_TRANSCRIPT_WINDOW_CHARS ?? 0);
-  const promptShape = process.env.SUSURA_LLM_PROMPT_SHAPE ?? 'raw';
+  const windowChars = Number(process.env.CAUL_LLM_TRANSCRIPT_WINDOW_CHARS ?? 0);
+  const promptShape = process.env.CAUL_LLM_PROMPT_SHAPE ?? 'raw';
   const windowedTranscript = windowChars > 0 && transcript.length > windowChars
     ? transcript.slice(-windowChars).trim()
     : transcript;
@@ -4204,16 +4204,16 @@ function runPiTextRequest(transcript, options = {}, onDelta = () => {}) {
     : getInferredPiModelFromAuth();
   const model = requestedModel
     || configuredModel
-    || process.env.SUSURA_LLM_MODEL
-    || process.env.SUSURA_BENCH_LLM_MODEL
+    || process.env.CAUL_LLM_MODEL
+    || process.env.CAUL_BENCH_LLM_MODEL
     || 'openai-codex/gpt-5.4-mini';
   const thinking = allowedLlmThinking.has(requestedThinking)
     ? requestedThinking
-    : process.env.SUSURA_LLM_THINKING
-    ?? process.env.SUSURA_BENCH_LLM_THINKING
+    : process.env.CAUL_LLM_THINKING
+    ?? process.env.CAUL_BENCH_LLM_THINKING
     ?? 'off';
 
-  const requestStrategy = process.env.SUSURA_LLM_REQUEST_STRATEGY ?? 'persistent';
+  const requestStrategy = process.env.CAUL_LLM_REQUEST_STRATEGY ?? 'persistent';
   const attachments = Array.isArray(options.attachments) ? options.attachments : [];
 
   if (attachments.length > 0) {
@@ -4236,11 +4236,11 @@ function runPiTextRequest(transcript, options = {}, onDelta = () => {}) {
     return runBackupPersistentPiRpcRequest(transcript, { model, thinking }, onDelta);
   }
 
-  if (process.env.SUSURA_LLM_DISABLE_PERSISTENT_PI !== '1') {
+  if (process.env.CAUL_LLM_DISABLE_PERSISTENT_PI !== '1') {
     return runPersistentPiRpcRequest(transcript, { model, thinking }, onDelta)
       .catch((error) => {
         if (rendererRealLlmSmoke) {
-          console.error(`susura-pi-rpc-fallback ${error.message}`);
+          console.error(`caul-pi-rpc-fallback ${error.message}`);
         }
 
         return runOneShotPiTextRequest(transcript, { attachments, model, thinking }, onDelta, runStartedAt);
@@ -4344,7 +4344,7 @@ function warmPersistentPiRpcBridge() {
     return;
   }
 
-  if (process.env.SUSURA_LLM_DISABLE_PERSISTENT_PI === '1') {
+  if (process.env.CAUL_LLM_DISABLE_PERSISTENT_PI === '1') {
     llmWarmStatus = 'ready';
     emitLlmStatus();
     return;
@@ -4352,11 +4352,11 @@ function warmPersistentPiRpcBridge() {
 
   const model = readSetupState().selectedPiModel
     || getInferredPiModelFromAuth()
-    || process.env.SUSURA_LLM_MODEL
-    || process.env.SUSURA_BENCH_LLM_MODEL
+    || process.env.CAUL_LLM_MODEL
+    || process.env.CAUL_BENCH_LLM_MODEL
     || 'openai-codex/gpt-5.4-mini';
-  const thinking = process.env.SUSURA_LLM_THINKING
-    ?? process.env.SUSURA_BENCH_LLM_THINKING
+  const thinking = process.env.CAUL_LLM_THINKING
+    ?? process.env.CAUL_BENCH_LLM_THINKING
     ?? 'off';
 
   if (!allowedLlmThinking.has(thinking)) {
@@ -4372,10 +4372,10 @@ function warmPersistentPiRpcBridge() {
     persistentPiRpcBridge = new PersistentPiRpcBridge({ model, thinking });
   }
 
-  const warmupStrategy = process.env.SUSURA_LLM_WARMUP_STRATEGY ?? 'hidden-prompt';
-  const warmupPrompt = process.env.SUSURA_LLM_WARMUP_PROMPT ?? 'Reply with OK.';
-  const warmupCount = Math.max(1, Number(process.env.SUSURA_LLM_WARMUP_COUNT ?? 1));
-  const warmupTimeoutMs = Math.max(1_000, Number(process.env.SUSURA_LLM_WARMUP_TIMEOUT_MS ?? 8_000));
+  const warmupStrategy = process.env.CAUL_LLM_WARMUP_STRATEGY ?? 'hidden-prompt';
+  const warmupPrompt = process.env.CAUL_LLM_WARMUP_PROMPT ?? 'Reply with OK.';
+  const warmupCount = Math.max(1, Number(process.env.CAUL_LLM_WARMUP_COUNT ?? 1));
+  const warmupTimeoutMs = Math.max(1_000, Number(process.env.CAUL_LLM_WARMUP_TIMEOUT_MS ?? 8_000));
   const warmup = warmupStrategy === 'session-only'
     ? persistentPiRpcBridge.start()
       .then(() => persistentPiRpcBridge?.newSession())
@@ -4395,7 +4395,7 @@ function warmPersistentPiRpcBridge() {
 
   warmup
     .then(() => {
-      if (process.env.SUSURA_LLM_PREWARM_BACKUP !== '1') {
+      if (process.env.CAUL_LLM_PREWARM_BACKUP !== '1') {
         return undefined;
       }
 
@@ -4418,7 +4418,7 @@ function warmPersistentPiRpcBridge() {
       persistentPiRpcBridge = null;
       emitLlmStatus();
 
-      console.error(`susura-pi-rpc-warm-failed ${error.message}`);
+      console.error(`caul-pi-rpc-warm-failed ${error.message}`);
     });
 }
 
@@ -4437,7 +4437,7 @@ function runPersistentWarmupPrompts(bridge, prompt, count) {
 function runOneShotPiTextRequest(transcript, { attachments = [], model, thinking }, onDelta = () => {}, runStartedAt = Date.now()) {
   return new Promise((resolve, reject) => {
     if (rendererRealLlmSmoke) {
-      console.log(`susura-llm-timing ${JSON.stringify({
+      console.log(`caul-llm-timing ${JSON.stringify({
         event: 'pi_child_spawn_start',
         atMs: Date.now() - runStartedAt
       })}`);
@@ -4467,7 +4467,7 @@ function runOneShotPiTextRequest(transcript, { attachments = [], model, thinking
     });
     const startedAt = Date.now();
     if (rendererRealLlmSmoke) {
-      console.log(`susura-llm-timing ${JSON.stringify({
+      console.log(`caul-llm-timing ${JSON.stringify({
         event: 'pi_child_spawned',
         atMs: Date.now() - runStartedAt,
         pid: child.pid
@@ -4490,13 +4490,13 @@ function runOneShotPiTextRequest(transcript, { attachments = [], model, thinking
 
     lines.on('line', (line) => {
       if (rendererRealLlmSmoke) {
-        console.log(`susura-pi-stdout ${Date.now() - startedAt} ${line.slice(0, 160)}`);
+        console.log(`caul-pi-stdout ${Date.now() - startedAt} ${line.slice(0, 160)}`);
       }
 
       const timingEvent = piTimingEvent(line);
 
       if (rendererRealLlmSmoke && timingEvent) {
-        console.log(`susura-llm-timing ${JSON.stringify({
+        console.log(`caul-llm-timing ${JSON.stringify({
           event: timingEvent,
           atMs: Date.now() - runStartedAt
         })}`);
@@ -4512,7 +4512,7 @@ function runOneShotPiTextRequest(transcript, { attachments = [], model, thinking
 
     child.stderr.on('data', (chunk) => {
       if (rendererRealLlmSmoke) {
-        console.error(`susura-pi-stderr ${Date.now() - startedAt} ${chunk.toString()}`);
+        console.error(`caul-pi-stderr ${Date.now() - startedAt} ${chunk.toString()}`);
       }
 
       errors.push(chunk.toString());
@@ -4526,7 +4526,7 @@ function runOneShotPiTextRequest(transcript, { attachments = [], model, thinking
       settled = true;
       clearTimeout(timeout);
       if (rendererRealLlmSmoke) {
-        console.error(`susura-pi-error ${Date.now() - startedAt} ${error.message}`);
+        console.error(`caul-pi-error ${Date.now() - startedAt} ${error.message}`);
       }
 
       reject(error);
@@ -4539,7 +4539,7 @@ function runOneShotPiTextRequest(transcript, { attachments = [], model, thinking
       settled = true;
       clearTimeout(timeout);
       if (rendererRealLlmSmoke) {
-        console.log(`susura-pi-exit ${Date.now() - startedAt} ${code}`);
+        console.log(`caul-pi-exit ${Date.now() - startedAt} ${code}`);
       }
 
       lines.close();
@@ -4570,11 +4570,11 @@ function withTimeout(promise, timeoutMs, message) {
 }
 
 function getLlmPersistentTimeoutMs() {
-  return Math.max(1_000, Number(process.env.SUSURA_LLM_PERSISTENT_TIMEOUT_MS ?? 15_000));
+  return Math.max(1_000, Number(process.env.CAUL_LLM_PERSISTENT_TIMEOUT_MS ?? 15_000));
 }
 
 function getLlmOneShotTimeoutMs() {
-  return Math.max(1_000, Number(process.env.SUSURA_LLM_ONE_SHOT_TIMEOUT_MS ?? 45_000));
+  return Math.max(1_000, Number(process.env.CAUL_LLM_ONE_SHOT_TIMEOUT_MS ?? 45_000));
 }
 
 function piTextDelta(line) {
@@ -4859,7 +4859,7 @@ function loadRendererSurface(window, surface) {
     const url = new URL(process.env.VITE_DEV_SERVER_URL || 'http://127.0.0.1:5173');
 
     if (surface) {
-      url.searchParams.set('susura-surface', surface);
+      url.searchParams.set('caul-surface', surface);
     }
 
     console.log(`Loading dev renderer ${url.toString()}`);
@@ -4868,7 +4868,7 @@ function loadRendererSurface(window, surface) {
   }
 
   window.loadFile(path.join(__dirname, '..', 'dist', 'index.html'), {
-    ...(surface ? { query: { 'susura-surface': surface } } : {})
+    ...(surface ? { query: { 'caul-surface': surface } } : {})
   });
 }
 
@@ -4888,7 +4888,7 @@ function applyPrivateWindowProtection(window) {
     return;
   }
 
-  if (process.env.SUSURA_DISABLE_PRIVATE_WINDOW_PROTECTION === '1') {
+  if (process.env.CAUL_DISABLE_PRIVATE_WINDOW_PROTECTION === '1') {
     window.setSkipTaskbar(false);
     return;
   }
@@ -5029,7 +5029,7 @@ function setPrivateWindowAlwaysOnTop(window) {
 }
 
 function shouldProtectPrivateWindowContent() {
-  if (process.env.SUSURA_ENABLE_PRIVATE_WINDOW_PROTECTION === '1') {
+  if (process.env.CAUL_ENABLE_PRIVATE_WINDOW_PROTECTION === '1') {
     return true;
   }
 
@@ -5233,7 +5233,7 @@ function runPackagedLaunchSmokeIfRequested(window, surface) {
         summary.ok = summary.ok && summary.updates?.ok === true;
       }
 
-      emitSmokeLine(`susura-packaged-launch-smoke ${JSON.stringify(summary)}`);
+      emitSmokeLine(`caul-packaged-launch-smoke ${JSON.stringify(summary)}`);
       packagedLaunchSmokeCompleted = true;
 
       if (!summary.ok || !summary.isPackaged) {
@@ -5241,7 +5241,7 @@ function runPackagedLaunchSmokeIfRequested(window, surface) {
         process.exitCode = 1;
       }
     } catch (error) {
-      console.error(`susura-packaged-launch-smoke failed ${error.message}`);
+      console.error(`caul-packaged-launch-smoke failed ${error.message}`);
       app.exitCode = 1;
       process.exitCode = 1;
     } finally {
@@ -5272,10 +5272,10 @@ function getPackagedLaunchSmokeRendererResult(window) {
 
       while (Date.now() <= waitUntil) {
         const bodyText = (document.body?.textContent ?? '').trim();
-        onboarding = document.querySelector('[aria-label="Susura setup"]')
-          || (bodyText.includes('Welcome to Susura') && bodyText.includes('Start using Susura'));
+        onboarding = document.querySelector('[aria-label="Caul setup"]')
+          || (bodyText.includes('Welcome to Caul') && bodyText.includes('Start using Caul'));
         homeLayout = document.querySelector('[aria-label="Home layout"]');
-        handle = document.querySelector('[aria-label="Susura overlay handle"]');
+        handle = document.querySelector('[aria-label="Caul overlay handle"]');
 
         if (${JSON.stringify(packagedLaunchSmokeRequiresOnboarding)} ? onboarding : (onboarding || homeLayout || handle)) {
           break;
@@ -5286,7 +5286,7 @@ function getPackagedLaunchSmokeRendererResult(window) {
 
       if (${JSON.stringify(packagedOnboardingCompletionSmoke)} && onboarding) {
         const startButton = Array.from(document.querySelectorAll('button'))
-          .find((button) => (button.textContent ?? '').includes('Start using Susura')) ?? null;
+          .find((button) => (button.textContent ?? '').includes('Start using Caul')) ?? null;
         completion = {
           attempted: true,
           buttonEnabled: Boolean(startButton && !startButton.disabled),
@@ -5299,9 +5299,9 @@ function getPackagedLaunchSmokeRendererResult(window) {
         }
       }
 
-      const runtime = await window.susura.getRuntimeContext();
+      const runtime = await window.caul.getRuntimeContext();
       if (${JSON.stringify(packagedUpdaterSmoke)}) {
-        const bridge = window.susura?.settings?.updates;
+        const bridge = window.caul?.settings?.updates;
         updates = {
           ok: false,
           statusAvailable: Boolean(bridge?.status),
@@ -5375,10 +5375,10 @@ function getPackagedWindowSurfaceFlags(window) {
     (() => {
       const bodyText = (document.body?.textContent ?? '').trim();
       return {
-        hasHandle: Boolean(document.querySelector('[aria-label="Susura overlay handle"]')),
+        hasHandle: Boolean(document.querySelector('[aria-label="Caul overlay handle"]')),
         hasHomeLayout: Boolean(document.querySelector('[aria-label="Home layout"]')),
-        hasOnboarding: Boolean(document.querySelector('[aria-label="Susura setup"]'))
-          || (bodyText.includes('Welcome to Susura') && bodyText.includes('Start using Susura')),
+        hasOnboarding: Boolean(document.querySelector('[aria-label="Caul setup"]'))
+          || (bodyText.includes('Welcome to Caul') && bodyText.includes('Start using Caul')),
         location: window.location.href,
         title: document.title
       };
@@ -5464,7 +5464,7 @@ function startPackagedLaunchSmokeFallback() {
       summary.ok = summary.ok && rendererResults.some((result) => result.updates?.ok === true);
     }
 
-    console.log(`susura-packaged-launch-smoke ${JSON.stringify(summary)}`);
+    console.log(`caul-packaged-launch-smoke ${JSON.stringify(summary)}`);
     packagedLaunchSmokeCompleted = true;
 
     if (!summary.ok || !summary.isPackaged) {
@@ -5524,16 +5524,16 @@ async function runOnboardingSmokeIfRequested(window) {
           return;
         }
 
-        await window.webContents.executeJavaScript(`window.dispatchEvent(new CustomEvent('susura:onboarding-smoke-step', { detail: ${JSON.stringify(step)} }))`);
+        await window.webContents.executeJavaScript(`window.dispatchEvent(new CustomEvent('caul:onboarding-smoke-step', { detail: ${JSON.stringify(step)} }))`);
         await new Promise((resolve) => setTimeout(resolve, 350));
         const image = await window.webContents.capturePage();
         fsSync.writeFileSync(path.join(onboardingSmokeDir, fileName), image.toPNG());
       }
 
-      console.log(`susura-onboarding-smoke ${JSON.stringify({ ok: true, dir: onboardingSmokeDir })}`);
+      console.log(`caul-onboarding-smoke ${JSON.stringify({ ok: true, dir: onboardingSmokeDir })}`);
       app.quit();
     } catch (error) {
-      console.error(`susura-onboarding-smoke ${JSON.stringify({ ok: false, error: error.message })}`);
+      console.error(`caul-onboarding-smoke ${JSON.stringify({ ok: false, error: error.message })}`);
       app.exitCode = 1;
       app.quit();
     }
@@ -5557,7 +5557,7 @@ function createPrivateOverlayHandleWindow() {
     frame: false,
     transparent: !shouldUseOpaquePrivateWindowsForProtection(),
     backgroundColor: shouldUseOpaquePrivateWindowsForProtection() ? '#111111' : '#00000000',
-    title: 'Susura Overlay Handle',
+    title: 'Caul Overlay Handle',
     alwaysOnTop: true,
     focusable: false,
     skipTaskbar: true,
@@ -5736,7 +5736,7 @@ function broadcastPrivateOverlayState() {
 
   BrowserWindow.getAllWindows().forEach((window) => {
     if (!window.isDestroyed()) {
-      window.webContents.send('susura:private-overlay-state', status);
+      window.webContents.send('caul:private-overlay-state', status);
     }
   });
 }
@@ -5913,7 +5913,7 @@ function showPrivateOverlayHandleMenu(sender) {
   const status = getPrivateOverlayStatus();
   const menu = Menu.buildFromTemplate([
     {
-      label: 'Quit Susura',
+      label: 'Quit Caul',
       click: () => {
         app.quit();
       }
@@ -6563,9 +6563,9 @@ function createWindow() {
 
   if (isTranscriptDebugLogEnabled()) {
     mainWindow.webContents.on('console-message', (_event, _level, message) => {
-      if (message.startsWith('susura-renderer-transcript-debug ')) {
+      if (message.startsWith('caul-renderer-transcript-debug ')) {
         writeTranscriptDebugLog('renderer.console', {
-          message: message.replace(/^susura-renderer-transcript-debug /, '')
+          message: message.replace(/^caul-renderer-transcript-debug /, '')
         });
       }
     });
@@ -6578,7 +6578,7 @@ function createWindow() {
           (async () => {
             const waitForRenderer = async () => {
               for (let index = 0; index < 60; index += 1) {
-                const setup = document.querySelector('[aria-label="Susura setup"]');
+                const setup = document.querySelector('[aria-label="Caul setup"]');
                 const homeLayout = document.querySelector('[aria-label="Home layout"]');
                 const transcript = document.querySelector('[aria-label="Transcription output"]');
                 const aiResponse = document.querySelector('[aria-label="AI response"]');
@@ -6592,10 +6592,10 @@ function createWindow() {
 
               return false;
             };
-            const runtime = await window.susura.getRuntimeContext();
-            const started = await window.susura.capture.start();
-            const paused = await window.susura.capture.pause();
-            const stopped = await window.susura.capture.stop();
+            const runtime = await window.caul.getRuntimeContext();
+            const started = await window.caul.capture.start();
+            const paused = await window.caul.capture.pause();
+            const stopped = await window.caul.capture.stop();
             const rendererMounted = await waitForRenderer();
             const transcript = document.querySelector('[aria-label="Transcription output"]');
             const documentElement = document.documentElement;
@@ -6608,7 +6608,7 @@ function createWindow() {
               states: [started.state, paused.state, stopped.state],
               rendererVisible: rendererMounted && Boolean(transcript),
               hasOuterScroll,
-              hasCredentialBridge: Object.prototype.hasOwnProperty.call(window.susura ?? {}, 'api' + 'Key'),
+              hasCredentialBridge: Object.prototype.hasOwnProperty.call(window.caul ?? {}, 'api' + 'Key'),
               contentSize: ${JSON.stringify(mainWindow.getContentSize())},
               minimumSize: ${JSON.stringify(mainWindow.getMinimumSize())},
               maximumSize: ${JSON.stringify(mainWindow.getMaximumSize())},
@@ -6619,7 +6619,7 @@ function createWindow() {
           })()
         `);
 
-        console.log(`susura-electron-smoke ${JSON.stringify(result)}`);
+        console.log(`caul-electron-smoke ${JSON.stringify(result)}`);
 
         if (
           !result.rendererVisible ||
@@ -6633,7 +6633,7 @@ function createWindow() {
           process.exitCode = 1;
         }
       } catch (error) {
-        console.error(`susura-electron-smoke failed ${error.message}`);
+        console.error(`caul-electron-smoke failed ${error.message}`);
         app.exitCode = 1;
         process.exitCode = 1;
       } finally {
@@ -6692,7 +6692,7 @@ function createWindow() {
           stoppedBySmoke: systemAudioSmoke.stoppedBySmoke
         };
 
-        console.log(`susura-system-audio-smoke ${JSON.stringify(result)}`);
+        console.log(`caul-system-audio-smoke ${JSON.stringify(result)}`);
         systemAudioSmoke = null;
         app.quit();
       }
@@ -6705,13 +6705,13 @@ function createWindow() {
         const result = await mainWindow.webContents.executeJavaScript(`
           (async () => {
             const events = [];
-            const unsubscribe = window.susura.transcription.onEvent((event) => {
+            const unsubscribe = window.caul.transcription.onEvent((event) => {
               events.push(event);
             });
 
-            await window.susura.transcription.start({ sources: ['system'] });
+            await window.caul.transcription.start({ sources: ['system'] });
             await new Promise((resolve) => setTimeout(resolve, ${JSON.stringify(localParakeetSmokeMs)}));
-            await window.susura.transcription.stop();
+            await window.caul.transcription.stop();
             unsubscribe();
 
             const completed = events
@@ -6750,13 +6750,13 @@ function createWindow() {
           })()
         `);
 
-        console.log(`susura-local-parakeet-smoke ${JSON.stringify(result)}`);
+        console.log(`caul-local-parakeet-smoke ${JSON.stringify(result)}`);
 
         if (!result.detected || result.errors.length > 0) {
           app.exitCode = 1;
         }
       } catch (error) {
-        console.error(`susura-local-parakeet-smoke failed ${error.message}`);
+        console.error(`caul-local-parakeet-smoke failed ${error.message}`);
         app.exitCode = 1;
       } finally {
         app.quit();
@@ -6765,7 +6765,7 @@ function createWindow() {
   }
 
   if (rendererTranscriptionSmokeMs > 0) {
-    emitSmokeLine(`susura-renderer-transcription-smoke-armed ${JSON.stringify({
+    emitSmokeLine(`caul-renderer-transcription-smoke-armed ${JSON.stringify({
       armed: true,
       detected: false,
       errors: [],
@@ -6790,7 +6790,7 @@ function createWindow() {
             let restartUsedBridgeFallback = false;
             let autoSendButtonFound = false;
             let autoSendDisabled = false;
-            const unsubscribe = window.susura.transcription.onEvent((event) => {
+            const unsubscribe = window.caul.transcription.onEvent((event) => {
               events.push({
                 ...event,
                 smokeAtMs: Date.now() - eventStartedAt
@@ -6860,12 +6860,12 @@ function createWindow() {
             sample();
             if (${JSON.stringify(rendererTranscriptionSmokeBridgeStart)}) {
               usedBridgeFallback = true;
-              await window.susura.transcription.start({ sources: ['system'] });
+              await window.caul.transcription.start({ sources: ['system'] });
             } else if (startButton && !startButton.disabled) {
               startButton.click();
             } else {
               usedBridgeFallback = true;
-              await window.susura.transcription.start({ sources: ['system'] });
+              await window.caul.transcription.start({ sources: ['system'] });
             }
 
             const interval = setInterval(sample, 500);
@@ -6880,7 +6880,7 @@ function createWindow() {
               await new Promise((resolve) => setTimeout(resolve, 1_500));
               sample();
             } else if (${JSON.stringify(rendererTranscriptionSmokeNoLlm)}) {
-              await window.susura.transcription.stop();
+              await window.caul.transcription.stop();
               await new Promise((resolve) => setTimeout(resolve, 1_500));
               sample();
             }
@@ -6892,14 +6892,14 @@ function createWindow() {
 
             if (${JSON.stringify(rendererTranscriptionSmokeBridgeStart)}) {
               restartUsedBridgeFallback = true;
-              await window.susura.transcription.start({ sources: ['system'] });
+              await window.caul.transcription.start({ sources: ['system'] });
               await new Promise((resolve) => setTimeout(resolve, 2_000));
             } else if (restartStartButton && !restartStartButton.disabled) {
               restartStartButton.click();
               await new Promise((resolve) => setTimeout(resolve, 2_000));
             } else {
               restartUsedBridgeFallback = true;
-              await window.susura.transcription.start({ sources: ['system'] });
+              await window.caul.transcription.start({ sources: ['system'] });
               await new Promise((resolve) => setTimeout(resolve, 2_000));
             }
 
@@ -6909,7 +6909,7 @@ function createWindow() {
             if (restartStopButton) {
               restartStopButton.click();
             } else {
-              await window.susura.transcription.stop();
+              await window.caul.transcription.stop();
             }
 
             await new Promise((resolve) => setTimeout(resolve, 1_000));
@@ -6983,13 +6983,13 @@ function createWindow() {
           })()
         `);
 
-        emitSmokeLine(`susura-renderer-transcription-smoke ${JSON.stringify(result)}`);
+        emitSmokeLine(`caul-renderer-transcription-smoke ${JSON.stringify(result)}`);
 
         if (!result.detected || result.errors.length > 0) {
           app.exitCode = 1;
         }
       } catch (error) {
-        emitSmokeLine(`susura-renderer-transcription-smoke ${JSON.stringify({
+        emitSmokeLine(`caul-renderer-transcription-smoke ${JSON.stringify({
           detected: false,
           errors: [error.message],
           failed: true,
@@ -7018,9 +7018,9 @@ function createWindow() {
   if (rendererLlmSmoke || rendererRealLlmSmoke) {
     mainWindow.webContents.once('did-finish-load', async () => {
       try {
-        const llmSmokeMode = process.env.SUSURA_LLM_SMOKE_MODE ?? 'stop';
-        const speculativeStopDelayMs = Number(process.env.SUSURA_LLM_SPECULATIVE_STOP_DELAY_MS ?? 500);
-        const llmSmokeTranscript = process.env.SUSURA_LLM_SMOKE_TRANSCRIPT ?? 'What is the refund policy?';
+        const llmSmokeMode = process.env.CAUL_LLM_SMOKE_MODE ?? 'stop';
+        const speculativeStopDelayMs = Number(process.env.CAUL_LLM_SPECULATIVE_STOP_DELAY_MS ?? 500);
+        const llmSmokeTranscript = process.env.CAUL_LLM_SMOKE_TRANSCRIPT ?? 'What is the refund policy?';
         const result = await mainWindow.webContents.executeJavaScript(`
           (async () => {
             const llmSmokeMode = ${JSON.stringify(llmSmokeMode)};
@@ -7045,14 +7045,14 @@ function createWindow() {
             const stopButton = () => Array.from(document.querySelectorAll('button'))
               .find((button) => /stop listening/i.test(button.textContent ?? ''));
 
-            if (!window.susura?.transcription) {
+            if (!window.caul?.transcription) {
               throw new Error('Transcription bridge was not found.');
             }
 
             await new Promise((resolve) => setTimeout(resolve, 300));
 
             for (let index = 0; index < 200; index += 1) {
-              const status = await window.susura.llm.status();
+              const status = await window.caul.llm.status();
 
               if (status.ready) {
                 break;
@@ -7063,7 +7063,7 @@ function createWindow() {
 
             startButton()?.click();
             await new Promise((resolve) => setTimeout(resolve, 50));
-            await window.susura.smokeEmitTranscriptionEvent({
+            await window.caul.smokeEmitTranscriptionEvent({
               type: 'completed',
               utteranceId: 1,
               text: llmSmokeTranscript
@@ -7075,9 +7075,9 @@ function createWindow() {
             let speculativeResult = null;
 
             if (llmSmokeMode === 'speculative') {
-              speculativePromise = window.susura.transcription.requestLlm({
-                model: ${JSON.stringify(process.env.SUSURA_LLM_MODEL ?? 'openai-codex/gpt-5.4-mini')},
-                reasoning: ${JSON.stringify(process.env.SUSURA_LLM_THINKING ?? 'off')},
+              speculativePromise = window.caul.transcription.requestLlm({
+                model: ${JSON.stringify(process.env.CAUL_LLM_MODEL ?? 'openai-codex/gpt-5.4-mini')},
+                reasoning: ${JSON.stringify(process.env.CAUL_LLM_THINKING ?? 'off')},
                 trace: {
                   requestedAt: Date.now(),
                   speculative: true
@@ -7138,14 +7138,14 @@ function createWindow() {
           })()
         `);
 
-        console.log(`susura-renderer-llm-smoke ${JSON.stringify(result)}`);
+        console.log(`caul-renderer-llm-smoke ${JSON.stringify(result)}`);
 
         if (!result.finalValue || result.finalValue.trim() === 'No response yet.') {
           process.exitCode = 1;
           app.exitCode = 1;
         }
       } catch (error) {
-        console.error(`susura-renderer-llm-smoke failed ${error.message}`);
+        console.error(`caul-renderer-llm-smoke failed ${error.message}`);
         process.exitCode = 1;
         app.exitCode = 1;
       } finally {
@@ -7179,7 +7179,7 @@ function createWindow() {
           metrics
         };
 
-        console.log(`susura-resource-smoke ${JSON.stringify(result)}`);
+        console.log(`caul-resource-smoke ${JSON.stringify(result)}`);
 
         if (totalWorkingSetMb > resourceSmokeMaxWorkingSetMb) {
           app.exitCode = 1;
@@ -7221,7 +7221,7 @@ function startResourceSmokeTimer() {
       metrics
     };
 
-    console.log(`susura-resource-smoke ${JSON.stringify(result)}`);
+    console.log(`caul-resource-smoke ${JSON.stringify(result)}`);
 
     if (totalWorkingSetMb > resourceSmokeMaxWorkingSetMb) {
       app.exitCode = 1;
@@ -7323,7 +7323,7 @@ app.on('window-all-closed', () => {
   }
 });
 
-ipcMain.handle('susura:get-runtime-context', () => ({
+ipcMain.handle('caul:get-runtime-context', () => ({
   platform: process.platform,
   arch: process.arch,
   isMac: process.platform === 'darwin',
@@ -7332,67 +7332,67 @@ ipcMain.handle('susura:get-runtime-context', () => ({
   vmTestingTarget: 'Parallels macOS VM'
 }));
 
-ipcMain.handle('susura:private-overlay-status', () => getPrivateOverlayStatus());
+ipcMain.handle('caul:private-overlay-status', () => getPrivateOverlayStatus());
 
-ipcMain.handle('susura:private-overlay-toggle', () => {
+ipcMain.handle('caul:private-overlay-toggle', () => {
   togglePrivateOverlayWindow();
   return getPrivateOverlayStatus();
 });
 
-ipcMain.handle('susura:private-overlay-hide', () => {
+ipcMain.handle('caul:private-overlay-hide', () => {
   hidePrivateOverlayWindow();
   return getPrivateOverlayStatus();
 });
 
-ipcMain.handle('susura:private-overlay-handle-menu', (event) => showPrivateOverlayHandleMenu(event.sender));
+ipcMain.handle('caul:private-overlay-handle-menu', (event) => showPrivateOverlayHandleMenu(event.sender));
 
-ipcMain.handle('susura:private-overlay-handle-drag-start', (_event, request) => startPrivateOverlayHandleDrag(request));
+ipcMain.handle('caul:private-overlay-handle-drag-start', (_event, request) => startPrivateOverlayHandleDrag(request));
 
-ipcMain.handle('susura:private-overlay-handle-drag-move', (_event, request) => movePrivateOverlayHandleDrag(request));
+ipcMain.handle('caul:private-overlay-handle-drag-move', (_event, request) => movePrivateOverlayHandleDrag(request));
 
-ipcMain.handle('susura:private-overlay-handle-drag-end', (_event, request) => endPrivateOverlayHandleDrag(request));
+ipcMain.handle('caul:private-overlay-handle-drag-end', (_event, request) => endPrivateOverlayHandleDrag(request));
 
-ipcMain.handle('susura:private-overlay-window-drag-start', (_event, request) => startPrivateOverlayWindowDrag(request));
+ipcMain.handle('caul:private-overlay-window-drag-start', (_event, request) => startPrivateOverlayWindowDrag(request));
 
-ipcMain.handle('susura:private-overlay-window-drag-move', (_event, request) => movePrivateOverlayWindowDrag(request));
+ipcMain.handle('caul:private-overlay-window-drag-move', (_event, request) => movePrivateOverlayWindowDrag(request));
 
-ipcMain.handle('susura:private-overlay-window-drag-end', (_event, request) => endPrivateOverlayWindowDrag(request));
+ipcMain.handle('caul:private-overlay-window-drag-end', (_event, request) => endPrivateOverlayWindowDrag(request));
 
-ipcMain.handle('susura:private-overlay-window-resize-start', (_event, request) => startPrivateOverlayWindowResize(request));
+ipcMain.handle('caul:private-overlay-window-resize-start', (_event, request) => startPrivateOverlayWindowResize(request));
 
-ipcMain.handle('susura:private-overlay-window-resize-move', (_event, request) => movePrivateOverlayWindowResize(request));
+ipcMain.handle('caul:private-overlay-window-resize-move', (_event, request) => movePrivateOverlayWindowResize(request));
 
-ipcMain.on('susura:private-overlay-window-resize-move-live', (_event, request) => {
+ipcMain.on('caul:private-overlay-window-resize-move-live', (_event, request) => {
   movePrivateOverlayWindowResize(request);
 });
 
-ipcMain.handle('susura:private-overlay-window-resize-end', (_event, request) => endPrivateOverlayWindowResize(request));
+ipcMain.handle('caul:private-overlay-window-resize-end', (_event, request) => endPrivateOverlayWindowResize(request));
 
-ipcMain.handle('susura:private-overlay-show-main', () => {
+ipcMain.handle('caul:private-overlay-show-main', () => {
   showMainWindow();
   return getPrivateOverlayStatus();
 });
 
-ipcMain.handle('susura:private-overlay-panic-hide', () => {
+ipcMain.handle('caul:private-overlay-panic-hide', () => {
   panicHidePrivateOverlay();
   return getPrivateOverlayStatus();
 });
 
-ipcMain.handle('susura:private-overlay-set-click-through', (_event, request) => (
+ipcMain.handle('caul:private-overlay-set-click-through', (_event, request) => (
   setPrivateOverlayClickThrough(Boolean(request?.enabled))
 ));
 
-ipcMain.handle('susura:private-overlay-set-handle-size', (_event, request) => (
+ipcMain.handle('caul:private-overlay-set-handle-size', (_event, request) => (
   setPrivateOverlayHandleSize(request?.size)
 ));
 
-ipcMain.handle('susura:private-overlay-reset-handle', () => resetPrivateOverlayHandlePosition());
+ipcMain.handle('caul:private-overlay-reset-handle', () => resetPrivateOverlayHandlePosition());
 
-ipcMain.handle('susura:capture-status', () => captureStatus);
+ipcMain.handle('caul:capture-status', () => captureStatus);
 
-ipcMain.handle('susura:permissions-status', () => getPermissionsStatus());
+ipcMain.handle('caul:permissions-status', () => getPermissionsStatus());
 
-ipcMain.handle('susura:permissions-open', (_event, request) => {
+ipcMain.handle('caul:permissions-open', (_event, request) => {
   const permission = typeof request === 'object' && request !== null
     ? request.permission
     : undefined;
@@ -7400,7 +7400,7 @@ ipcMain.handle('susura:permissions-open', (_event, request) => {
   return openPermissionsSettings(permission);
 });
 
-ipcMain.handle('susura:permissions-request', (_event, request) => {
+ipcMain.handle('caul:permissions-request', (_event, request) => {
   const permission = typeof request === 'object' && request !== null
     ? request.permission
     : undefined;
@@ -7408,7 +7408,7 @@ ipcMain.handle('susura:permissions-request', (_event, request) => {
   return requestPermission(permission);
 });
 
-ipcMain.handle('susura:settings-reset', (event) => {
+ipcMain.handle('caul:settings-reset', (event) => {
   resetWindowState(BrowserWindow.fromWebContents(event.sender));
   resetPrivateOverlayHandlePosition();
   resetPrivateOverlayWindowPosition();
@@ -7417,73 +7417,73 @@ ipcMain.handle('susura:settings-reset', (event) => {
   return { ok: true };
 });
 
-ipcMain.handle('susura:settings-quit', () => {
+ipcMain.handle('caul:settings-quit', () => {
   app.quit();
   return { ok: true };
 });
 
-ipcMain.handle('susura:settings-relaunch', () => {
+ipcMain.handle('caul:settings-relaunch', () => {
   app.relaunch();
   app.quit();
   return { ok: true };
 });
 
-ipcMain.handle('susura:updates-status', () => getUpdaterService().status());
+ipcMain.handle('caul:updates-status', () => getUpdaterService().status());
 
-ipcMain.handle('susura:updates-set-frequency', (_event, request) => (
+ipcMain.handle('caul:updates-set-frequency', (_event, request) => (
   getUpdaterService().setFrequency(request?.frequency)
 ));
 
-ipcMain.handle('susura:updates-check-now', () => getUpdaterService().checkNow());
+ipcMain.handle('caul:updates-check-now', () => getUpdaterService().checkNow());
 
-ipcMain.handle('susura:updates-download-and-install', () => getUpdaterService().downloadAndInstall());
+ipcMain.handle('caul:updates-download-and-install', () => getUpdaterService().downloadAndInstall());
 
-ipcMain.handle('susura:updates-install-downloaded', () => getUpdaterService().installDownloadedUpdate());
+ipcMain.handle('caul:updates-install-downloaded', () => getUpdaterService().installDownloadedUpdate());
 
-ipcMain.handle('susura:updates-open-download-page', () => getUpdaterService().openDownloadPage());
+ipcMain.handle('caul:updates-open-download-page', () => getUpdaterService().openDownloadPage());
 
-ipcMain.handle('susura:onboarding-status', () => getOnboardingStatus());
+ipcMain.handle('caul:onboarding-status', () => getOnboardingStatus());
 
-ipcMain.handle('susura:onboarding-complete', () => completeOnboarding());
+ipcMain.handle('caul:onboarding-complete', () => completeOnboarding());
 
-ipcMain.handle('susura:onboarding-fit-content', (event, size) => fitOnboardingWindowToContent(event.sender, size));
+ipcMain.handle('caul:onboarding-fit-content', (event, size) => fitOnboardingWindowToContent(event.sender, size));
 
-ipcMain.handle('susura:onboarding-open', () => reopenOnboarding());
+ipcMain.handle('caul:onboarding-open', () => reopenOnboarding());
 
-ipcMain.handle('susura:parakeet-status', () => getParakeetStatus());
+ipcMain.handle('caul:parakeet-status', () => getParakeetStatus());
 
-ipcMain.handle('susura:parakeet-download', (_event, request) => downloadLocalTranscriptionModel(request?.modelId));
+ipcMain.handle('caul:parakeet-download', (_event, request) => downloadLocalTranscriptionModel(request?.modelId));
 
-ipcMain.handle('susura:parakeet-remove', (_event, request) => removeLocalTranscriptionModel(request?.modelId));
+ipcMain.handle('caul:parakeet-remove', (_event, request) => removeLocalTranscriptionModel(request?.modelId));
 
-ipcMain.handle('susura:parakeet-set-model', (_event, request) => setPreferredLocalTranscriptionModel(request?.modelId));
+ipcMain.handle('caul:parakeet-set-model', (_event, request) => setPreferredLocalTranscriptionModel(request?.modelId));
 
-ipcMain.handle('susura:parakeet-cancel-download', () => cancelParakeetDownload());
+ipcMain.handle('caul:parakeet-cancel-download', () => cancelParakeetDownload());
 
-ipcMain.handle('susura:pi-status', () => getPiStatus());
+ipcMain.handle('caul:pi-status', () => getPiStatus());
 
-ipcMain.handle('susura:pi-chatgpt-login', () => openPiSetup('chatgpt-login'));
+ipcMain.handle('caul:pi-chatgpt-login', () => openPiSetup('chatgpt-login'));
 
-ipcMain.handle('susura:pi-login', () => openPiSetup('login'));
+ipcMain.handle('caul:pi-login', () => openPiSetup('login'));
 
-ipcMain.handle('susura:pi-model', () => openPiSetup('model'));
+ipcMain.handle('caul:pi-model', () => openPiSetup('model'));
 
-ipcMain.handle('susura:pi-save-model', (_event, request) => {
+ipcMain.handle('caul:pi-save-model', (_event, request) => {
   const model = typeof request === 'object' && request !== null ? request.model : '';
   return savePiModel(model);
 });
 
-ipcMain.handle('susura:pi-disconnect', () => disconnectPi());
+ipcMain.handle('caul:pi-disconnect', () => disconnectPi());
 
-ipcMain.handle('susura:prompt-templates-list', () => readPromptTemplateState());
+ipcMain.handle('caul:prompt-templates-list', () => readPromptTemplateState());
 
-ipcMain.handle('susura:prompt-templates-choose-attachments', (event) => (
+ipcMain.handle('caul:prompt-templates-choose-attachments', (event) => (
   choosePromptTemplateAttachments(BrowserWindow.fromWebContents(event.sender))
 ));
 
-ipcMain.handle('susura:prompt-templates-reset', () => resetPromptTemplates());
+ipcMain.handle('caul:prompt-templates-reset', () => resetPromptTemplates());
 
-ipcMain.handle('susura:prompt-templates-save', (_event, request) => {
+ipcMain.handle('caul:prompt-templates-save', (_event, request) => {
   const template = typeof request === 'object' && request !== null
     ? request.template
     : null;
@@ -7491,7 +7491,7 @@ ipcMain.handle('susura:prompt-templates-save', (_event, request) => {
   return savePromptTemplate(template);
 });
 
-ipcMain.handle('susura:prompt-templates-delete', (_event, request) => {
+ipcMain.handle('caul:prompt-templates-delete', (_event, request) => {
   const id = typeof request === 'object' && request !== null && typeof request.id === 'string'
     ? request.id
     : '';
@@ -7499,7 +7499,7 @@ ipcMain.handle('susura:prompt-templates-delete', (_event, request) => {
   return deletePromptTemplate(id);
 });
 
-ipcMain.handle('susura:prompt-templates-set-selected', (_event, request) => {
+ipcMain.handle('caul:prompt-templates-set-selected', (_event, request) => {
   const ids = typeof request === 'object' && request !== null && Array.isArray(request.ids)
     ? request.ids
     : [];
@@ -7507,25 +7507,25 @@ ipcMain.handle('susura:prompt-templates-set-selected', (_event, request) => {
   return setSelectedPromptTemplates(ids);
 });
 
-ipcMain.handle('susura:capture-start', () => {
+ipcMain.handle('caul:capture-start', () => {
   captureStatus.state = 'testing';
 
   return captureStatus;
 });
 
-ipcMain.handle('susura:capture-pause', () => {
+ipcMain.handle('caul:capture-pause', () => {
   captureStatus.state = 'paused';
 
   return captureStatus;
 });
 
-ipcMain.handle('susura:capture-stop', () => {
+ipcMain.handle('caul:capture-stop', () => {
   captureStatus.state = 'idle';
 
   return captureStatus;
 });
 
-ipcMain.handle('susura:transcription-start', (_event, request) => new Promise((resolve, reject) => {
+ipcMain.handle('caul:transcription-start', (_event, request) => new Promise((resolve, reject) => {
   if (rendererLlmSmoke || rendererRealLlmSmoke) {
     localTranscriptionActive = true;
     resolve({ ok: true });
@@ -7545,7 +7545,7 @@ ipcMain.handle('susura:transcription-start', (_event, request) => new Promise((r
   }
 }));
 
-ipcMain.handle('susura:transcription-prepare', (_event, request) => {
+ipcMain.handle('caul:transcription-prepare', (_event, request) => {
   if (rendererLlmSmoke || rendererRealLlmSmoke) {
     return { ok: true };
   }
@@ -7557,7 +7557,7 @@ ipcMain.handle('susura:transcription-prepare', (_event, request) => {
   return prepareLocalTranscriptionCapture(normalisedRequest);
 });
 
-ipcMain.handle('susura:transcription-stop', async () => {
+ipcMain.handle('caul:transcription-stop', async () => {
   if (rendererLlmSmoke || rendererRealLlmSmoke) {
     localTranscriptionActive = false;
     return { ok: true };
@@ -7570,7 +7570,7 @@ ipcMain.handle('susura:transcription-stop', async () => {
   return { ok: true };
 });
 
-ipcMain.handle('susura:llm-request', async (_event, request) => {
+ipcMain.handle('caul:llm-request', async (_event, request) => {
   const transcript = typeof request === 'object' && request !== null
     ? request.transcript
     : '';
@@ -7605,13 +7605,13 @@ ipcMain.handle('susura:llm-request', async (_event, request) => {
   return requestLlmResponse(transcript, options);
 });
 
-ipcMain.handle('susura:llm-status', () => ({
+ipcMain.handle('caul:llm-status', () => ({
   ok: true,
   ready: llmWarmStatus === 'ready',
   status: llmWarmStatus
 }));
 
-ipcMain.handle('susura:smoke-emit-transcription-event', (_event, event) => {
+ipcMain.handle('caul:smoke-emit-transcription-event', (_event, event) => {
   if (!rendererLlmSmoke && !rendererRealLlmSmoke) {
     throw new Error('Smoke event injection is disabled.');
   }
@@ -7621,11 +7621,11 @@ ipcMain.handle('susura:smoke-emit-transcription-event', (_event, event) => {
   return { ok: true };
 });
 
-ipcMain.handle('susura:system-audio-start', () => {
+ipcMain.handle('caul:system-audio-start', () => {
   return startSystemAudioCapture();
 });
 
-ipcMain.handle('susura:system-audio-stop', () => {
+ipcMain.handle('caul:system-audio-stop', () => {
   stopSystemAudioCapture();
 
   return { ok: true };

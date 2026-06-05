@@ -27,7 +27,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Susura
+      - name: Checkout Caul
         uses: actions/checkout@v5
 
       - name: Prepare public site artefact
@@ -50,19 +50,19 @@ jobs:
           path: pages-repo
           ssh-key: ${{ secrets.PAGES_DEPLOY_KEY }}
 
-      - name: Publish Susura page
+      - name: Publish Caul page
         run: |
-          rm -rf pages-repo/susura
-          mkdir -p pages-repo/susura
-          cp -R _site/. pages-repo/susura/
+          rm -rf pages-repo/caul
+          mkdir -p pages-repo/caul
+          cp -R _site/. pages-repo/caul/
           touch pages-repo/.nojekyll
           cd pages-repo
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .nojekyll susura
+          git add .nojekyll caul
           if git diff --cached --quiet; then
             echo "No download page changes to publish."
             exit 0
           fi
-          git commit -m "Publish Susura download page"
+          git commit -m "Publish Caul download page"
           git push

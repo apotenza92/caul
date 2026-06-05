@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 
-const durationMs = Number(process.env.SUSURA_CORE_AUDIO_SMOKE_MS ?? 6_000);
-const helperPath = 'native/macos-audio-helper/.build/debug/SusuraAudioHelper';
+const durationMs = Number(process.env.CAUL_CORE_AUDIO_SMOKE_MS ?? 6_000);
+const helperPath = 'native/macos-audio-helper/.build/debug/CaulAudioHelper';
 let maxLevel = 0;
 let maxDecibels = -120;
 let levelEvents = 0;
@@ -13,7 +13,7 @@ const errors = [];
 const tone = spawn(process.execPath, ['scripts/browser-audio-tone.mjs'], {
   env: {
     ...process.env,
-    SUSURA_BROWSER_TONE_MS: String(durationMs + 4_000)
+    CAUL_BROWSER_TONE_MS: String(durationMs + 4_000)
   },
   stdio: 'inherit'
 });
@@ -68,7 +68,7 @@ const summary = {
   errors
 };
 
-console.log(`susura-core-audio-browser-system-audio-smoke ${JSON.stringify(summary)}`);
+console.log(`caul-core-audio-browser-system-audio-smoke ${JSON.stringify(summary)}`);
 
 if (!summary.detected) {
   process.exit(1);

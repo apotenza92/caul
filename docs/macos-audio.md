@@ -77,11 +77,11 @@ Current local findings:
 - Direct helper tap setup succeeds: default output lookup, process tap creation, aggregate creation, tap format lookup, IO callback creation and aggregate-device start all complete.
 - Direct Core Audio helper streaming starts successfully after granting System Audio Recording permission to the responsible app.
 - Local browser audio detection has been verified through `npm run smoke:core-audio-browser-system-audio`: Chrome tone playback produced non-zero Core Audio Tap system audio levels.
-- The source Electron development app is locally signed with `electron/SusuraDevElectron.entitlements` before app-level Core Audio capture can be tested. The packaged `Susura Dev.app` should use a stable Apple Development signing identity so macOS TCC permissions stay attached to a predictable app identity across rebuilds.
+- The source Electron development app is locally signed with `electron/CaulDevElectron.entitlements` before app-level Core Audio capture can be tested. The packaged `Caul Dev.app` should use a stable Apple Development signing identity so macOS TCC permissions stay attached to a predictable app identity across rebuilds.
 - The ScreenCaptureKit helper backend starts successfully on the local machine and can detect browser audio when the output route is MacBook Pro Speakers.
 - The current default output route is a Scarlett 2i2 USB interface. The ScreenCaptureKit backend returned silent buffers on that route during local smoke tests.
 - The app route is intentionally Core Audio only. ScreenCaptureKit remains available through direct helper smoke commands for comparison testing, not product behaviour.
-- The browser audio verification command is `npm run smoke:browser-system-audio`. It launches a temporary Chrome profile that plays a tone and fails unless the Susura smoke output reports `"detected":true`.
+- The browser audio verification command is `npm run smoke:browser-system-audio`. It launches a temporary Chrome profile that plays a tone and fails unless the Caul smoke output reports `"detected":true`.
 - The direct Core Audio helper browser verification command is `npm run smoke:core-audio-browser-system-audio`.
 - The direct ScreenCaptureKit helper browser verification command is `npm run smoke:sck-browser-system-audio`.
 - Local browser audio detection has been verified through `npm run smoke:sck-browser-system-audio`: Chrome tone playback produced non-zero ScreenCaptureKit system audio levels.

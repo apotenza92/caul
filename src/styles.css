@@ -9,8 +9,8 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --susura-titlebar-height: 48px;
-  --susura-titlebar-centre-offset: 24px;
+  --caul-titlebar-height: 48px;
+  --caul-titlebar-centre-offset: 24px;
   color-scheme: light;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
@@ -53,9 +53,9 @@ body {
   min-height: 100vh;
 }
 
-html[data-susura-surface='app'] body,
-html[data-susura-surface='overlay'] body,
-html[data-susura-surface='handle'] body {
+html[data-caul-surface='app'] body,
+html[data-caul-surface='overlay'] body,
+html[data-caul-surface='handle'] body {
   background: transparent !important;
   min-width: 0;
 }
@@ -64,12 +64,12 @@ html[data-susura-surface='handle'] body {
   -webkit-app-region: drag;
 }
 
-.susura-start-here-nudge,
-.susura-prompt-template-nudge {
-  animation: susura-start-here-nudge 2.6s ease-in-out infinite;
+.caul-start-here-nudge,
+.caul-prompt-template-nudge {
+  animation: caul-start-here-nudge 2.6s ease-in-out infinite;
 }
 
-@keyframes susura-start-here-nudge {
+@keyframes caul-start-here-nudge {
   0%, 100% {
     transform: translateY(0);
   }
@@ -193,11 +193,11 @@ textarea,
     background: var(--panel-background);
   }
 
-  .susura-titlebar-centred-dialog {
-    top: calc(50% + var(--susura-titlebar-centre-offset)) !important;
+  .caul-titlebar-centred-dialog {
+    top: calc(50% + var(--caul-titlebar-centre-offset)) !important;
   }
 
-  .susura-settings-dialog {
+  .caul-settings-dialog {
     grid-template-rows: auto minmax(0, 1fr);
     height: 85vh;
     left: 50%;
@@ -206,81 +206,81 @@ textarea,
     transform: translate(-50%, -50%);
   }
 
-  .susura-preview-tooltip {
+  .caul-preview-tooltip {
     overscroll-behavior: contain;
     scrollbar-color: color-mix(in oklch, currentColor 34%, transparent) transparent;
     scrollbar-gutter: stable;
     scrollbar-width: thin;
   }
 
-  .susura-preview-tooltip::-webkit-scrollbar {
+  .caul-preview-tooltip::-webkit-scrollbar {
     height: 10px;
     width: 10px;
   }
 
-  .susura-preview-tooltip::-webkit-scrollbar-track {
+  .caul-preview-tooltip::-webkit-scrollbar-track {
     background: transparent;
     margin-block: 10px;
   }
 
-  .susura-preview-tooltip::-webkit-scrollbar-thumb {
+  .caul-preview-tooltip::-webkit-scrollbar-thumb {
     background: color-mix(in oklch, currentColor 26%, transparent);
     border: 3px solid transparent;
     border-radius: 9999px;
     background-clip: padding-box;
   }
 
-  .susura-preview-tooltip::-webkit-scrollbar-thumb:hover {
+  .caul-preview-tooltip::-webkit-scrollbar-thumb:hover {
     background: color-mix(in oklch, currentColor 42%, transparent);
     background-clip: padding-box;
   }
 
-  .susura-mac-close-button::before,
-  .susura-mac-close-button::after {
-    --susura-mac-close-x-height: 2px;
-    --susura-mac-close-x-width: 9px;
+  .caul-mac-close-button::before,
+  .caul-mac-close-button::after {
+    --caul-mac-close-x-height: 2px;
+    --caul-mac-close-x-width: 9px;
 
     background: #802F31;
     border-radius: 9999px;
     content: "";
-    height: var(--susura-mac-close-x-height);
-    left: calc(50% - (var(--susura-mac-close-x-width) / 2));
+    height: var(--caul-mac-close-x-height);
+    left: calc(50% - (var(--caul-mac-close-x-width) / 2));
     opacity: 0;
     pointer-events: none;
     position: absolute;
-    top: calc(50% - (var(--susura-mac-close-x-height) / 2));
+    top: calc(50% - (var(--caul-mac-close-x-height) / 2));
     transform-origin: center;
     transition: opacity 120ms ease;
-    width: var(--susura-mac-close-x-width);
+    width: var(--caul-mac-close-x-width);
   }
 
-  .susura-mac-close-button::before {
+  .caul-mac-close-button::before {
     transform: rotate(45deg);
   }
 
-  .susura-mac-close-button::after {
+  .caul-mac-close-button::after {
     transform: rotate(-45deg);
   }
 
-  .susura-mac-close-button:hover::before,
-  .susura-mac-close-button:hover::after,
-  .susura-mac-close-button:focus-visible::before,
-  .susura-mac-close-button:focus-visible::after {
+  .caul-mac-close-button:hover::before,
+  .caul-mac-close-button:hover::after,
+  .caul-mac-close-button:focus-visible::before,
+  .caul-mac-close-button:focus-visible::after {
     opacity: 1;
   }
 
-  .susura-mac-quit-button svg {
+  .caul-mac-quit-button svg {
     opacity: 0;
     pointer-events: none;
     transition: opacity 120ms ease;
   }
 
-  .susura-mac-quit-button:hover svg,
-  .susura-mac-quit-button:focus-visible svg {
+  .caul-mac-quit-button:hover svg,
+  .caul-mac-quit-button:focus-visible svg {
     opacity: 1;
   }
 
-  .susura-handle-button {
+  .caul-handle-button {
     --handle-surface: oklch(1 0 0 / 100%);
     --handle-surface-closed: oklch(1 0 0 / 42%);
     --handle-surface-hover: oklch(1 0 0 / 84%);
@@ -313,7 +313,7 @@ textarea,
     width: 100%;
   }
 
-  .dark .susura-handle-button {
+  .dark .caul-handle-button {
     --handle-surface: oklch(0.035 0 0 / 100%);
     --handle-surface-closed: oklch(0.035 0 0 / 44%);
     --handle-surface-hover: oklch(0.035 0 0 / 86%);
@@ -322,56 +322,56 @@ textarea,
     --handle-icon-hover: oklch(1 0 0 / 100%);
   }
 
-  .susura-handle-button::before {
+  .caul-handle-button::before {
     content: none;
   }
 
-  .susura-handle-button::after {
+  .caul-handle-button::after {
     content: none;
   }
 
-  .susura-handle-button[data-open='false'] {
+  .caul-handle-button[data-open='false'] {
     background: var(--handle-surface-closed);
   }
 
-  .susura-handle-button:hover {
+  .caul-handle-button:hover {
     background: var(--handle-surface-hover);
     color: var(--handle-icon-hover);
   }
 
-  .susura-handle-button[data-open='true'],
-  .susura-handle-button[data-open='true']:hover {
+  .caul-handle-button[data-open='true'],
+  .caul-handle-button[data-open='true']:hover {
     background: var(--handle-surface);
   }
 
-  .susura-handle-icon {
+  .caul-handle-icon {
     background: currentColor;
     display: block;
     height: 75%;
-    mask-image: var(--susura-handle-icon-url);
+    mask-image: var(--caul-handle-icon-url);
     mask-position: center;
     mask-repeat: no-repeat;
     mask-size: 100% 100%;
     width: 75%;
-    -webkit-mask-image: var(--susura-handle-icon-url);
+    -webkit-mask-image: var(--caul-handle-icon-url);
     -webkit-mask-position: center;
     -webkit-mask-repeat: no-repeat;
     -webkit-mask-size: 100% 100%;
   }
 
-  .susura-handle-button:focus-visible {
+  .caul-handle-button:focus-visible {
     outline: 2px solid color-mix(in oklch, var(--foreground) 36%, transparent);
     outline-offset: 3px;
   }
 
-  .susura-handle-button[data-motion='dragging'] {
+  .caul-handle-button[data-motion='dragging'] {
     cursor: default !important;
     transition:
       background 120ms ease,
       color 120ms ease;
   }
 
-  .susura-handle-button[data-motion='snapping'] {
+  .caul-handle-button[data-motion='snapping'] {
     cursor: default !important;
   }
 

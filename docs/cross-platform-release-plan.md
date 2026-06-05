@@ -1,10 +1,10 @@
 # Cross-Platform Release Plan
 
-This is the persistent plan for getting Susura to cleanly build, package, test and release on Windows and Linux without weakening the current macOS implementation or privacy boundaries.
+This is the persistent plan for getting Caul to cleanly build, package, test and release on Windows and Linux without weakening the current macOS implementation or privacy boundaries.
 
 ## Goal
 
-Make Susura release-ready on Windows ARM64 and Linux ARM64 first, using the local Parallels VMs as the initial release gate. Windows/Linux x64 artefacts can be CI-built and published from the same platform backend, but must be described as CI-built rather than locally smoke-tested until dedicated x64 release gates exist.
+Make Caul release-ready on Windows ARM64 and Linux ARM64 first, using the local Parallels VMs as the initial release gate. Windows/Linux x64 artefacts can be CI-built and published from the same platform backend, but must be described as CI-built rather than locally smoke-tested until dedicated x64 release gates exist.
 
 ## Target Matrix
 
@@ -15,7 +15,7 @@ Make Susura release-ready on Windows ARM64 and Linux ARM64 first, using the loca
 
 ## Architecture Work
 
-- Refactor `susura-desktop-backend` so it builds cleanly on macOS, Windows and Linux. The first platform-neutral `system_audio` boundary exists, with macOS mapped through the existing helper, Windows using CPAL's WASAPI output-device loopback path, and Linux using PipeWire `pw-record` against the default sink.
+- Refactor `caul-desktop-backend` so it builds cleanly on macOS, Windows and Linux. The first platform-neutral `system_audio` boundary exists, with macOS mapped through the existing helper, Windows using CPAL's WASAPI output-device loopback path, and Linux using PipeWire `pw-record` against the default sink.
 - Remove unconditional backend dependencies on macOS-only crates or helper paths.
 - Put system audio behind explicit platform backends:
   - macOS: Swift Core Audio helper.
@@ -29,8 +29,8 @@ Make Susura release-ready on Windows ARM64 and Linux ARM64 first, using the loca
 
 - Replace the placeholder `dist:win` and `dist:linux` scripts with real platform packaging commands. The scripts now target Windows ARM64/x64 NSIS and Linux ARM64/x64 AppImage, `.deb` and `.rpm`.
 - Make `electron-builder.config.cjs` platform-aware:
-  - macOS bundles `susura-desktop-backend` and `SusuraAudioHelper`.
-  - Windows/Linux bundle `susura-desktop-backend`, Pi resources, model resources and icons, but not the Swift helper.
+  - macOS bundles `caul-desktop-backend` and `CaulAudioHelper`.
+  - Windows/Linux bundle `caul-desktop-backend`, Pi resources, model resources and icons, but not the Swift helper.
 - Ensure packaged resources resolve through app paths on each platform, not repository-relative development paths.
 - Keep app names, app IDs, icons, user data paths and release artefact names distinct for stable, beta and dev builds.
 
@@ -56,15 +56,15 @@ For each platform, packaged E2E must verify:
 - Renderer AI response emits visible text.
 - Stop and restart work without relaunching the app.
 - Raw audio is not written by default.
-- No provider call or hidden telemetry happens before explicit setup. Privacy smokes disable update checks with `SUSURA_DISABLE_UPDATE_CHECKS=1`; normal packaged builds still default to weekly GitHub-backed update checks.
+- No provider call or hidden telemetry happens before explicit setup. Privacy smokes disable update checks with `CAUL_DISABLE_UPDATE_CHECKS=1`; normal packaged builds still default to weekly GitHub-backed update checks.
 
-The unified `vm:e2e` command runs macOS, Windows and Ubuntu Linux gates. Each gate emits a machine-parseable `susura-vm-e2e` summary and writes `artifacts/vm-e2e/<profile>.json` for passing, failing and VM-provisioning-blocked runs. `scripts/release.sh` warns when those summaries are missing or failing, and `SUSURA_REQUIRE_VM_E2E=1` turns the warning into a hard release block. Fedora remains an RPM install/package gate through `vm:smoke:fedora`.
+The unified `vm:e2e` command runs macOS, Windows and Ubuntu Linux gates. Each gate emits a machine-parseable `caul-vm-e2e` summary and writes `artifacts/vm-e2e/<profile>.json` for passing, failing and VM-provisioning-blocked runs. `scripts/release.sh` warns when those summaries are missing or failing, and `CAUL_REQUIRE_VM_E2E=1` turns the warning into a hard release block. Fedora remains an RPM install/package gate through `vm:smoke:fedora`.
 
 The backend also has bounded `smoke:desktop-system-audio`, `vm:backend-smoke:win` and `vm:backend-smoke:linux` commands for native system-audio smoke checks before the full packaged Electron E2E is automated. The Ubuntu VM backend smoke uses PipeWire capture and a bounded audio stimulus. The Windows VM backend smoke uses WASAPI loopback for the default render endpoint and includes `--windows-audio-diagnostics` output so missing or unusable VM audio endpoints fail with actionable context.
 
-Linux packaging builds an ARM64 AppImage with Electron Builder and an ARM64 `.deb` through native `dpkg-deb`, avoiding Electron Builder's x86 fpm helper on ARM Linux. The Ubuntu VM `vm:smoke:linux` gate validates `release/susura-arm64.deb`, checks for the packaged backend under `/opt/Susura/resources/bin/susura-desktop-backend`, installs the `.deb`, verifies packaged-resource PipeWire capture with a generated WAV played through `pw-play` and a non-zero max-level gate, verifies packaged-resource CPAL microphone capture, verifies same-process stop/restart for both system audio and microphone capture, verifies local Parakeet against a known speech WAV, drives the installed Electron renderer through the real Start listening control, confirms onboarding from a fresh user data directory, checks that pre-setup launch made no provider or telemetry requests and wrote no raw audio or transcript debug files under app `userData`, then completes onboarding with smoke-seeded ready prerequisites. Linux private overlay and handle privacy is a best-effort gate: the app must apply the shared protection path, but Electron does not expose content protection on Linux.
+Linux packaging builds an ARM64 AppImage with Electron Builder and an ARM64 `.deb` through native `dpkg-deb`, avoiding Electron Builder's x86 fpm helper on ARM Linux. The Ubuntu VM `vm:smoke:linux` gate validates `release/caul-arm64.deb`, checks for the packaged backend under `/opt/Caul/resources/bin/caul-desktop-backend`, installs the `.deb`, verifies packaged-resource PipeWire capture with a generated WAV played through `pw-play` and a non-zero max-level gate, verifies packaged-resource CPAL microphone capture, verifies same-process stop/restart for both system audio and microphone capture, verifies local Parakeet against a known speech WAV, drives the installed Electron renderer through the real Start listening control, confirms onboarding from a fresh user data directory, checks that pre-setup launch made no provider or telemetry requests and wrote no raw audio or transcript debug files under app `userData`, then completes onboarding with smoke-seeded ready prerequisites. Linux private overlay and handle privacy is a best-effort gate: the app must apply the shared protection path, but Electron does not expose content protection on Linux.
 
-Windows packaging builds a reproducible ARM64 unpacked Electron app with `dist:win:dir` and an ARM64 NSIS installer with `dist:win`. Packaged resources source the bundled Pi CLI directly from the installed root `node_modules/@earendil-works/pi-coding-agent` package. `vm:smoke:win` validates the installer or unpacked package, checks for the packaged backend under `resources\bin\susura-desktop-backend.exe`, records Windows audio diagnostics, plays a WASAPI or fallback render-audio stimulus, verifies packaged-resource WASAPI loopback capture with a non-zero max-level gate, verifies packaged-resource CPAL microphone capture, verifies same-process stop/restart for both system audio and microphone capture, verifies local Parakeet against a known speech WAV, drives the packaged Electron renderer through the real Start listening control, confirms onboarding from a fresh user data directory, checks pre-setup privacy, then completes onboarding with smoke-seeded ready prerequisites.
+Windows packaging builds a reproducible ARM64 unpacked Electron app with `dist:win:dir` and an ARM64 NSIS installer with `dist:win`. Packaged resources source the bundled Pi CLI directly from the installed root `node_modules/@earendil-works/pi-coding-agent` package. `vm:smoke:win` validates the installer or unpacked package, checks for the packaged backend under `resources\bin\caul-desktop-backend.exe`, records Windows audio diagnostics, plays a WASAPI or fallback render-audio stimulus, verifies packaged-resource WASAPI loopback capture with a non-zero max-level gate, verifies packaged-resource CPAL microphone capture, verifies same-process stop/restart for both system audio and microphone capture, verifies local Parakeet against a known speech WAV, drives the packaged Electron renderer through the real Start listening control, confirms onboarding from a fresh user data directory, checks pre-setup privacy, then completes onboarding with smoke-seeded ready prerequisites.
 
 The packaged onboarding completion smoke is deliberately scoped: it seeds a selected Pi model and placeholder local Moonshine Tiny model files so the final onboarding transition can be tested without downloading models or signing into ChatGPT during release smoke. It proves packaged setup-state handling, onboarding completion and post-completion window creation. Real local transcription is covered separately by the packaged Parakeet known-WAV gate.
 
@@ -74,8 +74,8 @@ The packaged local transcription smoke has two layers. The direct-backend layer 
 
 Current VM setup state:
 
-- Ubuntu is reachable through Parallels Tools and SSH, has a synced checkout at `/home/parallels/susura-cross-platform`, and can build latest ARM64 Linux artefacts for E2E.
-- Windows is reachable through Parallels Tools and has a synced checkout at `C:\Users\alex\susura-cross-platform`; Windows audio remains a hard E2E gate and failures should include `--windows-audio-diagnostics` output.
+- Ubuntu is reachable through Parallels Tools and SSH, has a synced checkout at `/home/parallels/caul-cross-platform`, and can build latest ARM64 Linux artefacts for E2E.
+- Windows is reachable through Parallels Tools and has a synced checkout at `C:\Users\alex\caul-cross-platform`; Windows audio remains a hard E2E gate and failures should include `--windows-audio-diagnostics` output.
 - The macOS VM gate requires Parallels Tools, a visible guest IP and a synced packaged `.app`; release automation must report this as a provisioning blocker when those requirements are not met.
 
 ## Release Criteria

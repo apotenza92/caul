@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use susura_audio_core::AudioLevel;
+use caul_audio_core::AudioLevel;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SessionState {

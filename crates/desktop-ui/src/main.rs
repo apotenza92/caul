@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
 use std::path::PathBuf;
-use susura_desktop_ui::NativeUiModel;
-use susura_macos_capture::RunningCapture;
-use susura_session_core::SessionState;
+use caul_desktop_ui::NativeUiModel;
+use caul_macos_capture::RunningCapture;
+use caul_session_core::SessionState;
 
 fn main() {
     dioxus_native::launch(app);

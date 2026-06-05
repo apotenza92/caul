@@ -1,6 +1,6 @@
 # Product Philosophy
 
-Susura should feel like a quiet tool that helps in the moment, not a complex meeting CRM. The product is for people who want a small private assistant for using AI during live calls, with fast local transcription models prioritised where practical and their existing ChatGPT subscription used for the AI model for now.
+Caul should feel like a quiet tool that helps in the moment, not a complex meeting CRM. The product is for people who want a small private assistant for using AI during live calls, with fast local transcription models prioritised where practical and their existing ChatGPT subscription used for the AI model for now.
 
 ## Product Principles
 
@@ -13,6 +13,6 @@ Susura should feel like a quiet tool that helps in the moment, not a complex mee
 
 ## Product Stance
 
-Susura should be a private, user-controlled overlay. It should avoid a surveillance identity and should not market itself around evasion, cheating or bypassing other systems.
+Caul should be a private, user-controlled overlay. It should avoid a surveillance identity and should not market itself around evasion, cheating or bypassing other systems.
 
 The app can be discreet and non-disruptive, but the project should describe that in terms of user control, focus and screen hygiene. Do not build process disguise, anti-detection workflows or claims that encourage misuse.

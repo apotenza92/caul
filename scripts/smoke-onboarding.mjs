@@ -4,16 +4,16 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 
 const root = process.cwd();
-const userDataDir = mkdtempSync(path.join(tmpdir(), 'susura-onboarding-user-'));
+const userDataDir = mkdtempSync(path.join(tmpdir(), 'caul-onboarding-user-'));
 const screenshotDir = path.join(root, 'artifacts', 'onboarding');
 
 const child = spawn(path.join(root, 'node_modules', '.bin', 'electron'), ['.'], {
   cwd: root,
   env: {
     ...process.env,
-    SUSURA_DISABLE_MODEL_AUTO_DOWNLOAD: '1',
-    SUSURA_ONBOARDING_SMOKE_DIR: screenshotDir,
-    SUSURA_USER_DATA_DIR: userDataDir
+    CAUL_DISABLE_MODEL_AUTO_DOWNLOAD: '1',
+    CAUL_ONBOARDING_SMOKE_DIR: screenshotDir,
+    CAUL_USER_DATA_DIR: userDataDir
   },
   stdio: ['ignore', 'pipe', 'pipe']
 });
@@ -38,7 +38,7 @@ child.once('exit', (code) => {
   clearTimeout(timeout);
   rmSync(userDataDir, { force: true, recursive: true });
 
-  if (code !== 0 || !output.includes('susura-onboarding-smoke')) {
+  if (code !== 0 || !output.includes('caul-onboarding-smoke')) {
     process.exitCode = 1;
   }
 });

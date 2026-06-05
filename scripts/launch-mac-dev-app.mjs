@@ -4,13 +4,13 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const privateBuild = process.argv.includes('--private');
-const appName = privateBuild ? 'Susura Dev-Private' : 'Susura Dev';
+const appName = privateBuild ? 'Caul Dev-Private' : 'Caul Dev';
 const appPath = join(process.cwd(), privateBuild ? 'release-dev-private' : 'release-dev', 'mac-arm64', `${appName}.app`);
 const appExecutablePath = join(appPath, 'Contents', 'MacOS', appName);
-const bundleIds = [privateBuild ? 'dev.susura.app.dev-private' : 'dev.susura.app.dev'];
+const bundleIds = [privateBuild ? 'dev.caul.app.dev-private' : 'dev.caul.app.dev'];
 const captureServices = ['ScreenCapture', 'AudioCapture'];
 const launchServicesRegister = '/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister';
-const userDataDir = join(homedir(), 'Library', 'Application Support', 'susura-dev');
+const userDataDir = join(homedir(), 'Library', 'Application Support', 'caul-dev');
 const modelsDir = join(userDataDir, 'models');
 const resetPermissions = process.argv.includes('--reset-permissions');
 const resetAllCapturePermissions = process.argv.includes('--reset-all-capture-permissions');
@@ -72,15 +72,15 @@ if (!existsSync(appPath)) {
   process.exit(1);
 }
 
-for (const processName of ['Susura Dev', 'Susura Dev-Private']) {
+for (const processName of ['Caul Dev', 'Caul Dev-Private']) {
   run('pkill', ['-x', processName], { allowFailure: true });
 }
-for (const appBundleName of ['Susura Dev.app', 'Susura Dev-Private.app']) {
+for (const appBundleName of ['Caul Dev.app', 'Caul Dev-Private.app']) {
   run('pkill', ['-f', `/${appBundleName}/Contents/`], { allowFailure: true });
 }
 
 if (fresh) {
-  const temporaryModelsDir = join(homedir(), 'Library', 'Application Support', `susura-dev-models-${Date.now()}`);
+  const temporaryModelsDir = join(homedir(), 'Library', 'Application Support', `caul-dev-models-${Date.now()}`);
 
   if (!resetModels && existsSync(modelsDir)) {
     renameSync(modelsDir, temporaryModelsDir);

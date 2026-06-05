@@ -1,5 +1,5 @@
 [package]
-name = "susura-desktop-backend"
+name = "caul-desktop-backend"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
@@ -14,11 +14,11 @@ hound = "3"
 rubato.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-susura-audio-core = { path = "../audio-core" }
+caul-audio-core = { path = "../audio-core" }
 transcribe-rs.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
-susura-macos-capture = { path = "../macos-capture" }
+caul-macos-capture = { path = "../macos-capture" }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 wasapi = "0.23"

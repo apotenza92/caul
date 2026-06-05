@@ -12,17 +12,17 @@ export const browserRuntimeContext: RuntimeContext = {
   arch: 'unknown',
   isMac: false,
   appChannel: 'stable',
-  appName: 'Susura',
+  appName: 'Caul',
   vmTestingTarget: 'Parallels macOS VM'
 };
 
 export async function getRuntimeContext(): Promise<RuntimeContext> {
-  if (!window.susura) {
+  if (!window.caul) {
     return browserRuntimeContext;
   }
 
   try {
-    return await window.susura.getRuntimeContext();
+    return await window.caul.getRuntimeContext();
   } catch {
     return browserRuntimeContext;
   }

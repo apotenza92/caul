@@ -5,16 +5,16 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import WebSocket from 'ws';
 
-const durationMs = Number(process.env.SUSURA_BROWSER_TONE_MS ?? 30_000);
-const debuggingPort = Number(process.env.SUSURA_BROWSER_DEBUG_PORT ?? 9223);
-const directory = await mkdtemp(path.join(tmpdir(), 'susura-browser-tone-'));
+const durationMs = Number(process.env.CAUL_BROWSER_TONE_MS ?? 30_000);
+const debuggingPort = Number(process.env.CAUL_BROWSER_DEBUG_PORT ?? 9223);
+const directory = await mkdtemp(path.join(tmpdir(), 'caul-browser-tone-'));
 const htmlPath = path.join(directory, 'tone.html');
 
 await writeFile(htmlPath, `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>Susura Browser Audio Smoke</title>
+    <title>Caul Browser Audio Smoke</title>
     <style>
       html, body {
         margin: 0;
@@ -102,7 +102,7 @@ try {
   process.exit(1);
 }
 
-const chromeProfile = await mkdtemp(path.join(tmpdir(), 'susura-chrome-profile-'));
+const chromeProfile = await mkdtemp(path.join(tmpdir(), 'caul-chrome-profile-'));
 const child = spawn(chromePath, [
   '--new-window',
   `--user-data-dir=${chromeProfile}`,
@@ -240,7 +240,7 @@ function clickPlayButton(webSocketDebuggerUrl) {
           y: point.y
         });
         await send('Runtime.evaluate', {
-          expression: 'document.body.dataset.susuraAudioTriggered = "true"',
+          expression: 'document.body.dataset.caulAudioTriggered = "true"',
           awaitPromise: true
         });
         socket.close();

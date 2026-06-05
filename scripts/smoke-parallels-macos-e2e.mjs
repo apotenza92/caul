@@ -4,11 +4,11 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
-const vmName = process.env.SUSURA_MACOS_VM_NAME ?? 'macOS';
-const packagePath = process.env.SUSURA_MACOS_PACKAGE_PATH ?? '/Users/alex/susura-e2e/Susura.app';
-const backendPath = process.env.SUSURA_MACOS_BACKEND_PATH ?? `${packagePath}/Contents/Resources/bin/susura-desktop-backend`;
-const modelPath = process.env.SUSURA_MACOS_PARAKEET_MODEL_DIR ?? '/Users/alex/susura-e2e/models/parakeet-tdt-0.6b-v3-int8';
-const userDataDir = process.env.SUSURA_MACOS_E2E_USER_DATA ?? '/tmp/susura-macos-e2e-user-data';
+const vmName = process.env.CAUL_MACOS_VM_NAME ?? 'macOS';
+const packagePath = process.env.CAUL_MACOS_PACKAGE_PATH ?? '/Users/alex/caul-e2e/Caul.app';
+const backendPath = process.env.CAUL_MACOS_BACKEND_PATH ?? `${packagePath}/Contents/Resources/bin/caul-desktop-backend`;
+const modelPath = process.env.CAUL_MACOS_PARAKEET_MODEL_DIR ?? '/Users/alex/caul-e2e/models/parakeet-tdt-0.6b-v3-int8';
+const userDataDir = process.env.CAUL_MACOS_E2E_USER_DATA ?? '/tmp/caul-macos-e2e-user-data';
 const smokeOutputFile = `${userDataDir}/smoke-output.log`;
 const summaryDir = path.join(process.cwd(), 'artifacts', 'vm-e2e');
 const summaryPath = path.join(summaryDir, 'macos.json');
@@ -146,7 +146,7 @@ async function failMacosE2e(message, { blocked = false, details = '', gates = {}
     console.error(details);
   }
 
-  console.error(`susura-vm-e2e ${JSON.stringify(summary)}`);
+  console.error(`caul-vm-e2e ${JSON.stringify(summary)}`);
   process.exit(1);
 }
 
@@ -178,13 +178,13 @@ if (!ready) {
 }
 
 const appDirectoryCheck = await runPrlctl(['exec', vmName, '/bin/test', '-d', packagePath]);
-const appBinaryCheck = await runPrlctl(['exec', vmName, '/bin/test', '-x', `${packagePath}/Contents/MacOS/Susura`]);
+const appBinaryCheck = await runPrlctl(['exec', vmName, '/bin/test', '-x', `${packagePath}/Contents/MacOS/Caul`]);
 const backendBinaryCheck = await runPrlctl(['exec', vmName, '/bin/test', '-x', backendPath]);
 const packageCheck = {
   ok: appDirectoryCheck.ok && appBinaryCheck.ok && backendBinaryCheck.ok,
   text: [
     appDirectoryCheck.ok ? '' : `Missing app bundle: ${packagePath}`,
-    appBinaryCheck.ok ? '' : `Missing executable app binary: ${packagePath}/Contents/MacOS/Susura`,
+    appBinaryCheck.ok ? '' : `Missing executable app binary: ${packagePath}/Contents/MacOS/Caul`,
     backendBinaryCheck.ok ? '' : `Missing executable backend binary: ${backendPath}`
   ].filter(Boolean).join('\n')
 };
@@ -217,25 +217,25 @@ const microphoneSmoke = await runPrlctl([
 const rendererLlmSmoke = await runGuestScript([
   `rm -rf ${shellQuote(userDataDir)}`,
   seedMacosUserDataScript(userDataDir),
-  `SUSURA_RENDERER_LLM_SMOKE=1 SUSURA_LLM_SMOKE_MODE=speculative SUSURA_USER_DATA_DIR=${shellQuote(userDataDir)} SUSURA_SMOKE_OUTPUT_FILE=${shellQuote(smokeOutputFile)} ${shellQuote(`${packagePath}/Contents/MacOS/Susura`)}`,
+  `CAUL_RENDERER_LLM_SMOKE=1 CAUL_LLM_SMOKE_MODE=speculative CAUL_USER_DATA_DIR=${shellQuote(userDataDir)} CAUL_SMOKE_OUTPUT_FILE=${shellQuote(smokeOutputFile)} ${shellQuote(`${packagePath}/Contents/MacOS/Caul`)}`,
   `cat ${shellQuote(smokeOutputFile)} 2>/dev/null || true`
 ].join('\n'), { timeout: 45_000, maxBuffer: 10 * 1024 * 1024 });
 const rendererTranscriptionSmoke = await runGuestScript([
   `rm -rf ${shellQuote(userDataDir)}`,
   seedMacosUserDataScript(userDataDir),
-  `SUSURA_RENDERER_TRANSCRIPTION_SMOKE_MS=8000 SUSURA_RENDERER_TRANSCRIPTION_SMOKE_NO_LLM=1 SUSURA_USER_DATA_DIR=${shellQuote(userDataDir)} SUSURA_SMOKE_OUTPUT_FILE=${shellQuote(smokeOutputFile)} ${shellQuote(`${packagePath}/Contents/MacOS/Susura`)}`,
+  `CAUL_RENDERER_TRANSCRIPTION_SMOKE_MS=8000 CAUL_RENDERER_TRANSCRIPTION_SMOKE_NO_LLM=1 CAUL_USER_DATA_DIR=${shellQuote(userDataDir)} CAUL_SMOKE_OUTPUT_FILE=${shellQuote(smokeOutputFile)} ${shellQuote(`${packagePath}/Contents/MacOS/Caul`)}`,
   `cat ${shellQuote(smokeOutputFile)} 2>/dev/null || true`
 ].join('\n'), { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 });
 const launchSmoke = await runGuestScript([
   `rm -rf ${shellQuote(userDataDir)}`,
   seedMacosUserDataScript(userDataDir),
-  `SUSURA_PACKAGED_LAUNCH_SMOKE_MS=250 SUSURA_PACKAGED_LAUNCH_SMOKE_REQUIRE_ONBOARDING=1 SUSURA_PACKAGED_PRIVACY_SMOKE=1 SUSURA_PACKAGED_ONBOARDING_COMPLETION_SMOKE=1 SUSURA_PACKAGED_UPDATER_SMOKE=1 SUSURA_DISABLE_MODEL_AUTO_DOWNLOAD=1 SUSURA_DISABLE_UPDATE_CHECKS=1 SUSURA_USER_DATA_DIR=${shellQuote(userDataDir)} SUSURA_SMOKE_OUTPUT_FILE=${shellQuote(smokeOutputFile)} ${shellQuote(`${packagePath}/Contents/MacOS/Susura`)}`,
+  `CAUL_PACKAGED_LAUNCH_SMOKE_MS=250 CAUL_PACKAGED_LAUNCH_SMOKE_REQUIRE_ONBOARDING=1 CAUL_PACKAGED_PRIVACY_SMOKE=1 CAUL_PACKAGED_ONBOARDING_COMPLETION_SMOKE=1 CAUL_PACKAGED_UPDATER_SMOKE=1 CAUL_DISABLE_MODEL_AUTO_DOWNLOAD=1 CAUL_DISABLE_UPDATE_CHECKS=1 CAUL_USER_DATA_DIR=${shellQuote(userDataDir)} CAUL_SMOKE_OUTPUT_FILE=${shellQuote(smokeOutputFile)} ${shellQuote(`${packagePath}/Contents/MacOS/Caul`)}`,
   `cat ${shellQuote(smokeOutputFile)} 2>/dev/null || true`
 ].join('\n'), { timeout: 45_000, maxBuffer: 10 * 1024 * 1024 });
 
-const launchSummary = parsePrefixedJson(launchSmoke.text, 'susura-packaged-launch-smoke');
-const llmSummary = parsePrefixedJson(rendererLlmSmoke.text, 'susura-renderer-llm-smoke');
-const transcriptionSummary = parsePrefixedJson(rendererTranscriptionSmoke.text, 'susura-renderer-transcription-smoke');
+const launchSummary = parsePrefixedJson(launchSmoke.text, 'caul-packaged-launch-smoke');
+const llmSummary = parsePrefixedJson(rendererLlmSmoke.text, 'caul-renderer-llm-smoke');
+const transcriptionSummary = parsePrefixedJson(rendererTranscriptionSmoke.text, 'caul-renderer-transcription-smoke');
 const systemAudioOk = systemAudioSmoke.ok && /"type":"system_audio_smoke"/.test(systemAudioSmoke.text);
 const microphoneOk = microphoneSmoke.ok && /"type":"microphone_smoke"/.test(microphoneSmoke.text);
 const aiOk = rendererLlmSmoke.ok && (
@@ -295,7 +295,7 @@ if (provisioningIssues.length > 0) {
     console.log(`- ${issue}`);
   }
 }
-console.log(`susura-vm-e2e ${JSON.stringify(summary)}`);
+console.log(`caul-vm-e2e ${JSON.stringify(summary)}`);
 
 if (!ok) {
   process.exit(1);

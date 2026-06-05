@@ -20,8 +20,8 @@ describe('updater helpers', () => {
   });
 
   it('honours the smoke-only update disable flag', () => {
-    expect(isUpdateSmokeDisabled({ SUSURA_DISABLE_UPDATE_CHECKS: '1' })).toBe(true);
-    expect(isUpdateSmokeDisabled({ SUSURA_DISABLE_UPDATE_CHECKS: '0' })).toBe(false);
+    expect(isUpdateSmokeDisabled({ CAUL_DISABLE_UPDATE_CHECKS: '1' })).toBe(true);
+    expect(isUpdateSmokeDisabled({ CAUL_DISABLE_UPDATE_CHECKS: '0' })).toBe(false);
     expect(isUpdateSmokeDisabled({})).toBe(false);
   });
 
@@ -75,10 +75,10 @@ describe('updater helpers', () => {
 
   it('selects matching platform assets without crossing stable and beta channels', () => {
     const assets = [
-      { name: 'Susura-windows-arm64-setup.exe', url: 'stable-win' },
-      { name: 'Susura-Beta-windows-arm64-setup.exe', url: 'beta-win' },
-      { name: 'susura-linux-arm64.deb', url: 'stable-linux' },
-      { name: 'susura-beta-linux-arm64.deb', url: 'beta-linux' }
+      { name: 'Caul-windows-arm64-setup.exe', url: 'stable-win' },
+      { name: 'Caul-Beta-windows-arm64-setup.exe', url: 'beta-win' },
+      { name: 'caul-linux-arm64.deb', url: 'stable-linux' },
+      { name: 'caul-beta-linux-arm64.deb', url: 'beta-linux' }
     ];
 
     expect(selectUpdateAsset(assets, { appChannel: 'stable', arch: 'arm64', platform: 'win32' })).toMatchObject({

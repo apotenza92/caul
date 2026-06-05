@@ -5,11 +5,11 @@
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleExecutable</key>
-  <string>SusuraAudioHelper</string>
+  <string>CaulAudioHelper</string>
   <key>CFBundleIdentifier</key>
-  <string>dev.susura.audio-helper</string>
+  <string>dev.caul.audio-helper</string>
   <key>CFBundleName</key>
-  <string>Susura Audio Helper</string>
+  <string>Caul Audio Helper</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>LSUIElement</key>
@@ -19,6 +19,6 @@
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>NSAudioCaptureUsageDescription</key>
-  <string>Susura needs access to system audio so it can transcribe audio playing on this Mac.</string>
+  <string>Caul needs access to system audio so it can transcribe audio playing on this Mac.</string>
 </dict>
 </plist>

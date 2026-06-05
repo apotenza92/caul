@@ -41,13 +41,13 @@ function TooltipContent({
 }: React.ComponentProps<typeof TooltipPrimitive.Content>) {
   if (
     typeof document !== "undefined"
-    && document.documentElement.dataset.susuraSuppressTooltips === "true"
+    && document.documentElement.dataset.caulSuppressTooltips === "true"
   ) {
-    const suppressStartedAt = Number(document.documentElement.dataset.susuraSuppressTooltipsAt ?? 0)
+    const suppressStartedAt = Number(document.documentElement.dataset.caulSuppressTooltipsAt ?? 0)
 
     if (!Number.isFinite(suppressStartedAt) || Date.now() - suppressStartedAt > 1200) {
-      delete document.documentElement.dataset.susuraSuppressTooltips
-      delete document.documentElement.dataset.susuraSuppressTooltipsAt
+      delete document.documentElement.dataset.caulSuppressTooltips
+      delete document.documentElement.dataset.caulSuppressTooltipsAt
     } else {
       return null
     }
@@ -55,7 +55,7 @@ function TooltipContent({
 
   if (
     typeof document !== "undefined"
-    && document.documentElement.dataset.susuraSuppressTooltips === "true"
+    && document.documentElement.dataset.caulSuppressTooltips === "true"
   ) {
     return null
   }

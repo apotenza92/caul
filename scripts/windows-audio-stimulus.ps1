@@ -5,7 +5,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$path = Join-Path $env:TEMP "susura-windows-audio-stimulus.wav"
+$path = Join-Path $env:TEMP "caul-windows-audio-stimulus.wav"
 $channels = 1
 $bitsPerSample = 16
 $samples = $DurationSeconds * $SampleRateHz

@@ -1,56 +1,56 @@
 import { spawn } from 'node:child_process';
 
-const runs = Number(process.env.SUSURA_LLM_FIRST_CHUNK_RUNS ?? 5);
-const timeoutMs = Number(process.env.SUSURA_LLM_FIRST_CHUNK_TIMEOUT_MS ?? 45_000);
+const runs = Number(process.env.CAUL_LLM_FIRST_CHUNK_RUNS ?? 5);
+const timeoutMs = Number(process.env.CAUL_LLM_FIRST_CHUNK_TIMEOUT_MS ?? 45_000);
 const models = listFromEnv(
-  process.env.SUSURA_LLM_FIRST_CHUNK_MODELS,
+  process.env.CAUL_LLM_FIRST_CHUNK_MODELS,
   ['openai-codex/gpt-5.4-mini']
 );
 const reasoningLevels = listFromEnv(
-  process.env.SUSURA_LLM_FIRST_CHUNK_REASONING,
+  process.env.CAUL_LLM_FIRST_CHUNK_REASONING,
   ['off']
 );
 const warmupStrategies = listFromEnv(
-  process.env.SUSURA_LLM_FIRST_CHUNK_WARMUPS,
+  process.env.CAUL_LLM_FIRST_CHUNK_WARMUPS,
   ['hidden-prompt', 'session-only']
 );
 const warmupCounts = listFromEnv(
-  process.env.SUSURA_LLM_FIRST_CHUNK_WARMUP_COUNTS,
+  process.env.CAUL_LLM_FIRST_CHUNK_WARMUP_COUNTS,
   ['1']
 );
 const warmupPrompts = listFromEnv(
-  process.env.SUSURA_LLM_FIRST_CHUNK_WARMUP_PROMPTS,
+  process.env.CAUL_LLM_FIRST_CHUNK_WARMUP_PROMPTS,
   ['ok']
 );
 const offlineModes = listFromEnv(
-  process.env.SUSURA_LLM_FIRST_CHUNK_OFFLINE,
+  process.env.CAUL_LLM_FIRST_CHUNK_OFFLINE,
   ['0']
 );
 const sessionDirModes = listFromEnv(
-  process.env.SUSURA_LLM_FIRST_CHUNK_SESSION_DIRS,
+  process.env.CAUL_LLM_FIRST_CHUNK_SESSION_DIRS,
   ['default']
 );
 const requestStrategies = listFromEnv(
-  process.env.SUSURA_LLM_FIRST_CHUNK_REQUEST_STRATEGIES,
+  process.env.CAUL_LLM_FIRST_CHUNK_REQUEST_STRATEGIES,
   ['persistent']
 );
 const promptShapes = listFromEnv(
-  process.env.SUSURA_LLM_FIRST_CHUNK_PROMPT_SHAPES,
+  process.env.CAUL_LLM_FIRST_CHUNK_PROMPT_SHAPES,
   ['raw']
 );
 const transcriptWindows = listFromEnv(
-  process.env.SUSURA_LLM_FIRST_CHUNK_TRANSCRIPT_WINDOWS,
+  process.env.CAUL_LLM_FIRST_CHUNK_TRANSCRIPT_WINDOWS,
   ['0']
 );
 const smokeModes = listFromEnv(
-  process.env.SUSURA_LLM_FIRST_CHUNK_SMOKE_MODES,
+  process.env.CAUL_LLM_FIRST_CHUNK_SMOKE_MODES,
   ['stop']
 );
 const backupPrewarmModes = listFromEnv(
-  process.env.SUSURA_LLM_FIRST_CHUNK_BACKUP_PREWARM,
+  process.env.CAUL_LLM_FIRST_CHUNK_BACKUP_PREWARM,
   ['0']
 );
-const smokeTranscript = process.env.SUSURA_LLM_FIRST_CHUNK_TRANSCRIPT
+const smokeTranscript = process.env.CAUL_LLM_FIRST_CHUNK_TRANSCRIPT
   ?? 'What is the refund policy?';
 
 await runCommand('npm', ['run', 'build'], { label: 'build' });
@@ -105,7 +105,7 @@ for (const model of models) {
                             warmupStrategy
                           });
                           results.push(result);
-                          console.log(`susura-llm-first-chunk-run ${JSON.stringify(result)}`);
+                          console.log(`caul-llm-first-chunk-run ${JSON.stringify(result)}`);
                         }
                       }
                     }
@@ -121,7 +121,7 @@ for (const model of models) {
 }
 
 for (const summary of summarise(results)) {
-  console.log(`susura-llm-first-chunk-summary ${JSON.stringify(summary)}`);
+  console.log(`caul-llm-first-chunk-summary ${JSON.stringify(summary)}`);
 }
 
 function runElectronSmoke({
@@ -151,21 +151,21 @@ function runElectronSmoke({
       env: {
         ...process.env,
         PI_OFFLINE: offlineMode,
-        SUSURA_RENDERER_REAL_LLM_SMOKE: '1',
-        VITE_SUSURA_SPECULATIVE_LLM: smokeMode === 'speculative' ? '1' : '0',
-        VITE_SUSURA_SPECULATIVE_LLM_DELAY_MS: process.env.SUSURA_LLM_SPECULATIVE_STOP_DELAY_MS ?? '500',
-        SUSURA_LLM_MODEL: model,
-        SUSURA_LLM_PREWARM_BACKUP: backupPrewarm,
-        SUSURA_LLM_PROMPT_SHAPE: promptShape,
-        SUSURA_LLM_REQUEST_STRATEGY: requestStrategy,
-        SUSURA_LLM_SMOKE_TRANSCRIPT: smokeTranscript,
-        SUSURA_LLM_SMOKE_MODE: smokeMode,
-        SUSURA_LLM_THINKING: reasoning,
-        SUSURA_LLM_TRANSCRIPT_WINDOW_CHARS: transcriptWindow,
-        SUSURA_LLM_WARMUP_COUNT: warmupCount,
-        SUSURA_LLM_WARMUP_PROMPT: warmupPrompt,
-        SUSURA_LLM_WARMUP_STRATEGY: warmupStrategy,
-        SUSURA_PI_SESSION_DIR_MODE: sessionDirMode
+        CAUL_RENDERER_REAL_LLM_SMOKE: '1',
+        VITE_CAUL_SPECULATIVE_LLM: smokeMode === 'speculative' ? '1' : '0',
+        VITE_CAUL_SPECULATIVE_LLM_DELAY_MS: process.env.CAUL_LLM_SPECULATIVE_STOP_DELAY_MS ?? '500',
+        CAUL_LLM_MODEL: model,
+        CAUL_LLM_PREWARM_BACKUP: backupPrewarm,
+        CAUL_LLM_PROMPT_SHAPE: promptShape,
+        CAUL_LLM_REQUEST_STRATEGY: requestStrategy,
+        CAUL_LLM_SMOKE_TRANSCRIPT: smokeTranscript,
+        CAUL_LLM_SMOKE_MODE: smokeMode,
+        CAUL_LLM_THINKING: reasoning,
+        CAUL_LLM_TRANSCRIPT_WINDOW_CHARS: transcriptWindow,
+        CAUL_LLM_WARMUP_COUNT: warmupCount,
+        CAUL_LLM_WARMUP_PROMPT: warmupPrompt,
+        CAUL_LLM_WARMUP_STRATEGY: warmupStrategy,
+        CAUL_PI_SESSION_DIR_MODE: sessionDirMode
       },
       stdio: ['ignore', 'pipe', 'pipe']
     });
@@ -225,15 +225,15 @@ function parseSmokeOutput(stdout) {
   let fallbackCount = 0;
 
   for (const line of stdout.split(/\r?\n/)) {
-    if (line.startsWith('susura-llm-timing ')) {
-      timing.push(JSON.parse(line.slice('susura-llm-timing '.length)));
+    if (line.startsWith('caul-llm-timing ')) {
+      timing.push(JSON.parse(line.slice('caul-llm-timing '.length)));
     }
 
-    if (line.startsWith('susura-renderer-llm-smoke ')) {
-      renderer = JSON.parse(line.slice('susura-renderer-llm-smoke '.length));
+    if (line.startsWith('caul-renderer-llm-smoke ')) {
+      renderer = JSON.parse(line.slice('caul-renderer-llm-smoke '.length));
     }
 
-    if (line.startsWith('susura-pi-rpc-fallback ')) {
+    if (line.startsWith('caul-pi-rpc-fallback ')) {
       fallbackCount += 1;
     }
   }

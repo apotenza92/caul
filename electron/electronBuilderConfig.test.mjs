@@ -64,7 +64,7 @@ describe('electron-builder macOS config', () => {
 
     expect(config.mac.extendInfo.LSUIElement).toBe(true);
     expect(config.directories.output).toBe('release-dev-private');
-    expect(config.appId).toBe('dev.susura.app.dev-private');
-    expect(config.productName).toBe('Susura Dev-Private');
+    expect(config.appId).toBe('dev.caul.app.dev-private');
+    expect(config.productName).toBe('Caul Dev-Private');
   });
 });

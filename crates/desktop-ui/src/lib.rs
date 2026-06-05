@@ -1,6 +1,6 @@
-use susura_audio_core::{AudioLevel, AudioSource};
-use susura_macos_capture::CaptureUpdate;
-use susura_session_core::SessionState;
+use caul_audio_core::{AudioLevel, AudioSource};
+use caul_macos_capture::CaptureUpdate;
+use caul_session_core::SessionState;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CaptureSettings {

@@ -7,7 +7,7 @@ const path = require('node:path');
 const updateFrequencyFileName = 'update-frequency.json';
 const lastUpdateCheckFileName = 'last-update-check.json';
 const githubOwner = 'apotenza92';
-const githubRepo = 'susura';
+const githubRepo = 'caul';
 const releasesApiUrl = `https://api.github.com/repos/${githubOwner}/${githubRepo}/releases?per_page=20`;
 const updateFrequencies = ['never', 'startup', 'hourly', 'sixHours', 'twelveHours', 'daily', 'weekly'];
 const updateFrequencyMs = {
@@ -24,7 +24,7 @@ function createUpdaterService({
   isDev,
   onBeforeInstallDownloadedUpdate,
   forceEnabled = false,
-  repositoryUrl = 'https://github.com/apotenza92/susura/releases'
+  repositoryUrl = 'https://github.com/apotenza92/caul/releases'
 } = {}) {
   const { autoUpdater } = require('electron-updater');
   let scheduleTimer = null;
@@ -57,7 +57,7 @@ function createUpdaterService({
     lastResult = {
       ok: true,
       status: 'ready',
-      message: 'Update downloaded. Restart Susura to install it.'
+      message: 'Update downloaded. Restart Caul to install it.'
     };
     emitStatus();
   });
@@ -140,7 +140,7 @@ function createUpdaterService({
     const payload = status();
     BrowserWindow.getAllWindows().forEach((window) => {
       if (!window.isDestroyed()) {
-        window.webContents.send('susura:updates-status', payload);
+        window.webContents.send('caul:updates-status', payload);
       }
     });
   }
@@ -229,7 +229,7 @@ function createUpdaterService({
         lastResult = {
           ok: true,
           status: 'not-available',
-          message: 'Susura is up to date.'
+          message: 'Caul is up to date.'
         };
         emitStatus();
         return status();
@@ -250,7 +250,7 @@ function createUpdaterService({
       lastResult = {
         ok: true,
         status: 'available',
-        message: `Susura ${targetRelease.version} is available.`
+        message: `Caul ${targetRelease.version} is available.`
       };
       emitStatus();
 
@@ -330,7 +330,7 @@ function createUpdaterService({
     lastResult = {
       ok: true,
       status: 'external',
-      message: 'Opened the Susura release page.'
+      message: 'Opened the Caul release page.'
     };
     emitStatus();
     return status();
@@ -362,7 +362,7 @@ function createUpdaterService({
       buttons: ['Download', 'Later'],
       cancelId: 1,
       defaultId: 0,
-      message: `Susura ${availableUpdate.version} is available.`,
+      message: `Caul ${availableUpdate.version} is available.`,
       type: 'info'
     }).then((result) => {
       if (result.response === 0) {
@@ -419,7 +419,7 @@ function fetchGitHubReleases() {
     const request = https.get(releasesApiUrl, {
       headers: {
         Accept: 'application/vnd.github+json',
-        'User-Agent': `Susura/${app.getVersion()}`
+        'User-Agent': `Caul/${app.getVersion()}`
       }
     }, (response) => {
       let body = '';
@@ -512,7 +512,7 @@ function downloadAsset(asset) {
 
     const request = https.get(asset.url, {
       headers: {
-        'User-Agent': `Susura/${app.getVersion()}`
+        'User-Agent': `Caul/${app.getVersion()}`
       }
     }, (response) => {
       if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
@@ -552,7 +552,7 @@ function normaliseReleaseVersion(value) {
 }
 
 function isUpdateSmokeDisabled(env = process.env) {
-  return env.SUSURA_DISABLE_UPDATE_CHECKS === '1';
+  return env.CAUL_DISABLE_UPDATE_CHECKS === '1';
 }
 
 function isVersionNewer(candidate, current) {

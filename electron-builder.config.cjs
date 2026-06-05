@@ -8,18 +8,18 @@ const isBeta = !isDevBuild && (process.env.FORCE_BETA_BUILD === 'true'
   || version.includes('-beta')
   || version.includes('-rc'));
 const buildChannel = isPrivateDevBuild ? 'DEV-PRIVATE' : isDevBuild ? 'DEV' : isBeta ? 'BETA' : 'STABLE';
-const appDisplayName = isPrivateDevBuild ? 'Susura Dev-Private' : isDevBuild ? 'Susura Dev' : isBeta ? 'Susura Beta' : 'Susura';
-const appId = isPrivateDevBuild ? 'dev.susura.app.dev-private' : isDevBuild ? 'dev.susura.app.dev' : isBeta ? 'dev.susura.app.beta' : 'dev.susura.app';
-const artifactPrefix = isPrivateDevBuild ? 'Susura-Dev-Private' : isDevBuild ? 'Susura-Dev' : isBeta ? 'Susura-Beta' : 'Susura';
-const devCodeSignIdentity = process.env.SUSURA_DEV_CODESIGN_IDENTITY
+const appDisplayName = isPrivateDevBuild ? 'Caul Dev-Private' : isDevBuild ? 'Caul Dev' : isBeta ? 'Caul Beta' : 'Caul';
+const appId = isPrivateDevBuild ? 'dev.caul.app.dev-private' : isDevBuild ? 'dev.caul.app.dev' : isBeta ? 'dev.caul.app.beta' : 'dev.caul.app';
+const artifactPrefix = isPrivateDevBuild ? 'Caul-Dev-Private' : isDevBuild ? 'Caul-Dev' : isBeta ? 'Caul-Beta' : 'Caul';
+const devCodeSignIdentity = process.env.CAUL_DEV_CODESIGN_IDENTITY
   ?? '0A2CD8B7803C6E7A4907B7CA517538115CA1A660';
-const packagePlatform = process.env.SUSURA_PACKAGE_PLATFORM ?? process.platform;
-const packageArch = process.env.SUSURA_PACKAGE_ARCH;
+const packagePlatform = process.env.CAUL_PACKAGE_PLATFORM ?? process.platform;
+const packageArch = process.env.CAUL_PACKAGE_ARCH;
 const winArchitectures = packageArch ? [packageArch] : ['arm64'];
 const linuxArchitectures = packageArch ? [packageArch] : ['arm64'];
 const linuxArtifactArch = packageArch ?? '${arch}';
 
-console.log(`\nSusura build configuration for v${version}`);
+console.log(`\nCaul build configuration for v${version}`);
 console.log(`  Type: ${buildChannel}`);
 console.log(`  App ID: ${appId}`);
 console.log(`  Product Name: ${appDisplayName}\n`);
@@ -41,13 +41,13 @@ const iconPaths = {
 };
 const icons = isBeta || isDevBuild ? iconPaths.beta : iconPaths.stable;
 const backendBinaryName = packagePlatform === 'win' || packagePlatform === 'win32'
-  ? 'susura-desktop-backend.exe'
-  : 'susura-desktop-backend';
+  ? 'caul-desktop-backend.exe'
+  : 'caul-desktop-backend';
 const macConfig = {
   artifactName: `${artifactPrefix}-macos-\${arch}.\${ext}`,
   category: 'public.app-category.productivity',
-  entitlements: 'electron/SusuraRelease.entitlements',
-  entitlementsInherit: 'electron/SusuraReleaseInherit.entitlements',
+  entitlements: 'electron/CaulRelease.entitlements',
+  entitlementsInherit: 'electron/CaulReleaseInherit.entitlements',
   extendInfo: {
     ...((!isDevBuild || isPrivateDevBuild) ? { LSUIElement: true } : {}),
     NSAudioCaptureUsageDescription: `${appDisplayName} needs access to system audio so it can transcribe audio playing on this Mac.`,
@@ -88,8 +88,8 @@ const commonExtraResources = [
 const macExtraResources = [
   ...commonExtraResources,
   {
-    from: 'native/macos-audio-helper/.build/release/SusuraAudioHelper',
-    to: 'bin/SusuraAudioHelper'
+    from: 'native/macos-audio-helper/.build/release/CaulAudioHelper',
+    to: 'bin/CaulAudioHelper'
   }
 ];
 
@@ -99,15 +99,15 @@ module.exports = {
   productName: appDisplayName,
   ...(isPrivateDevBuild ? {
     extraMetadata: {
-      name: 'susura-dev-private'
+      name: 'caul-dev-private'
     }
   } : isDevBuild ? {
     extraMetadata: {
-      name: 'susura-dev'
+      name: 'caul-dev'
     }
   } : isBeta ? {
     extraMetadata: {
-      name: 'susura-beta'
+      name: 'caul-beta'
     }
   } : {}),
   directories: {
@@ -128,7 +128,7 @@ module.exports = {
     {
       provider: 'github',
       owner: 'apotenza92',
-      repo: 'susura',
+      repo: 'caul',
       ...(isBeta ? { channel: 'beta' } : {})
     }
   ],
@@ -144,7 +144,7 @@ module.exports = {
     ]
   },
   linux: {
-    artifactName: `susura${isBeta ? '-beta' : ''}-\${arch}.\${ext}`,
+    artifactName: `caul${isBeta ? '-beta' : ''}-\${arch}.\${ext}`,
     category: 'Utility',
     icon: icons.linux,
     maintainer: 'Alex Potenza <apotenza92@users.noreply.github.com>',
@@ -164,7 +164,7 @@ module.exports = {
     ]
   },
   rpm: {
-    packageName: `susura${isBeta ? '-beta' : ''}`,
-    artifactName: `susura${isBeta ? '-beta' : ''}-${linuxArtifactArch}.\${ext}`
+    packageName: `caul${isBeta ? '-beta' : ''}`,
+    artifactName: `caul${isBeta ? '-beta' : ''}-${linuxArtifactArch}.\${ext}`
   }
 };

@@ -64,7 +64,7 @@ jobs:
           mkdir -p verified-release
 
           shopt -s nullglob
-          for zip_path in release/Susura*-macos-arm64.zip; do
+          for zip_path in release/Caul*-macos-arm64.zip; do
             app_dir="verified-release/$(basename "${zip_path%.zip}")"
             mkdir -p "$app_dir"
             unzip -q "$zip_path" -d "$app_dir"
@@ -125,8 +125,8 @@ jobs:
 
           if (-not ($env:GITHUB_REF_NAME.Contains("alpha") -or $env:GITHUB_REF_NAME.Contains("beta") -or $env:GITHUB_REF_NAME.Contains("rc"))) {
             $env:FORCE_BETA_BUILD = "true"
-            $env:SUSURA_PACKAGE_PLATFORM = "win"
-            $env:SUSURA_PACKAGE_ARCH = "${{ matrix.arch }}"
+            $env:CAUL_PACKAGE_PLATFORM = "win"
+            $env:CAUL_PACKAGE_ARCH = "${{ matrix.arch }}"
             if ("${{ matrix.arch }}" -eq "arm64") {
               $env:USE_SYSTEM_7ZA = "true"
               node scripts/prepare-windows-7za.mjs
@@ -188,7 +188,7 @@ jobs:
             if [[ "${{ matrix.arch }}" == "arm64" ]]; then
               linux_targets="AppImage"
             fi
-            FORCE_BETA_BUILD=true SUSURA_PACKAGE_PLATFORM=linux SUSURA_PACKAGE_ARCH=${{ matrix.arch }} npx electron-builder --config electron-builder.config.cjs --linux ${linux_targets} --${{ matrix.arch }} --publish=never
+            FORCE_BETA_BUILD=true CAUL_PACKAGE_PLATFORM=linux CAUL_PACKAGE_ARCH=${{ matrix.arch }} npx electron-builder --config electron-builder.config.cjs --linux ${linux_targets} --${{ matrix.arch }} --publish=never
             FORCE_BETA_BUILD=true node scripts/build-linux-deb.mjs ${{ matrix.arch }}
           fi
         timeout-minutes: 75
@@ -242,13 +242,13 @@ jobs:
           set -euo pipefail
 
           VERSION="${{ steps.version.outputs.VERSION }}"
-          BASE_URL="https://github.com/apotenza92/susura/releases/download/v${VERSION}"
+          BASE_URL="https://github.com/apotenza92/caul/releases/download/v${VERSION}"
 
-          curl -fL "${BASE_URL}/Susura-macos-arm64.zip" -o stable.zip
+          curl -fL "${BASE_URL}/Caul-macos-arm64.zip" -o stable.zip
           STABLE_SHA256="$(shasum -a 256 stable.zip | cut -d' ' -f1)"
           echo "STABLE_SHA256=${STABLE_SHA256}" >> "$GITHUB_OUTPUT"
 
-          curl -fL "${BASE_URL}/Susura-Beta-macos-arm64.zip" -o beta.zip
+          curl -fL "${BASE_URL}/Caul-Beta-macos-arm64.zip" -o beta.zip
           BETA_SHA256="$(shasum -a 256 beta.zip | cut -d' ' -f1)"
           echo "BETA_SHA256=${BETA_SHA256}" >> "$GITHUB_OUTPUT"
 
@@ -264,52 +264,53 @@ jobs:
 
           git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/apotenza92/homebrew-tap.git"
           cd homebrew-tap
+          rm -f Casks/susura.rb 'Casks/susura@beta.rb'
 
-          cat > Casks/susura.rb << EOF
-          cask "susura" do
+          cat > Casks/caul.rb << EOF
+          cask "caul" do
             version "${VERSION}"
 
             on_arm do
-              url "https://github.com/apotenza92/susura/releases/download/v#{version}/Susura-macos-arm64.zip"
+              url "https://github.com/apotenza92/caul/releases/download/v#{version}/Caul-macos-arm64.zip"
               sha256 "${STABLE_SHA256}"
             end
 
-            name "Susura"
+            name "Caul"
             desc "Private desktop assistant for live calls and screen work"
-            homepage "https://github.com/apotenza92/susura"
+            homepage "https://github.com/apotenza92/caul"
 
             livecheck do
               url :url
               strategy :github_latest
             end
 
-            app "Susura.app"
+            app "Caul.app"
 
             zap trash: [
-              "~/Library/Application Support/Susura",
-              "~/Library/Caches/dev.susura.app",
-              "~/Library/Caches/dev.susura.app.ShipIt",
-              "~/Library/Preferences/dev.susura.app.plist",
-              "~/Library/Saved Application State/dev.susura.app.savedState",
+              "~/Library/Application Support/Caul",
+              "~/Library/Caches/dev.caul.app",
+              "~/Library/Caches/dev.caul.app.ShipIt",
+              "~/Library/Preferences/dev.caul.app.plist",
+              "~/Library/Saved Application State/dev.caul.app.savedState",
             ]
           end
           EOF
 
-          cat > 'Casks/susura@beta.rb' << EOF
-          cask "susura@beta" do
+          cat > 'Casks/caul@beta.rb' << EOF
+          cask "caul@beta" do
             version "${VERSION}"
 
             on_arm do
-              url "https://github.com/apotenza92/susura/releases/download/v#{version}/Susura-Beta-macos-arm64.zip"
+              url "https://github.com/apotenza92/caul/releases/download/v#{version}/Caul-Beta-macos-arm64.zip"
               sha256 "${BETA_SHA256}"
             end
 
-            name "Susura Beta"
-            desc "Beta channel for Susura"
-            homepage "https://github.com/apotenza92/susura"
+            name "Caul Beta"
+            desc "Beta channel for Caul"
+            homepage "https://github.com/apotenza92/caul"
 
             livecheck do
-              url "https://api.github.com/repos/apotenza92/susura/releases"
+              url "https://api.github.com/repos/apotenza92/caul/releases"
               strategy :json do |json|
                 json
                   .reject { |release| release["draft"] }
@@ -317,28 +318,28 @@ jobs:
               end
             end
 
-            app "Susura Beta.app"
+            app "Caul Beta.app"
 
             zap trash: [
-              "~/Library/Application Support/Susura Beta",
-              "~/Library/Caches/dev.susura.app.beta",
-              "~/Library/Caches/dev.susura.app.beta.ShipIt",
-              "~/Library/Preferences/dev.susura.app.beta.plist",
-              "~/Library/Saved Application State/dev.susura.app.beta.savedState",
+              "~/Library/Application Support/Caul Beta",
+              "~/Library/Caches/dev.caul.app.beta",
+              "~/Library/Caches/dev.caul.app.beta.ShipIt",
+              "~/Library/Preferences/dev.caul.app.beta.plist",
+              "~/Library/Saved Application State/dev.caul.app.beta.savedState",
             ]
           end
           EOF
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Casks/susura.rb 'Casks/susura@beta.rb'
+          git add -A Casks
 
           if git diff --cached --quiet; then
             echo "Homebrew casks are already up to date."
             exit 0
           fi
 
-          git commit -m "Update susura to v${VERSION} (stable + beta casks)"
+          git commit -m "Update caul to v${VERSION} (stable + beta casks)"
           git push
 
   update-homebrew-beta:
@@ -357,7 +358,7 @@ jobs:
           set -euo pipefail
 
           VERSION="${{ steps.version.outputs.VERSION }}"
-          curl -fL "https://github.com/apotenza92/susura/releases/download/v${VERSION}/Susura-Beta-macos-arm64.zip" -o beta.zip
+          curl -fL "https://github.com/apotenza92/caul/releases/download/v${VERSION}/Caul-Beta-macos-arm64.zip" -o beta.zip
           BETA_SHA256="$(shasum -a 256 beta.zip | cut -d' ' -f1)"
           echo "BETA_SHA256=${BETA_SHA256}" >> "$GITHUB_OUTPUT"
 
@@ -372,22 +373,23 @@ jobs:
 
           git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/apotenza92/homebrew-tap.git"
           cd homebrew-tap
+          rm -f 'Casks/susura@beta.rb'
 
-          cat > 'Casks/susura@beta.rb' << EOF
-          cask "susura@beta" do
+          cat > 'Casks/caul@beta.rb' << EOF
+          cask "caul@beta" do
             version "${VERSION}"
 
             on_arm do
-              url "https://github.com/apotenza92/susura/releases/download/v#{version}/Susura-Beta-macos-arm64.zip"
+              url "https://github.com/apotenza92/caul/releases/download/v#{version}/Caul-Beta-macos-arm64.zip"
               sha256 "${BETA_SHA256}"
             end
 
-            name "Susura Beta"
-            desc "Beta channel for Susura"
-            homepage "https://github.com/apotenza92/susura"
+            name "Caul Beta"
+            desc "Beta channel for Caul"
+            homepage "https://github.com/apotenza92/caul"
 
             livecheck do
-              url "https://api.github.com/repos/apotenza92/susura/releases"
+              url "https://api.github.com/repos/apotenza92/caul/releases"
               strategy :json do |json|
                 json
                   .reject { |release| release["draft"] }
@@ -395,26 +397,26 @@ jobs:
               end
             end
 
-            app "Susura Beta.app"
+            app "Caul Beta.app"
 
             zap trash: [
-              "~/Library/Application Support/Susura Beta",
-              "~/Library/Caches/dev.susura.app.beta",
-              "~/Library/Caches/dev.susura.app.beta.ShipIt",
-              "~/Library/Preferences/dev.susura.app.beta.plist",
-              "~/Library/Saved Application State/dev.susura.app.beta.savedState",
+              "~/Library/Application Support/Caul Beta",
+              "~/Library/Caches/dev.caul.app.beta",
+              "~/Library/Caches/dev.caul.app.beta.ShipIt",
+              "~/Library/Preferences/dev.caul.app.beta.plist",
+              "~/Library/Saved Application State/dev.caul.app.beta.savedState",
             ]
           end
           EOF
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add 'Casks/susura@beta.rb'
+          git add -A Casks
 
           if git diff --cached --quiet; then
             echo "Homebrew beta cask is already up to date."
             exit 0
           fi
 
-          git commit -m "Update susura@beta to v${VERSION}"
+          git commit -m "Update caul@beta to v${VERSION}"
           git push

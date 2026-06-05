@@ -12,7 +12,7 @@ import { getRuntimeContext } from '../foundation/runtime';
 const awaitingResponseText = '';
 const idleLlmText = 'Auto Send is on.\nStop listening to send transcript to AI';
 const idleTranscriptText = 'Your live transcript will appear here once you start listening.';
-let rendererTranscriptDebugEnabled = import.meta.env.VITE_SUSURA_TRANSCRIPT_DEBUG_LOG === '1';
+let rendererTranscriptDebugEnabled = import.meta.env.VITE_CAUL_TRANSCRIPT_DEBUG_LOG === '1';
 
 export type LiveTranscriptionOptions = {
   listenToMicrophone: boolean;
@@ -1018,7 +1018,7 @@ function isSetupMessage(message: string) {
 }
 
 function isSpeculativeLlmEnabled() {
-  return import.meta.env.VITE_SUSURA_SPECULATIVE_LLM === '1';
+  return import.meta.env.VITE_CAUL_SPECULATIVE_LLM === '1';
 }
 
 function logTranscriptDebug(stage: string, payload: Record<string, unknown>) {
@@ -1026,7 +1026,7 @@ function logTranscriptDebug(stage: string, payload: Record<string, unknown>) {
     return;
   }
 
-  console.info(`susura-renderer-transcript-debug ${JSON.stringify({
+  console.info(`caul-renderer-transcript-debug ${JSON.stringify({
     at: new Date().toISOString(),
     stage,
     ...payload
@@ -1034,19 +1034,19 @@ function logTranscriptDebug(stage: string, payload: Record<string, unknown>) {
 }
 
 function getSpeculativeDelayMs() {
-  const delay = Number(import.meta.env.VITE_SUSURA_SPECULATIVE_LLM_DELAY_MS ?? 500);
+  const delay = Number(import.meta.env.VITE_CAUL_SPECULATIVE_LLM_DELAY_MS ?? 500);
 
   return Number.isFinite(delay) ? Math.max(0, delay) : 500;
 }
 
 function getSpeculativeModel(): LlmModel {
-  const model = import.meta.env.VITE_SUSURA_SPECULATIVE_LLM_MODEL;
+  const model = import.meta.env.VITE_CAUL_SPECULATIVE_LLM_MODEL;
 
   return isLlmModel(model) ? model : 'openai-codex/gpt-5.4-mini';
 }
 
 function getSpeculativeReasoning(): LlmReasoning {
-  const reasoning = import.meta.env.VITE_SUSURA_SPECULATIVE_LLM_REASONING;
+  const reasoning = import.meta.env.VITE_CAUL_SPECULATIVE_LLM_REASONING;
 
   return isLlmReasoning(reasoning) ? reasoning : 'off';
 }

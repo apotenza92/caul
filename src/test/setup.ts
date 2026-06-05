@@ -48,5 +48,5 @@ afterEach(() => {
   document.documentElement.removeAttribute('data-theme');
   document.documentElement.style.colorScheme = '';
   window.localStorage.clear();
-  delete window.susura;
+  delete window.caul;
 });

@@ -11,7 +11,7 @@ exports.default = async function afterPack(context) {
   const resourcesPath = path.join(appPath, 'Contents', 'Resources');
   const binDir = path.join(resourcesPath, 'bin');
 
-  for (const binaryName of ['susura-desktop-backend', 'SusuraAudioHelper']) {
+  for (const binaryName of ['caul-desktop-backend', 'CaulAudioHelper']) {
     const binaryPath = path.join(binDir, binaryName);
 
     if (fs.existsSync(binaryPath)) {

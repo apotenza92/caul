@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 const tone = spawn(process.execPath, ['scripts/browser-audio-tone.mjs'], {
   env: {
     ...process.env,
-    SUSURA_BROWSER_TONE_MS: process.env.SUSURA_BROWSER_TONE_MS ?? '30000'
+    CAUL_BROWSER_TONE_MS: process.env.CAUL_BROWSER_TONE_MS ?? '30000'
   },
   stdio: 'inherit'
 });
@@ -36,7 +36,7 @@ tone.kill('SIGTERM');
 
 const smokeLine = output
   .split('\n')
-  .find((line) => line.includes('susura-system-audio-smoke'));
+  .find((line) => line.includes('caul-system-audio-smoke'));
 const detected = smokeLine?.includes('"detected":true') ?? false;
 
 if (!detected) {

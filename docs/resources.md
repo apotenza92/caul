@@ -45,6 +45,6 @@ Use these projects to understand capture patterns, permission behaviour and prac
 ## Selection Rules
 
 - Prefer active projects with clear maintenance signals.
-- Prefer permissive licences that fit Susura's intended licence.
+- Prefer permissive licences that fit Caul's intended licence.
 - Prefer small dependency surfaces for sensitive capture and storage code.
 - Avoid copying competitor implementations when a platform API or focused library can provide the same foundation.

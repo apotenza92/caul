@@ -8,38 +8,36 @@ const sharp = require('sharp');
 
 const rootDir = path.resolve(__dirname, '..');
 const iconsDir = path.join(rootDir, 'assets', 'icons');
-const markSource = fs.existsSync(path.join(iconsDir, 'susura-mark.png'))
-  ? path.join(iconsDir, 'susura-mark.png')
-  : path.join(iconsDir, 'susura-mark.svg');
+const markSource = path.join(rootDir, 'assets', 'caul-icon.svg');
 
 const palettes = {
   stable: {
-    base: '#0f766e',
-    baseDark: '#0b4f4a',
-    baseLight: '#2dd4bf',
-    accent: '#a7f3d0',
-    shadow: '#083f3b'
+    base: '#34424A',
+    baseDark: '#263238',
+    baseLight: '#8EA6AD',
+    accent: '#B8A46A',
+    shadow: '#101619'
   },
   beta: {
-    base: '#c2410c',
-    baseDark: '#7c2d12',
-    baseLight: '#fb923c',
-    accent: '#fed7aa',
-    shadow: '#5f220d'
+    base: '#B8A46A',
+    baseDark: '#34424A',
+    baseLight: '#D8C98C',
+    accent: '#8EA6AD',
+    shadow: '#101619'
   },
   stableDark: {
-    base: '#0f766e',
-    baseDark: '#071f1d',
-    baseLight: '#14b8a6',
-    accent: '#ccfbf1',
-    shadow: '#031412'
+    base: '#34424A',
+    baseDark: '#101619',
+    baseLight: '#8EA6AD',
+    accent: '#B8A46A',
+    shadow: '#05080A'
   },
   betaDark: {
-    base: '#c2410c',
-    baseDark: '#241008',
-    baseLight: '#ea580c',
-    accent: '#ffedd5',
-    shadow: '#170904'
+    base: '#B8A46A',
+    baseDark: '#101619',
+    baseLight: '#D8C98C',
+    accent: '#8EA6AD',
+    shadow: '#05080A'
   }
 };
 

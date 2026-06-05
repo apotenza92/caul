@@ -2,8 +2,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
-const vmName = process.env.SUSURA_MACOS_VM_NAME ?? 'macOS Tahoe';
-const testUrl = process.env.SUSURA_VM_TEST_URL ?? 'http://10.211.55.2:5173/';
+const vmName = process.env.CAUL_MACOS_VM_NAME ?? 'macOS Tahoe';
+const testUrl = process.env.CAUL_VM_TEST_URL ?? 'http://10.211.55.2:5173/';
 
 async function runPrlctl(args, options = {}) {
   try {
@@ -66,8 +66,8 @@ if (!macos.ok || !arch.ok || !html.ok) {
   process.exit(1);
 }
 
-if (!html.text.includes('<title>Susura</title>')) {
-  console.error(`VM reached ${testUrl}, but the response did not look like the Susura app.`);
+if (!html.text.includes('<title>Caul</title>')) {
+  console.error(`VM reached ${testUrl}, but the response did not look like the Caul app.`);
   process.exit(1);
 }
 

@@ -6,7 +6,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
-use susura_audio_core::{AudioLevel, AudioSource};
+use caul_audio_core::{AudioLevel, AudioSource};
 
 #[derive(Debug, thiserror::Error)]
 pub enum MacosCaptureError {
@@ -59,7 +59,7 @@ impl HelperCommand {
             vec!["--stream-system-audio".to_string()]
         };
 
-        if let Ok(helper_path) = std::env::var("SUSURA_AUDIO_HELPER_PATH") {
+        if let Ok(helper_path) = std::env::var("CAUL_AUDIO_HELPER_PATH") {
             let helper_path = PathBuf::from(helper_path);
 
             if fs::metadata(&helper_path).is_ok() {
@@ -74,7 +74,7 @@ impl HelperCommand {
         let binary_path = package_path
             .join(".build")
             .join("debug")
-            .join("SusuraAudioHelper");
+            .join("CaulAudioHelper");
 
         if fs::metadata(&binary_path).is_ok() {
             return Self {
@@ -87,7 +87,7 @@ impl HelperCommand {
             "run".to_string(),
             "--package-path".to_string(),
             package_path.to_string_lossy().into_owned(),
-            "SusuraAudioHelper".to_string(),
+            "CaulAudioHelper".to_string(),
         ];
         args.extend(capture_args);
 
@@ -327,9 +327,9 @@ mod tests {
     #[test]
     fn builds_swift_fallback_command() {
         let _guard = ENV_LOCK.lock().expect("env lock should be available");
-        std::env::remove_var("SUSURA_AUDIO_HELPER_PATH");
+        std::env::remove_var("CAUL_AUDIO_HELPER_PATH");
 
-        let command = HelperCommand::system_audio("/tmp/susura-missing-root", false);
+        let command = HelperCommand::system_audio("/tmp/caul-missing-root", false);
 
         assert_eq!(command.command, PathBuf::from("swift"));
         assert!(command.args.contains(&"--stream-system-audio".to_string()));
@@ -339,11 +339,11 @@ mod tests {
     fn uses_configured_audio_helper_path() {
         let _guard = ENV_LOCK.lock().expect("env lock should be available");
         let helper_path = std::env::current_exe().expect("test executable path");
-        std::env::set_var("SUSURA_AUDIO_HELPER_PATH", &helper_path);
+        std::env::set_var("CAUL_AUDIO_HELPER_PATH", &helper_path);
 
-        let command = HelperCommand::system_audio("/tmp/susura-missing-root", false);
+        let command = HelperCommand::system_audio("/tmp/caul-missing-root", false);
 
-        std::env::remove_var("SUSURA_AUDIO_HELPER_PATH");
+        std::env::remove_var("CAUL_AUDIO_HELPER_PATH");
         assert_eq!(command.command, helper_path);
         assert_eq!(command.args, vec!["--stream-system-audio".to_string()]);
     }

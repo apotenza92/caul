@@ -26,11 +26,11 @@ describe('App', () => {
   it('shows only the minimal listening form', async () => {
     render(<App />);
 
-    expect(await screen.findByText('Susura')).toBeInTheDocument();
-    await waitFor(() => expect(document.title).toBe('Susura'));
+    expect(await screen.findByText('Caul')).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe('Caul'));
     expect(screen.queryByRole('button', { name: 'Auto' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Manual' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Susura Settings' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Caul Settings' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Home' })).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: 'Speaker' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Model')).not.toBeInTheDocument();
@@ -58,14 +58,14 @@ describe('App', () => {
     installTestBridge({
       runtimeContext: testRuntimeContext({
         appChannel: 'dev',
-        appName: 'Susura Dev'
+        appName: 'Caul Dev'
       })
     });
 
     render(<App />);
 
-    expect(await screen.findByText('Susura Dev')).toBeInTheDocument();
-    await waitFor(() => expect(document.title).toBe('Susura Dev'));
+    expect(await screen.findByText('Caul Dev')).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe('Caul Dev'));
   });
 
   it('opens settings as a modal page and closes it from either control', async () => {
@@ -73,16 +73,16 @@ describe('App', () => {
 
     render(<App />);
 
-    await user.hover(screen.getByRole('button', { name: 'Susura Settings' }));
-    expect((await screen.findAllByText('Open Susura settings'))
+    await user.hover(screen.getByRole('button', { name: 'Caul Settings' }));
+    expect((await screen.findAllByText('Open Caul settings'))
       .find((element) => element.getAttribute('data-slot') === 'tooltip-content'))
       .toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Susura Settings' }));
+    await user.click(screen.getByRole('button', { name: 'Caul Settings' }));
     expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Susura Settings' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('dialog', { name: 'Settings' })).toHaveClass('susura-settings-dialog');
-    expect(screen.getByRole('dialog', { name: 'Settings' })).toHaveClass('susura-large-modal-shell', 'h-[85vh]', 'w-[85vw]', 'max-w-[85vw]');
+    expect(screen.getByRole('button', { name: 'Caul Settings' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('dialog', { name: 'Settings' })).toHaveClass('caul-settings-dialog');
+    expect(screen.getByRole('dialog', { name: 'Settings' })).toHaveClass('caul-large-modal-shell', 'h-[85vh]', 'w-[85vw]', 'max-w-[85vw]');
     expect(screen.getByRole('dialog', { name: 'Settings' })).not.toHaveClass('w-[59.765625vw]', 'max-w-[59.765625vw]');
     expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: 'General' }))
       .toHaveAttribute('data-active', 'true');
@@ -92,11 +92,11 @@ describe('App', () => {
       .toHaveAttribute('data-active', 'false');
     expect(screen.getByRole('heading', { name: 'Settings' })).toHaveClass('text-sm', 'text-center');
 
-    await user.click(screen.getByRole('button', { name: 'Susura Settings' }));
+    await user.click(screen.getByRole('button', { name: 'Caul Settings' }));
     expect(screen.queryByRole('dialog', { name: 'Settings' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Susura Settings' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'Caul Settings' })).toHaveAttribute('aria-pressed', 'false');
 
-    await user.click(screen.getByRole('button', { name: 'Susura Settings' }));
+    await user.click(screen.getByRole('button', { name: 'Caul Settings' }));
     await user.click(await screen.findByRole('button', { name: 'Close settings' }));
 
     expect(screen.queryByRole('dialog', { name: 'Settings' })).not.toBeInTheDocument();
@@ -107,7 +107,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await user.click(screen.getByRole('button', { name: 'Susura Settings' }));
+    await user.click(screen.getByRole('button', { name: 'Caul Settings' }));
     expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Close settings backdrop' })).toHaveClass('cursor-default');
 
@@ -117,20 +117,25 @@ describe('App', () => {
   });
 
   it('renders guided onboarding setup rows', async () => {
-    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
     installTestBridge();
 
     render(<App />);
 
-    expect(await screen.findByAltText('Susura')).toBeInTheDocument();
+    expect(await screen.findByAltText('Caul')).toBeInTheDocument();
     expect(screen.getByText('Screen & System Audio Recording')).toBeInTheDocument();
     expect(screen.getByText('Microphone & System Audio')).toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual([
+      'Permissions',
+      'AI Model',
+      'Transcription'
+    ]);
     expect(screen.queryByText('Permission setup')).not.toBeInTheDocument();
   });
 
   it('shows targeted onboarding permission status and actions', async () => {
-    window.history.pushState({}, '', '/?susura-surface=onboarding');
-    window.localStorage.setItem('susura.initial-permission-requested', '1');
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
+    window.localStorage.setItem('caul.initial-permission-requested', '1');
     const bridge = installTestBridge({
       permissions: [
         {
@@ -166,7 +171,7 @@ describe('App', () => {
   });
 
   it('waits for the user to click permission buttons during onboarding', async () => {
-    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
     const bridge = installTestBridge({
       permissions: [
         {
@@ -201,7 +206,7 @@ describe('App', () => {
   });
 
   it('only requests the missing audio permission from the combined onboarding row', async () => {
-    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
     const bridge = installTestBridge({
       permissions: [
         {
@@ -233,7 +238,7 @@ describe('App', () => {
   });
 
   it('offers to restart onboarding after the denied audio permission path is retried', async () => {
-    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
     const bridge = installTestBridge({
       permissions: [
         {
@@ -261,20 +266,20 @@ describe('App', () => {
 
     const user = userEvent.setup();
 
-    expect(screen.queryByText('Changed it in System Settings? Restart Susura to apply the permission.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Changed it in System Settings? Restart Caul to apply the permission.')).not.toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'Grant Microphone & System Audio' })).toHaveTextContent('Open Settings');
 
     await user.click(await screen.findByRole('button', { name: 'Grant Microphone & System Audio' }));
 
-    expect(await screen.findByText('Changed it in System Settings? Restart Susura to apply the permission.')).toBeInTheDocument();
+    expect(await screen.findByText('Changed it in System Settings? Restart Caul to apply the permission.')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Restart Susura' }));
+    await user.click(screen.getByRole('button', { name: 'Restart Caul' }));
 
     expect(bridge.relaunches).toBe(1);
   });
 
   it('opens only one denied audio permission at a time during onboarding recovery', async () => {
-    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
     const bridge = installTestBridge({
       permissions: [
         {
@@ -307,11 +312,11 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Grant Microphone & System Audio' }));
 
     expect(bridge.requestedPermissions).toEqual(['microphone']);
-    expect(await screen.findByText('Changed it in System Settings? Restart Susura to apply the permission.')).toBeInTheDocument();
+    expect(await screen.findByText('Changed it in System Settings? Restart Caul to apply the permission.')).toBeInTheDocument();
   });
 
   it('hides the permissions step during onboarding when no platform permissions are relevant', async () => {
-    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
     const bridge = installTestBridge({
       permissions: [
         {
@@ -337,7 +342,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await screen.findByText('Transcription Model');
+    await screen.findByText('AI Model');
 
     expect(screen.queryByText('Permissions')).not.toBeInTheDocument();
     expect(screen.queryByText('Screen & System Audio Recording')).not.toBeInTheDocument();
@@ -348,22 +353,22 @@ describe('App', () => {
   });
 
   it('uses the packaged app name on onboarding', async () => {
-    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
     installTestBridge({
       runtimeContext: testRuntimeContext({
         appChannel: 'dev',
-        appName: 'Susura Dev'
+        appName: 'Caul Dev'
       })
     });
 
     render(<App />);
 
-    expect(await screen.findByRole('heading', { name: 'Welcome to Susura Dev' })).toBeInTheDocument();
-    expect(screen.getByAltText('Susura Dev')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Welcome to Caul Dev' })).toBeInTheDocument();
+    expect(screen.getByAltText('Caul Dev')).toBeInTheDocument();
   });
 
   it('starts downloading the recommended Parakeet model when onboarding opens', async () => {
-    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
     const bridge = installTestBridge({
       parakeetStatus: testParakeetStatus({
         installed: false,
@@ -373,20 +378,16 @@ describe('App', () => {
 
     render(<App />);
 
-    const modelSelect = await screen.findByLabelText('Transcription model');
-    expect(modelSelect).toHaveTextContent('Parakeet v3');
-    expect(modelSelect).toHaveClass('w-[14rem]', 'min-w-0');
-    expect(modelSelect).not.toHaveClass('flex-1');
-    expect(modelSelect).not.toHaveClass('w-44');
-    expect(modelSelect).toHaveAttribute('title', 'Parakeet v3');
-    expect(within(modelSelect).getByText('Recommended')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Use' })).toBeInTheDocument();
+    expect(await screen.findByText('Preparing local transcription')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Transcription model')).not.toBeInTheDocument();
+    expect(screen.queryByText('Recommended')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Use' })).not.toBeInTheDocument();
 
     await waitFor(() => expect(bridge.parakeetDownloads).toBe(1));
   });
 
   it('starts downloading the recommended Moonshine model when onboarding opens', async () => {
-    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
     const moonshineStatus = testParakeetStatus({
       installed: false,
       modelId: 'moonshine-tiny',
@@ -410,53 +411,30 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findByLabelText('Transcription model')).toHaveTextContent('Moonshine tiny');
+    expect(await screen.findByText('Preparing local transcription')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Transcription model')).not.toBeInTheDocument();
+    expect(screen.queryByText('Moonshine tiny')).not.toBeInTheDocument();
     await waitFor(() => expect(bridge.parakeetDownloads).toBe(1));
     expect(bridge.selectedLocalTranscriptionModels).toEqual(['moonshine-tiny']);
   });
 
-  it('removes an unused auto-downloaded model only when onboarding is completed', async () => {
-    window.history.pushState({}, '', '/?susura-surface=onboarding');
-    const user = userEvent.setup();
-    const bridge = installTestBridge({
-      piStatus: testPiStatus({
-        connected: true,
-        selectedModel: 'openai-codex/gpt-5.5',
-        status: 'ready'
-      }),
-      parakeetStatus: testParakeetStatus({
-        installed: false,
-        status: 'missing'
-      })
-    });
+  it('does not expose manual transcription controls in onboarding', async () => {
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
+    installTestBridge();
 
     render(<App />);
 
-    await waitFor(() => expect(bridge.parakeetDownloads).toBe(1));
-    await selectSetting(user, 'Transcription model', 'Moonshine tiny');
-    expect(bridge.removedLocalTranscriptionModels).toEqual([]);
-
-    await user.click(screen.getByRole('button', { name: 'Use' }));
-    await user.click(await screen.findByRole('button', { name: 'Start using Susura' }));
-
-    expect(bridge.removedLocalTranscriptionModels).toEqual(['parakeet']);
-  });
-
-  it('allows choosing another local transcription model from onboarding', async () => {
-    window.history.pushState({}, '', '/?susura-surface=onboarding');
-    const user = userEvent.setup();
-    const bridge = installTestBridge();
-
-    render(<App />);
-
-    await selectSetting(user, 'Transcription model', 'Moonshine tiny');
-    await user.click(screen.getByRole('button', { name: 'Use' }));
-
-    expect(bridge.selectedLocalTranscriptionModels).toEqual(['moonshine-tiny']);
+    expect(await screen.findByText('Ready')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Transcription model')).not.toBeInTheDocument();
+    expect(screen.queryByText('Parakeet v3')).not.toBeInTheDocument();
+    expect(screen.queryByText('Moonshine tiny')).not.toBeInTheDocument();
+    expect(screen.queryByText('Recommended')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Use' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
   });
 
   it('does not download a local model automatically when cloud transcription is recommended', async () => {
-    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
     const bridge = installTestBridge({
       onboardingStatus: testOnboardingStatus({
         parakeet: testParakeetStatus({
@@ -477,13 +455,14 @@ describe('App', () => {
 
     render(<App />);
 
-    await screen.findByLabelText('Transcription model');
+    expect(await screen.findByText('Transcription setup needs attention')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Transcription model')).not.toBeInTheDocument();
 
     expect(bridge.parakeetDownloads).toBe(0);
   });
 
   it('shows local model download progress in onboarding', async () => {
-    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
     installTestBridge({
       parakeetStatus: testParakeetStatus({
         installed: false,
@@ -498,14 +477,15 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findByLabelText('Transcription model')).toHaveTextContent('Parakeet v3');
+    expect(await screen.findByText('Downloading local transcription')).toBeInTheDocument();
     expect(screen.getByText('42% · 42 B/100 B')).toBeInTheDocument();
     expect(screen.getByLabelText('Downloading 42% · 42 B of 100 B')).toBeInTheDocument();
     expect(screen.queryByText('Downloading Parakeet v3')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Transcription model')).not.toBeInTheDocument();
   });
 
   it('shows Moonshine as a ready local recommendation instead of a failed state', async () => {
-    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
     installTestBridge({
       onboardingStatus: testOnboardingStatus({
         parakeet: testParakeetStatus({
@@ -530,14 +510,14 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findByLabelText('Transcription model')).toHaveTextContent('Moonshine tiny');
-    expect(screen.getByText('Ready')).toBeInTheDocument();
+    expect(await screen.findByText('Ready')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Use' })).not.toBeInTheDocument();
-    expect(screen.queryByText('Recommended model')).not.toBeInTheDocument();
+    expect(screen.queryByText('Moonshine tiny')).not.toBeInTheDocument();
+    expect(screen.queryByText('Recommended')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Transcription model')).not.toBeInTheDocument();
   });
 
-  it('keeps Use enabled for a different model when the current model is ready', async () => {
-    window.history.pushState({}, '', '/?susura-surface=onboarding');
+  it('keeps manual transcription model switching in settings', async () => {
     const user = userEvent.setup();
     installTestBridge({
       parakeetStatus: testParakeetStatus({
@@ -548,17 +528,22 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findByText('Ready')).toBeInTheDocument();
+    await openSettings(user);
+    await openSettingsSection(user, 'Models');
+
+    expect(await screen.findByLabelText('Transcription model')).toHaveValue('parakeet');
+    expect(screen.getByText('Recommended')).toBeInTheDocument();
+    expect(screen.getByText('Ready')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Use' })).not.toBeInTheDocument();
 
-    await selectSetting(user, 'Transcription model', 'Moonshine tiny');
+    await selectSetting(user, 'Transcription model', 'Lightweight');
 
     expect(screen.queryByText('Ready')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Use' })).toBeEnabled();
   });
 
   it('starts ChatGPT sign in from onboarding', async () => {
-    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
     const user = userEvent.setup();
     const bridge = installTestBridge();
 
@@ -570,7 +555,7 @@ describe('App', () => {
   });
 
   it('shows a loading state while ChatGPT sign in opens from onboarding', async () => {
-    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
     const user = userEvent.setup();
     let resolveLogin!: (value: { ok: boolean }) => void;
     const loginPromise = new Promise<{ ok: boolean }>((resolve) => {
@@ -594,7 +579,7 @@ describe('App', () => {
   });
 
   it('keeps onboarding start disabled and explains missing setup', async () => {
-    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
     const user = userEvent.setup();
     installTestBridge({
       onboardingStatus: testOnboardingStatus({
@@ -629,19 +614,19 @@ describe('App', () => {
 
     render(<App />);
 
-    const startButton = await screen.findByRole('button', { name: 'Start using Susura' });
+    const startButton = await screen.findByRole('button', { name: 'Start using Caul' });
     expect(startButton).toBeDisabled();
 
     await user.hover(startButton.parentElement!);
 
     expect(await screen.findAllByText('Still needed')).not.toHaveLength(0);
     expect(screen.getAllByText('Screen & System Audio Recording')).not.toHaveLength(0);
-    expect(screen.getAllByText('Transcription model')).not.toHaveLength(0);
+    expect(screen.getAllByText('Local transcription')).not.toHaveLength(0);
     expect(screen.getAllByText('ChatGPT sign in')).not.toHaveLength(0);
   });
 
   it('enables onboarding start when setup is complete', async () => {
-    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
     const user = userEvent.setup();
     const bridge = installTestBridge({
       piStatus: testPiStatus({
@@ -653,7 +638,7 @@ describe('App', () => {
 
     render(<App />);
 
-    const startButton = await screen.findByRole('button', { name: 'Start using Susura' });
+    const startButton = await screen.findByRole('button', { name: 'Start using Caul' });
     await waitFor(() => expect(startButton).toBeEnabled());
 
     await user.click(startButton);
@@ -662,7 +647,7 @@ describe('App', () => {
   });
 
   it('uses a ready Parakeet model automatically during onboarding', async () => {
-    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
     const bridge = installTestBridge({
       piStatus: testPiStatus({
         connected: true,
@@ -674,7 +659,7 @@ describe('App', () => {
 
     render(<App />);
 
-    const startButton = await screen.findByRole('button', { name: 'Start using Susura' });
+    const startButton = await screen.findByRole('button', { name: 'Start using Caul' });
     await waitFor(() => expect(startButton).toBeEnabled());
     expect(screen.getByText('Ready')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Use' })).not.toBeInTheDocument();
@@ -682,7 +667,7 @@ describe('App', () => {
   });
 
   it('does not show extra ChatGPT sign-in status text in onboarding', async () => {
-    window.history.pushState({}, '', '/?susura-surface=onboarding');
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
     installTestBridge({
       piStatus: testPiStatus({
         connected: true,
@@ -709,7 +694,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await user.click(screen.getByRole('button', { name: 'Susura Settings' }));
+    await user.click(screen.getByRole('button', { name: 'Caul Settings' }));
 
     const settingsClose = await screen.findByRole('button', { name: 'Close settings' });
     expect(settingsClose).toHaveClass('right-3');
@@ -720,7 +705,7 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: 'Manage prompt templates' }));
 
     const promptTemplatesClose = await screen.findByRole('button', { name: 'Close prompt templates' });
-    expect(screen.getByRole('dialog', { name: 'Prompt templates' })).toHaveClass('susura-settings-dialog', 'susura-large-modal-shell', 'h-[85vh]', 'w-[85vw]');
+    expect(screen.getByRole('dialog', { name: 'Prompt templates' })).toHaveClass('caul-settings-dialog', 'caul-large-modal-shell', 'h-[85vh]', 'w-[85vw]');
     expect(screen.getByRole('heading', { name: 'Prompt templates' })).toHaveClass('text-sm', 'text-center');
     expect(screen.getByText('Save reusable instructions that are prepended to transcript requests.')).toHaveClass('sr-only');
     expect(promptTemplatesClose).toHaveClass('right-3');
@@ -739,7 +724,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await user.click(screen.getByRole('button', { name: 'Susura Settings' }));
+    await user.click(screen.getByRole('button', { name: 'Caul Settings' }));
 
     const settingsClose = await screen.findByRole('button', { name: 'Close settings' });
     expect(settingsClose).toHaveClass('top-6', '-translate-y-1/2', 'left-3', 'size-[14px]', 'rounded-full', 'border-[0.5px]', 'border-[#FB1626]', 'bg-[#FF5C60]', 'shadow-none', 'hover:bg-[#FF5C60]', 'active:bg-[#D94D4F]', 'text-[#802F31]');
@@ -748,7 +733,7 @@ describe('App', () => {
     expect(settingsClose.className).not.toContain('shadow-[inset');
     expect(settingsClose).not.toHaveClass('right-3');
     expect(settingsClose).not.toHaveAttribute('data-variant');
-    expect(settingsClose).toHaveClass('susura-mac-close-button');
+    expect(settingsClose).toHaveClass('caul-mac-close-button');
     expect(settingsClose.querySelector('svg')).not.toBeInTheDocument();
 
     await user.click(settingsClose);
@@ -761,39 +746,39 @@ describe('App', () => {
     expect(promptTemplatesClose.className).not.toContain('shadow-[inset');
     expect(promptTemplatesClose).not.toHaveClass('right-3');
     expect(promptTemplatesClose).not.toHaveAttribute('data-variant');
-    expect(promptTemplatesClose).toHaveClass('susura-mac-close-button');
+    expect(promptTemplatesClose).toHaveClass('caul-mac-close-button');
     expect(promptTemplatesClose.querySelector('svg')).not.toBeInTheDocument();
   });
 
   it('renders the private overlay handle surface and toggles the full app overlay', async () => {
     const user = userEvent.setup();
     const bridge = installTestBridge();
-    window.history.pushState({}, '', '/?susura-surface=handle');
+    window.history.pushState({}, '', '/?caul-surface=handle');
 
     render(<App />);
 
-    expect(screen.getByLabelText('Susura overlay handle')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Toggle Susura app' }).querySelector('.susura-handle-icon')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Toggle Susura app' }).querySelector('svg')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Toggle Susura app' })).not.toHaveTextContent('S');
-    expect(screen.getByRole('button', { name: 'Toggle Susura app' })).toHaveAttribute('data-open', 'false');
-    await user.click(screen.getByRole('button', { name: 'Toggle Susura app' }));
+    expect(screen.getByLabelText('Caul overlay handle')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Toggle Caul app' }).querySelector('.caul-handle-icon')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Toggle Caul app' }).querySelector('svg')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Toggle Caul app' })).not.toHaveTextContent('S');
+    expect(screen.getByRole('button', { name: 'Toggle Caul app' })).toHaveAttribute('data-open', 'false');
+    await user.click(screen.getByRole('button', { name: 'Toggle Caul app' }));
 
     expect(bridge.privateOverlayToggles).toBe(1);
     expect(bridge.privateOverlayState.overlayWindowVisible).toBe(true);
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Toggle Susura app' })).toHaveAttribute('data-open', 'true');
+      expect(screen.getByRole('button', { name: 'Toggle Caul app' })).toHaveAttribute('data-open', 'true');
     });
-    expect(screen.getByRole('button', { name: 'Toggle Susura app' })).toHaveAttribute('data-open', 'true');
+    expect(screen.getByRole('button', { name: 'Toggle Caul app' })).toHaveAttribute('data-open', 'true');
   });
 
   it('drags the circular private overlay handle without toggling the app overlay', () => {
     const bridge = installTestBridge();
-    window.history.pushState({}, '', '/?susura-surface=handle');
+    window.history.pushState({}, '', '/?caul-surface=handle');
 
     render(<App />);
 
-    const handle = screen.getByRole('button', { name: 'Toggle Susura app' });
+    const handle = screen.getByRole('button', { name: 'Toggle Caul app' });
 
     fireEvent.pointerDown(handle, {
       button: 0,
@@ -820,11 +805,11 @@ describe('App', () => {
 
   it('opens the private overlay handle menu on right click without toggling the app overlay', () => {
     const bridge = installTestBridge();
-    window.history.pushState({}, '', '/?susura-surface=handle');
+    window.history.pushState({}, '', '/?caul-surface=handle');
 
     render(<App />);
 
-    fireEvent.contextMenu(screen.getByRole('button', { name: 'Toggle Susura app' }));
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Toggle Caul app' }));
 
     expect(bridge.privateOverlayHandleMenuShows).toBe(1);
     expect(bridge.privateOverlayToggles).toBe(0);
@@ -835,7 +820,7 @@ describe('App', () => {
 
     render(<App />);
 
-    const titleBar = screen.getByLabelText('Move Susura window');
+    const titleBar = screen.getByLabelText('Move Caul window');
 
     fireEvent.pointerDown(titleBar, {
       button: 0,
@@ -903,24 +888,24 @@ describe('App', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Hide Susura app' })).toHaveAttribute('data-platform', 'macos');
+      expect(screen.getByRole('button', { name: 'Hide Caul app' })).toHaveAttribute('data-platform', 'macos');
     });
 
-    expect(screen.getByLabelText('Move Susura window')).toHaveClass('justify-center');
-    expect(screen.getByLabelText('Move Susura window').parentElement).toHaveClass('h-8');
-    expect(screen.getByLabelText('Move Susura window')).toHaveClass('cursor-default');
-    expect(screen.getByText('Susura')).toHaveClass('text-sm', 'font-medium');
-    expect(screen.getByRole('button', { name: 'Hide Susura app' })).toHaveClass('left-3', 'size-[14px]', 'cursor-default', 'rounded-full', 'border-[0.5px]', 'border-[#FB1626]', 'bg-[#FF5C60]', 'shadow-none', 'hover:bg-[#FF5C60]', 'active:bg-[#D94D4F]');
-    expect(screen.getByRole('button', { name: 'Hide Susura app' })).not.toHaveClass('hover:bg-red-400');
-    expect(screen.getByRole('button', { name: 'Hide Susura app' }).className).not.toContain('shadow-[inset');
-    expect(screen.getByRole('button', { name: 'Hide Susura app' }).querySelector('svg')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Quit Susura' })).toHaveAttribute('data-platform', 'macos');
-    expect(screen.getByRole('button', { name: 'Quit Susura' })).toHaveClass('left-8', 'size-[14px]', 'cursor-default', 'rounded-full', 'border-[0.5px]', 'border-[#9B48D6]', 'bg-[#BF5AF2]');
-    expect(screen.getByRole('button', { name: 'Quit Susura' }).querySelector('svg')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Susura Settings' })).toHaveClass('right-1.5');
-    expect(screen.getByRole('button', { name: 'Susura Settings' })).not.toHaveClass('left-1.5');
-    expect(screen.getByRole('button', { name: 'Susura Settings' })).toHaveClass('size-7', 'bg-transparent');
-    expect(screen.getByRole('button', { name: 'Susura Settings' })).not.toHaveClass('border-border');
+    expect(screen.getByLabelText('Move Caul window')).toHaveClass('justify-center');
+    expect(screen.getByLabelText('Move Caul window').parentElement).toHaveClass('h-8');
+    expect(screen.getByLabelText('Move Caul window')).toHaveClass('cursor-default');
+    expect(screen.getByText('Caul')).toHaveClass('text-sm', 'font-medium');
+    expect(screen.getByRole('button', { name: 'Hide Caul app' })).toHaveClass('left-3', 'size-[14px]', 'cursor-default', 'rounded-full', 'border-[0.5px]', 'border-[#FB1626]', 'bg-[#FF5C60]', 'shadow-none', 'hover:bg-[#FF5C60]', 'active:bg-[#D94D4F]');
+    expect(screen.getByRole('button', { name: 'Hide Caul app' })).not.toHaveClass('hover:bg-red-400');
+    expect(screen.getByRole('button', { name: 'Hide Caul app' }).className).not.toContain('shadow-[inset');
+    expect(screen.getByRole('button', { name: 'Hide Caul app' }).querySelector('svg')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Quit Caul' })).toHaveAttribute('data-platform', 'macos');
+    expect(screen.getByRole('button', { name: 'Quit Caul' })).toHaveClass('left-8', 'size-[14px]', 'cursor-default', 'rounded-full', 'border-[0.5px]', 'border-[#9B48D6]', 'bg-[#BF5AF2]');
+    expect(screen.getByRole('button', { name: 'Quit Caul' }).querySelector('svg')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Caul Settings' })).toHaveClass('right-1.5');
+    expect(screen.getByRole('button', { name: 'Caul Settings' })).not.toHaveClass('left-1.5');
+    expect(screen.getByRole('button', { name: 'Caul Settings' })).toHaveClass('size-7', 'bg-transparent');
+    expect(screen.getByRole('button', { name: 'Caul Settings' })).not.toHaveClass('border-border');
   });
 
   it('keeps the top-right X close button on non-macOS platforms', async () => {
@@ -934,19 +919,19 @@ describe('App', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Hide Susura app' })).toHaveAttribute('data-platform', 'desktop');
+      expect(screen.getByRole('button', { name: 'Hide Caul app' })).toHaveAttribute('data-platform', 'desktop');
     });
 
-    expect(screen.getByRole('button', { name: 'Hide Susura app' })).toHaveClass('right-9');
-    expect(screen.getByRole('button', { name: 'Hide Susura app' })).toHaveClass('cursor-default');
-    expect(screen.getByRole('button', { name: 'Hide Susura app' }).querySelector('svg')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Quit Susura' })).toHaveAttribute('data-platform', 'desktop');
-    expect(screen.getByRole('button', { name: 'Quit Susura' })).toHaveClass('right-1');
-    expect(screen.getByRole('button', { name: 'Quit Susura' }).querySelector('svg')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Susura Settings' })).toHaveClass('left-1.5');
-    expect(screen.getByRole('button', { name: 'Susura Settings' })).not.toHaveClass('right-1.5');
-    expect(screen.getByRole('button', { name: 'Susura Settings' })).toHaveClass('size-7', 'bg-transparent');
-    expect(screen.getByRole('button', { name: 'Susura Settings' })).not.toHaveClass('border-border');
+    expect(screen.getByRole('button', { name: 'Hide Caul app' })).toHaveClass('right-9');
+    expect(screen.getByRole('button', { name: 'Hide Caul app' })).toHaveClass('cursor-default');
+    expect(screen.getByRole('button', { name: 'Hide Caul app' }).querySelector('svg')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Quit Caul' })).toHaveAttribute('data-platform', 'desktop');
+    expect(screen.getByRole('button', { name: 'Quit Caul' })).toHaveClass('right-1');
+    expect(screen.getByRole('button', { name: 'Quit Caul' }).querySelector('svg')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Caul Settings' })).toHaveClass('left-1.5');
+    expect(screen.getByRole('button', { name: 'Caul Settings' })).not.toHaveClass('right-1.5');
+    expect(screen.getByRole('button', { name: 'Caul Settings' })).toHaveClass('size-7', 'bg-transparent');
+    expect(screen.getByRole('button', { name: 'Caul Settings' })).not.toHaveClass('border-border');
   });
 
   it('requires confirmation before quitting from the titlebar', async () => {
@@ -960,20 +945,20 @@ describe('App', () => {
 
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: 'Quit Susura' }));
+    await user.click(await screen.findByRole('button', { name: 'Quit Caul' }));
 
-    expect(await screen.findByRole('heading', { name: 'Quit Susura?' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Quit Caul?' })).toBeInTheDocument();
     expect(bridge.quits).toBe(0);
 
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
 
     await waitFor(() => {
-      expect(screen.queryByRole('heading', { name: 'Quit Susura?' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'Quit Caul?' })).not.toBeInTheDocument();
     });
     expect(bridge.quits).toBe(0);
 
-    await user.click(screen.getByRole('button', { name: 'Quit Susura' }));
-    await user.click(screen.getAllByRole('button', { name: 'Quit Susura' }).at(-1)!);
+    await user.click(screen.getByRole('button', { name: 'Quit Caul' }));
+    await user.click(screen.getAllByRole('button', { name: 'Quit Caul' }).at(-1)!);
 
     expect(bridge.quits).toBe(1);
   });
@@ -1091,13 +1076,13 @@ describe('App', () => {
   });
 
   it('loads the full app when the retired compact overlay route is requested', async () => {
-    window.history.pushState({}, '', '/?susura-surface=overlay');
+    window.history.pushState({}, '', '/?caul-surface=overlay');
 
     render(<App />);
 
     expect(screen.queryByRole('navigation', { name: 'Primary' })).not.toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'Start Listening' })).toBeInTheDocument();
-    expect(screen.queryByLabelText('Susura private overlay')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Caul private overlay')).not.toBeInTheDocument();
   });
 
   it('does not expose private overlay controls in settings', async () => {
@@ -1127,7 +1112,7 @@ describe('App', () => {
   });
 
   it('shows long scroll fixture sections when requested in development', () => {
-    window.history.pushState({}, '', '/?susura-scroll-fixture=1');
+    window.history.pushState({}, '', '/?caul-scroll-fixture=1');
 
     const { container } = render(<App />);
 
@@ -1219,7 +1204,7 @@ describe('App', () => {
 
   it('requests a permission from the Settings permissions area', async () => {
     const user = userEvent.setup();
-    window.localStorage.setItem('susura.initial-permission-requested', '1');
+    window.localStorage.setItem('caul.initial-permission-requested', '1');
     const bridge = installTestBridge({
       permissions: [
         {
@@ -1290,7 +1275,7 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Grant Microphone & System Audio' }));
 
     expect(bridge.requestedPermissions).toEqual(['microphone']);
-    expect(await screen.findByText('Changed it in System Settings? Restart Susura to apply the permission.')).toBeInTheDocument();
+    expect(await screen.findByText('Changed it in System Settings? Restart Caul to apply the permission.')).toBeInTheDocument();
   });
 
   it('does not show Grant buttons for granted permissions in Settings', async () => {
@@ -1500,7 +1485,7 @@ describe('App', () => {
     await screen.findByRole('button', { name: 'Permissions' });
 
     expect(bridge.requestedPermissions).toEqual([]);
-    expect(window.localStorage.getItem('susura.initial-permission-requested')).toBeNull();
+    expect(window.localStorage.getItem('caul.initial-permission-requested')).toBeNull();
   });
 
   it('toggles listening with one button', async () => {
@@ -1538,7 +1523,7 @@ describe('App', () => {
 
     const speaker = await screen.findByRole('button', { name: 'Speaker on' });
     expect(speaker).toHaveAttribute('aria-pressed', 'true');
-    expect(speaker).toHaveClass('text-emerald-600');
+    expect(speaker).toHaveClass('text-[#34424A]');
     const microphoneOff = screen.getByRole('button', { name: 'Microphone off' });
     expect(microphoneOff).toHaveAttribute('aria-pressed', 'false');
     expect(microphoneOff.querySelector('.lucide-mic-off')).toBeInTheDocument();
@@ -1546,7 +1531,7 @@ describe('App', () => {
     await user.click(microphoneOff);
     const microphoneOn = screen.getByRole('button', { name: 'Microphone on' });
     expect(microphoneOn).toHaveAttribute('aria-pressed', 'true');
-    expect(microphoneOn).toHaveClass('text-emerald-600');
+    expect(microphoneOn).toHaveClass('text-[#34424A]');
     expect(microphoneOn.querySelector('.lucide-mic')).toBeInTheDocument();
     expect(screen.getByLabelText('Start Listening hint')).toHaveTextContent(
       'Click Start Listening while playing something through your speakers, headphones, or speaking into your microphone.'
@@ -1599,13 +1584,13 @@ describe('App', () => {
 
     const autoSend = screen.getByRole('button', { name: 'Auto Send' });
     expect(autoSend).toHaveAttribute('aria-pressed', 'true');
-    expect(autoSend).toHaveClass('text-emerald-600');
-    expect(autoSend.querySelector('.susura-auto-send-off-slash')).not.toBeInTheDocument();
+    expect(autoSend).toHaveClass('text-[#34424A]');
+    expect(autoSend.querySelector('.caul-auto-send-off-slash')).not.toBeInTheDocument();
 
     await user.click(autoSend);
     expect(autoSend).toHaveAttribute('aria-pressed', 'false');
-    expect(autoSend).not.toHaveClass('text-emerald-600');
-    expect(autoSend.querySelector('.susura-auto-send-off-slash')).toBeInTheDocument();
+    expect(autoSend).not.toHaveClass('text-[#34424A]');
+    expect(autoSend.querySelector('.caul-auto-send-off-slash')).toBeInTheDocument();
     expect((await screen.findAllByText('Sends the transcript to AI when listening stops.'))
       .find((element) => element.getAttribute('data-slot') === 'tooltip-content'))
       .toBeInTheDocument();
@@ -2009,7 +1994,7 @@ describe('App', () => {
     const instructionsDialog = screen.getByRole('dialog', { name: 'Instructions' });
     const instructionsInput = within(instructionsDialog).getByRole('textbox', { name: 'Instructions' });
     expect(instructionsDialog).toHaveAttribute('data-state', 'open');
-    expect(instructionsDialog).toHaveClass('susura-large-modal-shell', 'h-[85vh]', 'w-[85vw]');
+    expect(instructionsDialog).toHaveClass('caul-large-modal-shell', 'h-[85vh]', 'w-[85vw]');
     expect(instructionsInput).toHaveValue('');
     expect(instructionsInput).toHaveAttribute('placeholder', 'e.g. Always answer in British English.');
     expect(screen.queryByRole('button', { name: 'Restore default' })).not.toBeInTheDocument();
@@ -2018,7 +2003,7 @@ describe('App', () => {
     await user.clear(instructionsInput);
     await user.type(instructionsInput, 'Keep the answer concise.');
 
-    expect(window.localStorage.getItem('susura.general-instructions')).toBe('Keep the answer concise.');
+    expect(window.localStorage.getItem('caul.general-instructions')).toBe('Keep the answer concise.');
     expect(screen.getByRole('dialog', { name: 'Instructions' })).toBeInTheDocument();
   });
 
@@ -2047,7 +2032,7 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
 
     const requestTranscript = bridge.llmRequests.at(-1)?.transcript ?? '';
-    expect(window.localStorage.getItem('susura.general-instructions')).toBeNull();
+    expect(window.localStorage.getItem('caul.general-instructions')).toBeNull();
     expect(requestTranscript).not.toContain('General instructions:');
     expect(requestTranscript).toContain('Discussed renewal timelines.');
   });
@@ -2229,7 +2214,7 @@ describe('App', () => {
 
     expect(await screen.findAllByText('AI input')).not.toHaveLength(0);
     expect(screen.getAllByText((content) => content.includes('Summarise the last decision.'))).not.toHaveLength(0);
-    expect(document.querySelector('.susura-preview-tooltip')).toHaveClass('pointer-events-auto');
+    expect(document.querySelector('.caul-preview-tooltip')).toHaveClass('pointer-events-auto');
   });
 
   it('caps the manual AI prompt height to half the AI panel height', async () => {
@@ -2366,7 +2351,7 @@ describe('App', () => {
   it('downloads the visible transcript from the transcript toolbar', async () => {
     const user = userEvent.setup();
     const bridge = installTestBridge();
-    const createObjectURL = vi.fn((_blob: Blob) => 'blob:susura-transcript');
+    const createObjectURL = vi.fn((_blob: Blob) => 'blob:caul-transcript');
     const revokeObjectURL = vi.fn();
     const click = vi.fn();
     let downloadName = '';
@@ -2410,9 +2395,9 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: 'Text file' }));
 
     expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
-    expect(downloadName).toMatch(/^susura-transcript-\d{14}\.txt$/);
+    expect(downloadName).toMatch(/^caul-transcript-\d{14}\.txt$/);
     expect(click).toHaveBeenCalled();
-    expect(revokeObjectURL).toHaveBeenCalledWith('blob:susura-transcript');
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:caul-transcript');
 
     URL.createObjectURL = originalCreateObjectURL;
     URL.revokeObjectURL = originalRevokeObjectURL;
@@ -2421,7 +2406,7 @@ describe('App', () => {
   it('downloads Word transcripts as docx and preserves line breaks', async () => {
     const user = userEvent.setup();
     const bridge = installTestBridge();
-    const createObjectURL = vi.fn((_blob: Blob) => 'blob:susura-transcript');
+    const createObjectURL = vi.fn((_blob: Blob) => 'blob:caul-transcript');
     const click = vi.fn();
     let downloadName = '';
     let downloadedBlob: Blob | null = null;
@@ -2469,7 +2454,7 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Download full transcript' }));
     await user.click(await screen.findByRole('button', { name: 'Word document' }));
 
-    expect(downloadName).toMatch(/^susura-transcript-\d{14}\.docx$/);
+    expect(downloadName).toMatch(/^caul-transcript-\d{14}\.docx$/);
     expect(downloadedBlob).not.toBeNull();
     const blob = downloadedBlob as unknown as Blob;
     const blobText = await blob.text();
@@ -2689,12 +2674,12 @@ describe('App', () => {
 
     expect(screen.getByRole('group', { name: 'Updates' })).toBeInTheDocument();
     expect(screen.getByLabelText('Automatic checks')).toHaveTextContent('Weekly');
-    expect(screen.getByText('Running app: Susura Beta 0.1.8. Update channel: Beta.')).toBeInTheDocument();
+    expect(screen.getByText('Running app: Caul Beta 0.1.8. Update channel: Beta.')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Check for Updates' }));
 
     await waitFor(() => expect(bridge.updateChecks).toBe(1));
-    expect(await screen.findByText(/Susura is up to date\./)).toBeInTheDocument();
+    expect(await screen.findByText(/Caul is up to date\./)).toBeInTheDocument();
 
     await selectSetting(user, 'Automatic checks', 'Daily');
 
@@ -2707,40 +2692,40 @@ describe('App', () => {
     installTestBridge();
     render(<App />);
     await openSettings(user);
-    expect(await screen.findByText('Running app: Susura Beta 0.1.8. Update channel: Beta.')).toBeInTheDocument();
+    expect(await screen.findByText('Running app: Caul Beta 0.1.8. Update channel: Beta.')).toBeInTheDocument();
     cleanup();
 
     installTestBridge({
       updateStatus: testUpdateStatus({
         appChannel: 'stable',
-        appName: 'Susura'
+        appName: 'Caul'
       })
     });
     render(<App />);
     await openSettings(user);
-    expect(await screen.findByText('Running app: Susura 0.1.8. Update channel: Stable.')).toBeInTheDocument();
+    expect(await screen.findByText('Running app: Caul 0.1.8. Update channel: Stable.')).toBeInTheDocument();
     cleanup();
 
     installTestBridge({
       updateStatus: testUpdateStatus({
         appChannel: 'dev',
-        appName: 'Susura Dev'
+        appName: 'Caul Dev'
       })
     });
     render(<App />);
     await openSettings(user);
-    expect(await screen.findByText('Running app: Susura Dev 0.1.8. Update channel: Dev.')).toBeInTheDocument();
+    expect(await screen.findByText('Running app: Caul Dev 0.1.8. Update channel: Dev.')).toBeInTheDocument();
     cleanup();
 
     installTestBridge({
       updateStatus: testUpdateStatus({
         appChannel: 'dev-private',
-        appName: 'Susura Dev-Private'
+        appName: 'Caul Dev-Private'
       })
     });
     render(<App />);
     await openSettings(user);
-    expect(await screen.findByText('Running app: Susura Dev-Private 0.1.8. Update channel: Dev-Private.')).toBeInTheDocument();
+    expect(await screen.findByText('Running app: Caul Dev-Private 0.1.8. Update channel: Dev-Private.')).toBeInTheDocument();
   });
 
   it('shows update download progress outside the update action row', async () => {
@@ -2749,7 +2734,7 @@ describe('App', () => {
       updateStatus: testUpdateStatus({
         availableUpdate: {
           prerelease: false,
-          releaseName: 'Susura 0.1.9',
+          releaseName: 'Caul 0.1.9',
           version: '0.1.9'
         },
         downloading: true,
@@ -2782,13 +2767,13 @@ describe('App', () => {
       updateStatus: testUpdateStatus({
         availableUpdate: {
           prerelease: false,
-          releaseName: 'Susura 0.1.9',
+          releaseName: 'Caul 0.1.9',
           version: '0.1.9'
         },
         lastResult: {
           ok: true,
           status: 'ready',
-          message: 'Update downloaded. Restart Susura to install it.'
+          message: 'Update downloaded. Restart Caul to install it.'
         }
       })
     });
@@ -3060,13 +3045,13 @@ describe('App', () => {
 
     await user.click(screen.getByRole('checkbox', { name: 'Auto-collapse' }));
     expect(screen.getByRole('checkbox', { name: 'Auto-collapse' })).not.toBeChecked();
-    expect(window.localStorage.getItem('susura.auto-collapse')).toBe('0');
+    expect(window.localStorage.getItem('caul.auto-collapse')).toBe('0');
 
     await user.click(screen.getByRole('button', { name: 'Reset Settings' }));
     await user.click(screen.getByRole('button', { name: 'Reset Settings' }));
 
     expect(screen.getByRole('checkbox', { name: 'Auto-collapse' })).toBeChecked();
-    expect(window.localStorage.getItem('susura.auto-collapse')).toBeNull();
+    expect(window.localStorage.getItem('caul.auto-collapse')).toBeNull();
   });
 
   it('clears transcript and AI response feeds from the global action toolbar', async () => {
@@ -3578,8 +3563,8 @@ describe('App', () => {
   });
 
   it('keeps speculative LLM text hidden until matching transcript is stopped', async () => {
-    vi.stubEnv('VITE_SUSURA_SPECULATIVE_LLM', '1');
-    vi.stubEnv('VITE_SUSURA_SPECULATIVE_LLM_DELAY_MS', '20');
+    vi.stubEnv('VITE_CAUL_SPECULATIVE_LLM', '1');
+    vi.stubEnv('VITE_CAUL_SPECULATIVE_LLM_DELAY_MS', '20');
     const user = userEvent.setup();
     const bridge = installTestBridge();
 
@@ -3626,8 +3611,8 @@ describe('App', () => {
   });
 
   it('falls back to a normal LLM request when speculative transcript is stale', async () => {
-    vi.stubEnv('VITE_SUSURA_SPECULATIVE_LLM', '1');
-    vi.stubEnv('VITE_SUSURA_SPECULATIVE_LLM_DELAY_MS', '200');
+    vi.stubEnv('VITE_CAUL_SPECULATIVE_LLM', '1');
+    vi.stubEnv('VITE_CAUL_SPECULATIVE_LLM_DELAY_MS', '200');
     const user = userEvent.setup();
     const bridge = installTestBridge();
 
@@ -3672,7 +3657,7 @@ describe('App', () => {
 });
 
 async function openSettings(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('button', { name: 'Susura Settings' }));
+  await user.click(screen.getByRole('button', { name: 'Caul Settings' }));
   await screen.findByRole('navigation', { name: 'Settings sections' });
 }
 
@@ -3695,7 +3680,16 @@ async function selectSetting(
   label: string,
   option: string
 ) {
-  await user.click(screen.getByLabelText(label));
+  const control = screen.getByLabelText(label);
+
+  if (control instanceof HTMLSelectElement) {
+    const matchingOption = Array.from(control.options).find((item) => item.textContent === option || item.label === option);
+    expect(matchingOption).toBeDefined();
+    await user.selectOptions(control, matchingOption?.value ?? option);
+    return;
+  }
+
+  await user.click(control);
   await user.click(await screen.findByRole('option', { name: new RegExp(`^${escapeRegExp(option)}(?:\\b|\\s|$)`) }));
 }
 
@@ -3794,12 +3788,12 @@ function installTestBridge(overrides: {
 
   const getCurrentOnboardingStatus = async () => overrides.onboardingStatus ?? testOnboardingStatus({
     parakeet: parakeetStatus,
-    permissions: await window.susura!.permissions!.status(),
+    permissions: await window.caul!.permissions!.status(),
     pi: piStatus,
     selectedLocalTranscriptionModel
   });
 
-  window.susura = {
+  window.caul = {
     capture: {
       pause: async () => testCaptureStatus('paused'),
       start: async () => testCaptureStatus('testing'),
@@ -4100,7 +4094,7 @@ function installTestBridge(overrides: {
             lastResult: {
               ok: true,
               status: 'not-available',
-              message: 'Susura is up to date.'
+              message: 'Caul is up to date.'
             }
           };
           emitUpdateStatus?.(updateStatus);
@@ -4297,7 +4291,7 @@ function testPromptTemplateState(overrides: Partial<PromptTemplateState> = {}): 
 function testUpdateStatus(overrides: Partial<UpdateStatus> = {}): UpdateStatus {
   return {
     appChannel: 'beta',
-    appName: 'Susura Beta',
+    appName: 'Caul Beta',
     appVersion: '0.1.8',
     availableUpdate: null,
     checking: false,
@@ -4415,7 +4409,7 @@ function testPromptTemplateAttachment(overrides: Partial<PromptTemplateAttachmen
 function testParakeetStatus(overrides: Partial<ParakeetStatus> = {}): ParakeetStatus {
   return {
     installed: overrides.installed ?? true,
-    modelDir: overrides.modelDir ?? '/tmp/susura/models/parakeet-tdt-0.6b-v3-int8',
+    modelDir: overrides.modelDir ?? '/tmp/caul/models/parakeet-tdt-0.6b-v3-int8',
     modelId: overrides.modelId ?? 'parakeet',
     modelName: overrides.modelName ?? 'Parakeet v3',
     ok: overrides.ok ?? true,
@@ -4426,7 +4420,7 @@ function testParakeetStatus(overrides: Partial<ParakeetStatus> = {}): ParakeetSt
 
 function testPiStatus(overrides: Partial<PiStatus> = {}): PiStatus {
   return {
-    agentDir: overrides.agentDir ?? '/tmp/susura/pi-agent',
+    agentDir: overrides.agentDir ?? '/tmp/caul/pi-agent',
     bundled: overrides.bundled ?? true,
     connected: overrides.connected ?? false,
     ok: overrides.ok ?? true,
@@ -4518,7 +4512,7 @@ function testRuntimeContext(overrides: Partial<RuntimeContext> = {}): RuntimeCon
   return {
     arch: overrides.arch ?? 'arm64',
     appChannel: overrides.appChannel ?? 'stable',
-    appName: overrides.appName ?? 'Susura',
+    appName: overrides.appName ?? 'Caul',
     isMac: overrides.isMac ?? true,
     platform: overrides.platform ?? 'darwin',
     vmTestingTarget: overrides.vmTestingTarget ?? 'test'

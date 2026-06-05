@@ -6,7 +6,7 @@ import process from 'node:process';
 
 const release = process.argv.includes('--release');
 const cargo = resolveCargo();
-const args = ['build', '-p', 'susura-desktop-backend'];
+const args = ['build', '-p', 'caul-desktop-backend'];
 
 if (release) {
   args.push('--release');
@@ -23,8 +23,8 @@ const result = spawnSync(cargo, args, {
 process.exit(result.status ?? 1);
 
 function resolveCargo() {
-  if (process.env.SUSURA_CARGO) {
-    return process.env.SUSURA_CARGO;
+  if (process.env.CAUL_CARGO) {
+    return process.env.CAUL_CARGO;
   }
 
   if (process.platform === 'win32') {

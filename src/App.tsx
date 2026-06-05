@@ -40,9 +40,9 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { ArrowUpIcon, CheckCircle2Icon, ChevronDownIcon, ChevronRightIcon, CircleAlertIcon, CopyIcon, DownloadIcon, FastForwardIcon, FileIcon, FileInputIcon, FileTextIcon, ImageIcon, InfoIcon, ListChecksIcon, LoaderCircleIcon, LogOutIcon, MicIcon, MicOffIcon, PaperclipIcon, PencilIcon, PlayIcon, PowerIcon, SearchIcon, SendIcon, SettingsIcon, SquareIcon, Trash2Icon, Volume2Icon, VolumeXIcon, XCircleIcon, XIcon } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
-import susuraAppIconUrl from '../assets/icons/icon-rounded.png?url';
-import susuraBetaAppIconUrl from '../assets/icons/beta/icon-rounded.png?url';
-import susuraMarkUrl from '../assets/icons/susura-mark.png?url';
+import caulAppIconUrl from '../assets/icons/icon-rounded.png?url';
+import caulBetaAppIconUrl from '../assets/icons/beta/icon-rounded.png?url';
+import caulIconUrl from '../assets/caul-icon.svg?url';
 import {
   getLlmBridge,
   getPermissionsBridge,
@@ -90,8 +90,8 @@ const layout = {
   windowTitleBarSettingsButton: 'absolute top-1/2 z-[70] flex size-7 -translate-y-1/2 items-center justify-center rounded-md bg-transparent p-0 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
   windowTitleBarSettingsButtonMac: 'right-1.5',
   windowTitleBarSettingsButtonDesktop: 'left-1.5',
-  windowTitleBarMacCloseButton: 'susura-mac-close-button absolute left-3 top-1/2 z-10 size-[14px] -translate-y-1/2 cursor-default rounded-full border-[0.5px] border-[#FB1626] bg-[#FF5C60] p-0 shadow-none hover:bg-[#FF5C60] active:bg-[#D94D4F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF5C60]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-  windowTitleBarMacQuitButton: 'susura-mac-quit-button absolute left-8 top-1/2 z-10 flex size-[14px] -translate-y-1/2 cursor-default items-center justify-center rounded-full border-[0.5px] border-[#9B48D6] bg-[#BF5AF2] p-0 text-[#4F167D] shadow-none hover:bg-[#BF5AF2] active:bg-[#9B48D6] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#BF5AF2]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background [&_svg]:size-2.5 [&_svg]:stroke-[3]',
+  windowTitleBarMacCloseButton: 'caul-mac-close-button absolute left-3 top-1/2 z-10 size-[14px] -translate-y-1/2 cursor-default rounded-full border-[0.5px] border-[#FB1626] bg-[#FF5C60] p-0 shadow-none hover:bg-[#FF5C60] active:bg-[#D94D4F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF5C60]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+  windowTitleBarMacQuitButton: 'caul-mac-quit-button absolute left-8 top-1/2 z-10 flex size-[14px] -translate-y-1/2 cursor-default items-center justify-center rounded-full border-[0.5px] border-[#9B48D6] bg-[#BF5AF2] p-0 text-[#4F167D] shadow-none hover:bg-[#BF5AF2] active:bg-[#9B48D6] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#BF5AF2]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background [&_svg]:size-2.5 [&_svg]:stroke-[3]',
   page: 'h-full min-h-0 overflow-hidden',
   form: 'h-full w-full',
   contentTopToolbar: 'grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto]',
@@ -127,7 +127,7 @@ const layout = {
   panelScroller: 'panel-background relative -mt-px box-border h-full min-h-0 overflow-y-auto [overflow-anchor:none]',
   settingsBackdrop: 'absolute inset-0 z-40 cursor-default bg-black/10 supports-backdrop-filter:backdrop-blur-xs',
   modalBlurBackdrop: 'fixed inset-0 z-40 pointer-events-none bg-black/10 supports-backdrop-filter:backdrop-blur-xs',
-  settingsDialog: 'susura-settings-dialog susura-large-modal-shell absolute z-50 grid h-[85vh] w-[85vw] max-w-[85vw] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-xl bg-popover text-sm text-popover-foreground ring-1 ring-foreground/10',
+  settingsDialog: 'caul-settings-dialog caul-large-modal-shell absolute z-50 grid h-[85vh] w-[85vw] max-w-[85vw] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-xl bg-popover text-sm text-popover-foreground ring-1 ring-foreground/10',
   modalHeaderTitle: 'font-heading text-sm leading-none font-medium text-center',
   settingsHeader: 'flex h-12 items-center justify-center border-b border-border px-12',
   settingsHeaderMac: '',
@@ -136,7 +136,7 @@ const layout = {
   settingsPanel: 'min-h-0 overflow-y-auto p-4',
   modalCloseButton: 'absolute top-6 z-20 -translate-y-1/2',
   modalCloseButtonDesktop: 'right-3 size-8 rounded-md',
-  modalCloseButtonMac: 'susura-mac-close-button left-3 size-[14px] cursor-default rounded-full border-[0.5px] border-[#FB1626] bg-[#FF5C60] p-0 text-[#802F31] shadow-none hover:bg-[#FF5C60] active:bg-[#D94D4F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF5C60]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-popover',
+  modalCloseButtonMac: 'caul-mac-close-button left-3 size-[14px] cursor-default rounded-full border-[0.5px] border-[#FB1626] bg-[#FF5C60] p-0 text-[#802F31] shadow-none hover:bg-[#FF5C60] active:bg-[#D94D4F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF5C60]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-popover',
   settingsInlineGroup: 'flex-row flex-wrap items-start',
   settingsDescription: 'text-sm text-muted-foreground',
   settingsPermissionActions: 'flex flex-wrap items-center gap-2',
@@ -145,7 +145,7 @@ const layout = {
   transcriptPrimaryActionsVertical: 'flex min-h-0 min-w-0 flex-1 flex-col items-center justify-between gap-2',
   listeningSourceIndicators: 'flex shrink-0 items-center justify-center gap-2',
   listeningSourceIndicatorsVertical: 'flex shrink-0 flex-col items-center gap-1',
-  listeningSourceIndicatorActive: 'border-emerald-600/50 bg-emerald-600/10 text-emerald-600 hover:bg-emerald-600/15 dark:border-emerald-500/50 dark:bg-emerald-500/10 dark:text-emerald-500 dark:hover:bg-emerald-500/15',
+  listeningSourceIndicatorActive: 'border-[#34424A]/50 bg-[#34424A]/10 text-[#34424A] hover:bg-[#34424A]/15 dark:border-[#8EA6AD]/50 dark:bg-[#8EA6AD]/10 dark:text-[#8EA6AD] dark:hover:bg-[#8EA6AD]/15',
   aiToolbarActions: 'flex w-full min-w-0 flex-1 items-center justify-start',
   aiResponseActions: 'ml-auto flex items-center gap-2',
   aiResponseActionsVertical: 'flex flex-col items-center gap-2',
@@ -153,7 +153,7 @@ const layout = {
   transcriptActions: 'ml-auto flex items-center gap-2',
   transcriptActionsVertical: 'flex flex-col items-center gap-2',
   sectionCollapseButton: 'size-8 shrink-0 rounded-md text-muted-foreground',
-  sectionPreviewTooltip: 'susura-preview-tooltip pointer-events-auto max-h-[min(28rem,70vh)] w-[clamp(18rem,25vw,36rem)] max-w-[calc(100vw-2rem)] overflow-y-auto overflow-x-hidden break-words p-4 pr-3 text-left text-sm leading-6 [overflow-wrap:anywhere]',
+  sectionPreviewTooltip: 'caul-preview-tooltip pointer-events-auto max-h-[min(28rem,70vh)] w-[clamp(18rem,25vw,36rem)] max-w-[calc(100vw-2rem)] overflow-y-auto overflow-x-hidden break-words p-4 pr-3 text-left text-sm leading-6 [overflow-wrap:anywhere]',
   listeningButton: 'w-[140px]',
   listeningButtonVertical: 'w-full',
   sideToolbarRow: 'flex w-full items-center justify-center',
@@ -164,10 +164,10 @@ const layout = {
   compactToolbarButtonLabel: 'compact-toolbar-button-label',
   permissionButton: 'h-auto min-h-9 max-w-full whitespace-normal break-words px-2.5 py-1.5 text-center text-xs leading-snug border-destructive/50 bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/60 focus-visible:ring-destructive/20 dark:border-destructive/40 dark:bg-destructive/20 dark:hover:bg-destructive/30',
   grantPermissionsButton: 'w-[160px] border-destructive/50 bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/60 focus-visible:ring-destructive/20 dark:border-destructive/40 dark:bg-destructive/20 dark:hover:bg-destructive/30',
-  startButton: 'bg-emerald-600 text-white hover:bg-emerald-700 focus-visible:border-emerald-500 focus-visible:ring-emerald-500/30 dark:bg-emerald-600 dark:hover:bg-emerald-500',
+  startButton: 'bg-[#34424A] text-white hover:bg-[#263238] focus-visible:border-[#34424A] focus-visible:ring-[#34424A]/30 dark:bg-[#34424A] dark:hover:bg-[#8EA6AD]',
   output: 'box-border h-full min-h-0 overflow-y-auto px-6 py-6 whitespace-pre-wrap text-sm leading-6',
   transcriptSessionOutput: 'transcript-session-output box-border h-full min-h-0 overflow-y-auto',
-  historyVirtualSpacer: 'pointer-events-none h-[var(--susura-history-virtual-height,100%)]',
+  historyVirtualSpacer: 'pointer-events-none h-[var(--caul-history-virtual-height,100%)]',
   transcriptList: 'absolute inset-x-0 top-0',
   transcriptSection: '-mt-px bg-card text-card-foreground first:mt-0',
   transcriptSectionActive: '',
@@ -198,9 +198,9 @@ const layout = {
   pickerRow: 'group/picker-row relative min-w-0',
   pickerRowButton: 'pr-8',
   pickerRowDelete: 'absolute right-1 top-1/2 size-6 -translate-y-1/2 rounded-md text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/picker-row:opacity-100',
-  generalInstructionsDialog: 'susura-settings-dialog susura-large-modal-shell absolute z-50 grid h-[85vh] w-[85vw] max-w-[85vw] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-xl bg-popover text-sm text-popover-foreground ring-1 ring-foreground/10',
+  generalInstructionsDialog: 'caul-settings-dialog caul-large-modal-shell absolute z-50 grid h-[85vh] w-[85vw] max-w-[85vw] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-xl bg-popover text-sm text-popover-foreground ring-1 ring-foreground/10',
   generalInstructionsEditor: 'grid min-h-0 p-4',
-  promptTemplateDialog: 'susura-settings-dialog susura-large-modal-shell absolute z-50 grid h-[85vh] w-[85vw] max-w-[85vw] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-xl bg-popover text-sm text-popover-foreground ring-1 ring-foreground/10',
+  promptTemplateDialog: 'caul-settings-dialog caul-large-modal-shell absolute z-50 grid h-[85vh] w-[85vw] max-w-[85vw] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-xl bg-popover text-sm text-popover-foreground ring-1 ring-foreground/10',
   promptTemplateHeader: 'flex h-12 items-center justify-center border-b border-border px-12',
   promptTemplateHeaderMac: '',
   promptTemplateEditor: 'grid min-h-0 flex-1 gap-0 md:grid-cols-[220px_minmax(0,1fr)]',
@@ -214,14 +214,14 @@ const layout = {
   promptTemplateAttachmentMeta: 'truncate text-xs text-muted-foreground',
   promptTemplateFooter: 'mx-0 mb-0',
   handleRoot: 'grid h-screen w-screen overflow-hidden place-items-center bg-transparent text-foreground',
-  handleButton: 'susura-handle-button',
+  handleButton: 'caul-handle-button',
   handleButtonOpen: '',
   placeholder: 'box-border flex h-full min-h-0 items-center justify-center overflow-y-auto whitespace-pre-wrap px-6 py-6 text-center text-sm text-muted-foreground',
-  startHereHint: 'susura-start-here-nudge pointer-events-none absolute left-2 top-4 z-20 flex w-[74%] max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-md border border-emerald-600/35 bg-background/95 px-3 py-2 text-left shadow-lg shadow-emerald-600/15 ring-1 ring-emerald-600/10 backdrop-blur',
-  startHereArrow: 'size-5 shrink-0 text-emerald-600 dark:text-emerald-500',
+  startHereHint: 'caul-start-here-nudge pointer-events-none absolute left-2 top-4 z-20 flex w-[74%] max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-md border border-[#34424A]/35 bg-background/95 px-3 py-2 text-left shadow-lg shadow-[#34424A]/15 ring-1 ring-[#34424A]/10 backdrop-blur',
+  startHereArrow: 'size-5 shrink-0 text-[#34424A] dark:text-[#8EA6AD]',
   startHereDescription: 'min-w-0 max-w-full text-sm leading-5 text-foreground',
-  aiPromptTemplateHint: 'susura-prompt-template-nudge pointer-events-none absolute left-2 top-4 z-20 flex w-[74%] max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-md border border-emerald-600/35 bg-background/95 px-3 py-2 text-left shadow-lg shadow-emerald-600/15 ring-1 ring-emerald-600/10 backdrop-blur',
-  aiPromptTemplateHintIcon: 'size-5 shrink-0 text-emerald-600 dark:text-emerald-500',
+  aiPromptTemplateHint: 'caul-prompt-template-nudge pointer-events-none absolute left-2 top-4 z-20 flex w-[74%] max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-md border border-[#34424A]/35 bg-background/95 px-3 py-2 text-left shadow-lg shadow-[#34424A]/15 ring-1 ring-[#34424A]/10 backdrop-blur',
+  aiPromptTemplateHintIcon: 'size-5 shrink-0 text-[#34424A] dark:text-[#8EA6AD]',
   aiPromptTemplateHintDescription: 'min-w-0 max-w-full text-sm leading-5 text-foreground'
 };
 
@@ -236,8 +236,8 @@ const defaultSendToAiWhenListeningStops = true;
 const defaultAutoCollapse = true;
 const defaultLlmModel: LlmModel = 'openai-codex/gpt-5.4-mini';
 const defaultLlmReasoning: LlmReasoning = 'off';
-const autoCollapsePreferenceKey = 'susura.auto-collapse';
-const generalInstructionsPreferenceKey = 'susura.general-instructions';
+const autoCollapsePreferenceKey = 'caul.auto-collapse';
+const generalInstructionsPreferenceKey = 'caul.general-instructions';
 const defaultGeneralInstructions = '';
 const generalInstructionsPlaceholder = 'e.g. Always answer in British English.';
 const handleDragThresholdPx = 6;
@@ -254,7 +254,7 @@ const privateOverlayHandleSizeOptions: Array<{ label: string; value: PrivateOver
   { label: 'Large (64 px)', value: 'large' }
 ];
 const handleIconStyle = {
-  '--susura-handle-icon-url': `url("${susuraMarkUrl}")`
+  '--caul-handle-icon-url': `url("${caulIconUrl}")`
 } as React.CSSProperties;
 
 type OverlayEdge = 'bottom' | 'left' | 'right' | 'top';
@@ -314,8 +314,8 @@ type AiResponseSectionData = {
 };
 type CollapseOverrides = Record<string, boolean>;
 
-const scrollFixtureQueryParam = 'susura-scroll-fixture';
-const streamFixtureQueryParam = 'susura-stream-fixture';
+const scrollFixtureQueryParam = 'caul-scroll-fixture';
+const streamFixtureQueryParam = 'caul-stream-fixture';
 
 const scrollFixtureTranscriptSessions: TranscriptSession[] = [
   createScrollFixtureTranscriptSession({
@@ -388,16 +388,16 @@ const streamFixtureAiResponses: AiResponseSectionData[] = [
 export function App() {
   useSystemColourScheme();
 
-  const surface = getSusuraSurface();
+  const surface = getCaulSurface();
   const runtimeContext = useRuntimeContext();
   const isMac = runtimeContext?.isMac ?? isNavigatorMac();
-  const appWindowTitle = runtimeContext?.appName ?? 'Susura';
+  const appWindowTitle = runtimeContext?.appName ?? 'Caul';
 
   useLayoutEffect(() => {
-    document.documentElement.dataset.susuraSurface = surface;
+    document.documentElement.dataset.caulSurface = surface;
 
     return () => {
-      delete document.documentElement.dataset.susuraSurface;
+      delete document.documentElement.dataset.caulSurface;
     };
   }, [surface]);
 
@@ -817,7 +817,7 @@ export function App() {
           className={layout.appBody}
           data-overlay-edge={overlayEdge}
         >
-          <form className={layout.page} aria-label="Susura setup">
+          <form className={layout.page} aria-label="Caul setup">
             <HomePage
               autoCollapse={autoCollapse}
               canStartListening={canStartListening}
@@ -907,10 +907,10 @@ function isLlmReadyOrSettled(status: { ready: boolean; status: string }) {
   return status.ready || status.status === 'error' || status.status === 'disabled';
 }
 
-type SusuraSurface = 'app' | 'handle' | 'onboarding';
+type CaulSurface = 'app' | 'handle' | 'onboarding';
 
-function getSusuraSurface(): SusuraSurface {
-  const surface = new URLSearchParams(window.location.search).get('susura-surface');
+function getCaulSurface(): CaulSurface {
+  const surface = new URLSearchParams(window.location.search).get('caul-surface');
 
   return surface === 'handle' || surface === 'onboarding' ? surface : 'app';
 }
@@ -920,19 +920,16 @@ type OnboardingStep = 'permissions' | 'parakeet' | 'ai';
 function OnboardingSurface() {
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [isChatGptSigningIn, setIsChatGptSigningIn] = useState(false);
-  const [selectedTranscriptionModelId, setSelectedTranscriptionModelId] = useState<LocalTranscriptionModelId>('parakeet');
   const permissionsRef = useRef<HTMLElement | null>(null);
   const parakeetRef = useRef<HTMLElement | null>(null);
   const aiRef = useRef<HTMLElement | null>(null);
-  const hasInitialisedTranscriptionModelRef = useRef(false);
   const hasAutoStartedParakeetDownloadRef = useRef(false);
   const autoSelectingReadyModelRef = useRef<LocalTranscriptionModelId | null>(null);
-  const autoStartedLocalModelRef = useRef<LocalTranscriptionModelId | null>(null);
   const runtimeContext = useRuntimeContext();
-  const appName = runtimeContext?.appName ?? 'Susura';
+  const appName = runtimeContext?.appName ?? 'Caul';
   const appIconUrl = runtimeContext?.appChannel === 'beta' || runtimeContext?.appChannel === 'dev'
-    ? susuraBetaAppIconUrl
-    : susuraAppIconUrl;
+    ? caulBetaAppIconUrl
+    : caulAppIconUrl;
 
   useEffect(() => {
     void refresh();
@@ -959,11 +956,11 @@ function OnboardingSurface() {
       }
     };
 
-    window.addEventListener('susura:onboarding-smoke-step', smokeStep);
+    window.addEventListener('caul:onboarding-smoke-step', smokeStep);
 
     return () => {
       unsubscribe?.();
-      window.removeEventListener('susura:onboarding-smoke-step', smokeStep);
+      window.removeEventListener('caul:onboarding-smoke-step', smokeStep);
     };
   }, []);
 
@@ -988,11 +985,6 @@ function OnboardingSurface() {
 
     if (nextStatus) {
       setStatus(nextStatus);
-
-      if (!hasInitialisedTranscriptionModelRef.current) {
-        hasInitialisedTranscriptionModelRef.current = true;
-        setSelectedTranscriptionModelId(getInitialTranscriptionModelId(nextStatus));
-      }
     }
   }
 
@@ -1019,10 +1011,6 @@ function OnboardingSurface() {
     }
   }
 
-  function selectTranscriptionModel(modelId: LocalTranscriptionModelId) {
-    setSelectedTranscriptionModelId(modelId);
-  }
-
   async function signInWithChatGpt() {
     setIsChatGptSigningIn(true);
 
@@ -1036,18 +1024,6 @@ function OnboardingSurface() {
   }
 
   async function finish() {
-    const autoStartedModelId = autoStartedLocalModelRef.current;
-
-    if (autoStartedModelId && autoStartedModelId !== selectedTranscriptionModelId) {
-      autoStartedLocalModelRef.current = null;
-
-      try {
-        await getSettingsBridge()?.parakeet?.remove(autoStartedModelId);
-      } catch (error) {
-        console.error('Failed to remove unused auto-downloaded transcription model:', error);
-      }
-    }
-
     await getSettingsBridge()?.onboarding?.complete();
   }
 
@@ -1073,25 +1049,25 @@ function OnboardingSurface() {
     }
 
     hasAutoStartedParakeetDownloadRef.current = true;
-    autoStartedLocalModelRef.current = recommendedModelId;
-    setSelectedTranscriptionModelId(recommendedModelId);
     void downloadParakeet(recommendedModelId);
   }, [status]);
 
   useEffect(() => {
+    const readyModelId = status?.parakeet.modelId;
+
     if (
       !status
       || status.parakeet.status !== 'installed'
-      || status.parakeet.modelId !== selectedTranscriptionModelId
-      || status.selectedLocalTranscriptionModel === selectedTranscriptionModelId
-      || autoSelectingReadyModelRef.current === selectedTranscriptionModelId
+      || !readyModelId
+      || status.selectedLocalTranscriptionModel === readyModelId
+      || autoSelectingReadyModelRef.current === readyModelId
     ) {
       return;
     }
 
-    autoSelectingReadyModelRef.current = selectedTranscriptionModelId;
+    autoSelectingReadyModelRef.current = readyModelId;
 
-    void getSettingsBridge()?.parakeet?.setModel(selectedTranscriptionModelId)
+    void getSettingsBridge()?.parakeet?.setModel(readyModelId)
       .then(() => refresh())
       .catch((error) => {
         console.error('Failed to use ready transcription model:', error);
@@ -1099,7 +1075,7 @@ function OnboardingSurface() {
       .finally(() => {
         autoSelectingReadyModelRef.current = null;
       });
-  }, [selectedTranscriptionModelId, status]);
+  }, [status]);
 
   useEffect(() => {
     const element = contentRef.current;
@@ -1165,16 +1141,6 @@ function OnboardingSurface() {
           </OnboardingPanel>
         ) : null}
 
-        <OnboardingPanel sectionRef={parakeetRef} title="Transcription Model">
-	          <TranscriptionModelRow
-	            onCancel={() => void getSettingsBridge()?.parakeet?.cancelDownload()}
-	            onDownload={(modelId) => void downloadParakeet(modelId)}
-	            onSelectModel={selectTranscriptionModel}
-	            selectedModelId={selectedTranscriptionModelId}
-	            status={status}
-	          />
-        </OnboardingPanel>
-
         <OnboardingPanel sectionRef={aiRef} title="AI Model">
           <StatusRow
             action={!piReady ? (
@@ -1191,6 +1157,10 @@ function OnboardingSurface() {
             label="ChatGPT"
             ready={piReady}
           />
+        </OnboardingPanel>
+
+        <OnboardingPanel sectionRef={parakeetRef} title="Transcription">
+          <OnboardingTranscriptionStatus status={status} />
         </OnboardingPanel>
 
         <OnboardingStartButton
@@ -1218,12 +1188,12 @@ function OnboardingStartButton({
         <Button
           className={disabled
             ? 'h-10 pointer-events-none px-5 text-sm'
-            : 'h-10 bg-emerald-600 px-5 text-sm text-white hover:bg-emerald-500 focus-visible:border-emerald-400 focus-visible:ring-emerald-500/30 dark:bg-emerald-500 dark:text-emerald-950 dark:hover:bg-emerald-400'}
+            : 'h-10 bg-[#34424A] px-5 text-sm text-white hover:bg-[#8EA6AD] focus-visible:border-[#8EA6AD] focus-visible:ring-[#34424A]/30 dark:bg-[#8EA6AD] dark:text-[#101619] dark:hover:bg-[#B8A46A]'}
           disabled={disabled}
           onClick={onClick}
           type="button"
         >
-          Start using Susura
+          Start using Caul
         </Button>
         {disabled ? (
           <div
@@ -1257,7 +1227,7 @@ function getMissingOnboardingItems(status: OnboardingStatus | null) {
   }
 
   if (!isOnboardingTranscriptionModelReady(status)) {
-    missing.push('Transcription model');
+    missing.push('Local transcription');
   }
 
   if (!status.pi.connected) {
@@ -1314,22 +1284,84 @@ function StatusRow({
         <h3 className="text-sm font-medium">{label}</h3>
         {value ? <div aria-live="polite" className="text-xs text-muted-foreground">{value}</div> : null}
       </div>
-      {action ?? (ready ? <CheckCircle2Icon className="size-4 text-emerald-600" /> : <XCircleIcon className="size-4 text-muted-foreground" />)}
+      {action ?? (ready ? <CheckCircle2Icon className="size-4 text-[#34424A]" /> : <XCircleIcon className="size-4 text-muted-foreground" />)}
     </div>
   );
 }
 
-const localTranscriptionModelOptions: Array<{ label: string; value: LocalTranscriptionModelId }> = [
-  { label: 'Parakeet v3', value: 'parakeet' },
-  { label: 'Moonshine tiny', value: 'moonshine-tiny' }
+function OnboardingTranscriptionStatus({ status }: { status: OnboardingStatus | null }) {
+  if (!status) {
+    return (
+      <StatusRow
+        action={<LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />}
+        label="Checking transcription setup"
+        ready={false}
+      />
+    );
+  }
+
+  const isReady = isOnboardingTranscriptionModelReady(status);
+  const downloadProgress = getLocalModelDownloadProgressLabel(status.parakeet.progress);
+  const canAutoDownload = status.transcription.recommended !== 'cloud'
+    && Boolean(status.transcription.recommendedModel?.id)
+    && status.transcription.autoDownloadModel !== false
+    && status.transcription.autoDownloadParakeet !== false;
+
+  if (isReady) {
+    return (
+      <StatusRow
+        label="Ready"
+        ready
+      />
+    );
+  }
+
+  if (status.parakeet.status === 'downloading') {
+    return (
+      <StatusRow
+        action={(
+          <span aria-label={downloadProgress.accessibleLabel} aria-live="polite" className="min-w-0 max-w-32 truncate text-right text-xs tabular-nums text-muted-foreground" title={downloadProgress.accessibleLabel}>
+            {downloadProgress.label}
+          </span>
+        )}
+        label="Downloading local transcription"
+        ready={false}
+      />
+    );
+  }
+
+  if (status.parakeet.status === 'installed') {
+    return (
+      <StatusRow
+        action={<LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />}
+        label="Finishing transcription setup"
+        ready={false}
+      />
+    );
+  }
+
+  return (
+    <StatusRow
+      action={canAutoDownload
+        ? <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />
+        : <StatusPill ready={false}>Not ready</StatusPill>}
+      label={canAutoDownload ? 'Preparing local transcription' : 'Transcription setup needs attention'}
+      ready={false}
+    />
+  );
+}
+
+const localTranscriptionModelOptions: Array<{ label: string; title: string; value: LocalTranscriptionModelId }> = [
+  { label: 'Strong quality', title: 'Strong quality - Parakeet v3', value: 'parakeet' },
+  { label: 'Lightweight', title: 'Lightweight - Moonshine tiny', value: 'moonshine-tiny' }
 ];
 
 function getInitialTranscriptionModelId(status: OnboardingStatus): LocalTranscriptionModelId {
   return status.selectedLocalTranscriptionModel ?? status.parakeet.modelId ?? status.transcription.recommendedModel?.id ?? 'parakeet';
 }
 
-function getLocalTranscriptionModelLabel(modelId: LocalTranscriptionModelId) {
-  return localTranscriptionModelOptions.find((option) => option.value === modelId)?.label ?? 'Parakeet v3';
+function getLocalTranscriptionModelTitle(modelId: LocalTranscriptionModelId) {
+  return localTranscriptionModelOptions.find((option) => option.value === modelId)?.title ?? 'Strong quality - Parakeet v3';
 }
 
 function TranscriptionModelRow({
@@ -1353,48 +1385,32 @@ function TranscriptionModelRow({
   const recommendedModelId = status?.transcription.recommendedModel?.id;
   const showRecommendedBadge = selectedModelId === recommendedModelId;
   const recommendedTooltip = getRecommendedTranscriptionModelTooltip(status);
-  const selectedModelLabel = getLocalTranscriptionModelLabel(selectedModelId);
+  const selectedModelTitle = getLocalTranscriptionModelTitle(selectedModelId);
   const downloadProgress = getLocalModelDownloadProgressLabel(status?.parakeet.progress);
   const renderRecommendedBadge = () => (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="shrink-0 rounded-full border border-amber-500/35 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 shadow-sm dark:border-amber-400/35 dark:bg-amber-400/10 dark:text-amber-300">
-          Recommended
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>
-        {recommendedTooltip}
-      </TooltipContent>
-    </Tooltip>
+    <span className="pointer-events-none shrink-0 rounded-full border border-amber-500/35 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 shadow-sm dark:border-amber-400/35 dark:bg-amber-400/10 dark:text-amber-300" title={recommendedTooltip}>
+      Recommended
+    </span>
   );
 
   return (
     <div className="grid min-h-10 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
       <div className="flex min-w-0 items-center gap-2">
-        <Select
+        <select
+          aria-label="Transcription model"
+          className="h-8 w-[15.25rem] max-w-full min-w-0 appearance-auto rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
           name="transcription-model"
           value={selectedModelId}
-          onValueChange={(value) => onSelectModel(value as LocalTranscriptionModelId)}
+          onChange={(event) => onSelectModel(event.currentTarget.value as LocalTranscriptionModelId)}
+          title={selectedModelTitle}
         >
-          <SelectTrigger aria-label="Transcription model" className="w-[14rem] min-w-0" title={selectedModelLabel}>
-            <span className="flex min-w-0 items-center gap-2">
-              <span className="truncate">{selectedModelLabel}</span>
-              {showRecommendedBadge ? renderRecommendedBadge() : null}
-            </span>
-          </SelectTrigger>
-          <SelectContent className="min-w-72">
-            <SelectGroup>
-              {localTranscriptionModelOptions.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate">{option.label}</span>
-                    {option.value === recommendedModelId ? renderRecommendedBadge() : null}
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
+          {localTranscriptionModelOptions.map((option) => (
+            <option key={option.value} title={option.title} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        {showRecommendedBadge ? renderRecommendedBadge() : null}
       </div>
       <div className="flex min-w-0 items-center justify-end gap-2">
         {isDownloading ? (
@@ -1402,7 +1418,7 @@ function TranscriptionModelRow({
             {downloadProgress.label}
           </span>
         ) : isSelectedModelReady ? (
-          <span aria-live="polite" className="inline-flex w-20 items-center justify-end gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+          <span aria-live="polite" className="inline-flex w-20 items-center justify-end gap-1 text-xs font-medium text-[#34424A] dark:text-[#8EA6AD]">
             <CheckCircle2Icon className="size-3.5" />
             Ready
           </span>
@@ -1471,7 +1487,7 @@ function StatusPill({
   ready: boolean;
 }) {
   return (
-    <span className={`rounded-full border px-2 py-1 text-xs font-medium ${ready ? 'border-emerald-600/35 text-emerald-700 dark:text-emerald-400' : 'border-destructive/35 text-destructive'}`}>
+    <span className={`rounded-full border px-2 py-1 text-xs font-medium ${ready ? 'border-[#34424A]/35 text-[#34424A] dark:text-[#8EA6AD]' : 'border-destructive/35 text-destructive'}`}>
       {children}
     </span>
   );
@@ -1553,7 +1569,7 @@ function AudioPermissionSetupRow({
           </Tooltip>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className={`rounded-full border px-2 py-1 text-xs font-medium ${ready ? 'border-emerald-600/35 text-emerald-700 dark:text-emerald-400' : 'border-destructive/35 text-destructive'}`}>
+          <span className={`rounded-full border px-2 py-1 text-xs font-medium ${ready ? 'border-[#34424A]/35 text-[#34424A] dark:text-[#8EA6AD]' : 'border-destructive/35 text-destructive'}`}>
             {ready ? 'Granted' : 'Not granted'}
           </span>
           {!ready ? (
@@ -1573,7 +1589,7 @@ function AudioPermissionSetupRow({
           ) : null}
           {showRestart ? (
             <Button
-              aria-label="Restart Susura"
+              aria-label="Restart Caul"
               onClick={() => void getSettingsBridge()?.relaunch?.()}
               size="sm"
               type="button"
@@ -1586,7 +1602,7 @@ function AudioPermissionSetupRow({
       </div>
       {showRestart ? (
         <p className="pb-2 text-xs text-muted-foreground">
-          Changed it in System Settings? Restart Susura to apply the permission.
+          Changed it in System Settings? Restart Caul to apply the permission.
         </p>
       ) : null}
     </div>
@@ -1629,7 +1645,7 @@ function PermissionSetupRow({
           </Tooltip>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className={`rounded-full border px-2 py-1 text-xs font-medium ${ready ? 'border-emerald-600/35 text-emerald-700 dark:text-emerald-400' : 'border-destructive/35 text-destructive'}`}>
+          <span className={`rounded-full border px-2 py-1 text-xs font-medium ${ready ? 'border-[#34424A]/35 text-[#34424A] dark:text-[#8EA6AD]' : 'border-destructive/35 text-destructive'}`}>
             {statusLabel}
           </span>
           {!ready ? (
@@ -1718,18 +1734,18 @@ function useSuppressTooltipsAfterOverlayOpen(isOverlayOpen: boolean) {
     }
 
     wasOverlayOpenRef.current = isOverlayOpen;
-    document.documentElement.dataset.susuraSuppressTooltips = 'true';
-    document.documentElement.dataset.susuraSuppressTooltipsAt = String(Date.now());
+    document.documentElement.dataset.caulSuppressTooltips = 'true';
+    document.documentElement.dataset.caulSuppressTooltipsAt = String(Date.now());
 
     const timeout = window.setTimeout(() => {
-      delete document.documentElement.dataset.susuraSuppressTooltips;
-      delete document.documentElement.dataset.susuraSuppressTooltipsAt;
+      delete document.documentElement.dataset.caulSuppressTooltips;
+      delete document.documentElement.dataset.caulSuppressTooltipsAt;
     }, overlayOpenTooltipSuppressionMs);
 
     return () => {
       window.clearTimeout(timeout);
-      delete document.documentElement.dataset.susuraSuppressTooltips;
-      delete document.documentElement.dataset.susuraSuppressTooltipsAt;
+      delete document.documentElement.dataset.caulSuppressTooltips;
+      delete document.documentElement.dataset.caulSuppressTooltipsAt;
     };
   }, [isOverlayOpen]);
 }
@@ -2016,9 +2032,9 @@ function PrivateOverlayWindowTitleBar({
       sideOffset={8}
     >
       <div className="space-y-1">
-        <h2 className="text-sm font-medium text-foreground">Quit Susura?</h2>
+        <h2 className="text-sm font-medium text-foreground">Quit Caul?</h2>
         <p className="text-xs text-muted-foreground">
-          This will stop Susura and close the app completely.
+          This will stop Caul and close the app completely.
         </p>
       </div>
       <div className="flex justify-end gap-2">
@@ -2026,7 +2042,7 @@ function PrivateOverlayWindowTitleBar({
           Cancel
         </Button>
         <Button onClick={confirmQuit} size="sm" type="button" variant="destructive">
-          Quit Susura
+          Quit Caul
         </Button>
       </div>
     </PopoverContent>
@@ -2048,20 +2064,20 @@ function PrivateOverlayWindowTitleBar({
         {isMac ? (
           <>
             <button
-              aria-label="Hide Susura app"
+              aria-label="Hide Caul app"
               className={layout.windowTitleBarMacCloseButton}
               data-platform="macos"
               onClick={() => void getPrivateOverlayBridge()?.hide()}
-              title="Hide Susura app"
+              title="Hide Caul app"
               type="button"
             />
             <Popover open={isQuitConfirmationOpen} onOpenChange={setIsQuitConfirmationOpen}>
               <PopoverTrigger asChild>
                 <button
-                  aria-label="Quit Susura"
+                  aria-label="Quit Caul"
                   className={layout.windowTitleBarMacQuitButton}
                   data-platform="macos"
-                  title="Quit Susura completely"
+                  title="Quit Caul completely"
                   type="button"
                 >
                   <PowerIcon />
@@ -2073,12 +2089,12 @@ function PrivateOverlayWindowTitleBar({
         ) : (
           <>
             <Button
-              aria-label="Hide Susura app"
+              aria-label="Hide Caul app"
               className={layout.windowTitleBarButton}
               data-platform="desktop"
               onClick={() => void getPrivateOverlayBridge()?.hide()}
               size="icon"
-              title="Hide Susura app"
+              title="Hide Caul app"
               type="button"
               variant="ghost"
             >
@@ -2087,11 +2103,11 @@ function PrivateOverlayWindowTitleBar({
             <Popover open={isQuitConfirmationOpen} onOpenChange={setIsQuitConfirmationOpen}>
               <PopoverTrigger asChild>
                 <Button
-                  aria-label="Quit Susura"
+                  aria-label="Quit Caul"
                   className={layout.windowTitleBarQuitButton}
                   data-platform="desktop"
                   size="icon"
-                  title="Quit Susura completely"
+                  title="Quit Caul completely"
                   type="button"
                   variant="ghost"
                 >
@@ -2105,7 +2121,7 @@ function PrivateOverlayWindowTitleBar({
         <Tooltip>
           <TooltipTrigger asChild>
             <button
-              aria-label="Susura Settings"
+              aria-label="Caul Settings"
               aria-pressed={isSettingsOpen}
               className={`${layout.windowTitleBarSettingsButton} ${isMac ? layout.windowTitleBarSettingsButtonMac : layout.windowTitleBarSettingsButtonDesktop} ${isSettingsOpen ? 'bg-muted text-foreground' : ''}`}
               onClick={onToggleSettings}
@@ -2114,7 +2130,7 @@ function PrivateOverlayWindowTitleBar({
               <SettingsIcon className="mx-auto size-4" />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">Open Susura settings</TooltipContent>
+          <TooltipContent side="bottom">Open Caul settings</TooltipContent>
         </Tooltip>
       </header>
     </>
@@ -2259,9 +2275,9 @@ function PrivateOverlayHandleSurface() {
   }
 
   return (
-    <main className={layout.handleRoot} aria-label="Susura overlay handle">
+    <main className={layout.handleRoot} aria-label="Caul overlay handle">
       <button
-        aria-label="Toggle Susura app"
+        aria-label="Toggle Caul app"
         className={`${layout.handleButton} ${isOverlayOpen ? layout.handleButtonOpen : ''}`.trim()}
         data-motion={handleMotion}
         data-open={isOverlayOpen ? 'true' : 'false'}
@@ -2273,10 +2289,10 @@ function PrivateOverlayHandleSurface() {
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerEnd}
-        title="Toggle Susura app"
+        title="Toggle Caul app"
         type="button"
       >
-        <span aria-hidden="true" className="susura-handle-icon" style={handleIconStyle} />
+        <span aria-hidden="true" className="caul-handle-icon" style={handleIconStyle} />
       </button>
     </main>
   );
@@ -2963,7 +2979,7 @@ function HomeActionToolbar({
           {!sendToAiWhenListeningStops && (
             <span
               aria-hidden="true"
-              className="susura-auto-send-off-slash absolute left-1/2 top-1/2 h-0.5 w-[1.1rem] -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-full bg-current"
+              className="caul-auto-send-off-slash absolute left-1/2 top-1/2 h-0.5 w-[1.1rem] -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-full bg-current"
             />
           )}
         </span>
@@ -3793,7 +3809,7 @@ function updateHistoryVirtualGeometry(
     activeOffsetTop + Math.max(activeHeight, scrollElement.clientHeight)
   );
 
-  scrollElement.style.setProperty('--susura-history-virtual-height', `${virtualHeight}px`);
+  scrollElement.style.setProperty('--caul-history-virtual-height', `${virtualHeight}px`);
 
   return activeOffsetTop;
 }
@@ -4152,7 +4168,7 @@ function getAiInputTooltip(request: string) {
 }
 
 function scrollOpenPreviewTooltip(event: WheelEvent<HTMLElement>) {
-  const tooltip = document.querySelector<HTMLElement>('[data-slot="tooltip-content"].susura-preview-tooltip');
+  const tooltip = document.querySelector<HTMLElement>('[data-slot="tooltip-content"].caul-preview-tooltip');
 
   if (!tooltip) {
     return;
@@ -4920,7 +4936,7 @@ function downloadTextFile(text: string, format: TranscriptDownloadFormat, kind: 
   const link = document.createElement('a');
 
   link.href = url;
-  link.download = `susura-${kind}-${getTranscriptDownloadTimestamp(text)}.${format}`;
+  link.download = `caul-${kind}-${getTranscriptDownloadTimestamp(text)}.${format}`;
   document.body.append(link);
   link.click();
   link.remove();
@@ -5372,7 +5388,7 @@ function SettingsPage({
         <div className={`${layout.settingsHeader} ${isMac ? layout.settingsHeaderMac : ''}`}>
           <h2 id="settings-dialog-title" className={layout.modalHeaderTitle}>Settings</h2>
           <p id="settings-dialog-description" className="sr-only">
-            Configure Susura listening, model and reset settings.
+            Configure Caul listening, model and reset settings.
           </p>
         </div>
         <div className={layout.settingsContent}>
@@ -5500,7 +5516,7 @@ function SettingsPage({
                               <TooltipButton
                                 onClick={() => void getSettingsBridge()?.updates?.installDownloaded()}
                                 size="default"
-                                tooltip="Restart Susura and install the update"
+                                tooltip="Restart Caul and install the update"
                                 type="button"
                                 variant="outline"
                               >
@@ -5536,12 +5552,12 @@ function SettingsPage({
                         <TooltipButton
                           onClick={onQuit}
                           size="default"
-                          tooltip="Quit Susura"
+                          tooltip="Quit Caul"
                           type="button"
                           variant="destructive"
                         >
                           <LogOutIcon />
-                          Quit Susura
+                          Quit Caul
                         </TooltipButton>
                       </div>
                       <div className="flex">

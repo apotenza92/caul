@@ -9,8 +9,8 @@ import {
 
 describe('Tooltip', () => {
   afterEach(() => {
-    delete document.documentElement.dataset.susuraSuppressTooltips;
-    delete document.documentElement.dataset.susuraSuppressTooltipsAt;
+    delete document.documentElement.dataset.caulSuppressTooltips;
+    delete document.documentElement.dataset.caulSuppressTooltipsAt;
   });
 
   it('renders above app, modal and popover layers', () => {
@@ -45,8 +45,8 @@ describe('Tooltip', () => {
   });
 
   it('clears stale global suppression instead of hiding tooltips forever', () => {
-    document.documentElement.dataset.susuraSuppressTooltips = 'true';
-    document.documentElement.dataset.susuraSuppressTooltipsAt = String(Date.now() - 2000);
+    document.documentElement.dataset.caulSuppressTooltips = 'true';
+    document.documentElement.dataset.caulSuppressTooltipsAt = String(Date.now() - 2000);
 
     render(
       <TooltipProvider delayDuration={0}>
@@ -58,7 +58,7 @@ describe('Tooltip', () => {
     );
 
     expect(document.querySelector('[data-slot="tooltip-content"]')).toHaveTextContent('Tooltip body');
-    expect(document.documentElement.dataset.susuraSuppressTooltips).toBeUndefined();
-    expect(document.documentElement.dataset.susuraSuppressTooltipsAt).toBeUndefined();
+    expect(document.documentElement.dataset.caulSuppressTooltips).toBeUndefined();
+    expect(document.documentElement.dataset.caulSuppressTooltipsAt).toBeUndefined();
   });
 });

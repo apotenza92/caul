@@ -8,26 +8,26 @@ const root = process.cwd();
 
 if (target === 'win') {
   rmSync(path.join(root, 'release', `win-${arch}-unpacked`), { recursive: true, force: true });
-  rmSync(path.join(root, 'release', `Susura-windows-${arch}-setup.exe`), { force: true });
-  rmSync(path.join(root, 'release', `Susura-windows-${arch}-setup.exe.blockmap`), { force: true });
-  rmSync(path.join(root, 'release', `Susura-Beta-windows-${arch}-setup.exe`), { force: true });
-  rmSync(path.join(root, 'release', `Susura-Beta-windows-${arch}-setup.exe.blockmap`), { force: true });
+  rmSync(path.join(root, 'release', `Caul-windows-${arch}-setup.exe`), { force: true });
+  rmSync(path.join(root, 'release', `Caul-windows-${arch}-setup.exe.blockmap`), { force: true });
+  rmSync(path.join(root, 'release', `Caul-Beta-windows-${arch}-setup.exe`), { force: true });
+  rmSync(path.join(root, 'release', `Caul-Beta-windows-${arch}-setup.exe.blockmap`), { force: true });
   rmSync(path.join(root, 'release', 'latest.yml'), { force: true });
 } else if (target === 'linux') {
   const electronBuilderArch = arch === 'x64' ? 'x86_64' : arch;
   const appDirName = arch === 'x64' ? 'linux-unpacked' : `linux-${arch}-unpacked`;
   rmSync(path.join(root, 'release', appDirName), { recursive: true, force: true });
   rmSync(path.join(root, 'release', `deb-${arch}`), { recursive: true, force: true });
-  rmSync(path.join(root, 'release', `susura-${arch}.AppImage`), { force: true });
-  rmSync(path.join(root, 'release', `susura-${electronBuilderArch}.AppImage`), { force: true });
-  rmSync(path.join(root, 'release', `susura-${arch}.deb`), { force: true });
-  rmSync(path.join(root, 'release', `susura-${arch}.rpm`), { force: true });
-  rmSync(path.join(root, 'release', `susura-${electronBuilderArch}.rpm`), { force: true });
-  rmSync(path.join(root, 'release', `susura-beta-${arch}.AppImage`), { force: true });
-  rmSync(path.join(root, 'release', `susura-beta-${electronBuilderArch}.AppImage`), { force: true });
-  rmSync(path.join(root, 'release', `susura-beta-${arch}.deb`), { force: true });
-  rmSync(path.join(root, 'release', `susura-beta-${arch}.rpm`), { force: true });
-  rmSync(path.join(root, 'release', `susura-beta-${electronBuilderArch}.rpm`), { force: true });
+  rmSync(path.join(root, 'release', `caul-${arch}.AppImage`), { force: true });
+  rmSync(path.join(root, 'release', `caul-${electronBuilderArch}.AppImage`), { force: true });
+  rmSync(path.join(root, 'release', `caul-${arch}.deb`), { force: true });
+  rmSync(path.join(root, 'release', `caul-${arch}.rpm`), { force: true });
+  rmSync(path.join(root, 'release', `caul-${electronBuilderArch}.rpm`), { force: true });
+  rmSync(path.join(root, 'release', `caul-beta-${arch}.AppImage`), { force: true });
+  rmSync(path.join(root, 'release', `caul-beta-${electronBuilderArch}.AppImage`), { force: true });
+  rmSync(path.join(root, 'release', `caul-beta-${arch}.deb`), { force: true });
+  rmSync(path.join(root, 'release', `caul-beta-${arch}.rpm`), { force: true });
+  rmSync(path.join(root, 'release', `caul-beta-${electronBuilderArch}.rpm`), { force: true });
 } else {
   console.error('Usage: node scripts/clean-package-output.mjs <win|linux> [arm64|x64]');
   process.exit(1);

@@ -4,10 +4,10 @@ import http from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-const durationMs = Number(process.env.SUSURA_LOCAL_PARAKEET_SMOKE_MS ?? 60_000);
+const durationMs = Number(process.env.CAUL_LOCAL_PARAKEET_SMOKE_MS ?? 60_000);
 const devServerPort = await getAvailablePort();
 const devServerUrl = `http://127.0.0.1:${devServerPort}`;
-const userDataDir = mkdtempSync(path.join(tmpdir(), 'susura-electron-smoke-'));
+const userDataDir = mkdtempSync(path.join(tmpdir(), 'caul-electron-smoke-'));
 let output = '';
 
 const vite = spawn('node', ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', String(devServerPort)], {
@@ -28,8 +28,8 @@ try {
     env: {
       ...process.env,
       VITE_DEV_SERVER_URL: devServerUrl,
-      SUSURA_LOCAL_PARAKEET_SMOKE_MS: String(durationMs),
-      SUSURA_USER_DATA_DIR: userDataDir
+      CAUL_LOCAL_PARAKEET_SMOKE_MS: String(durationMs),
+      CAUL_USER_DATA_DIR: userDataDir
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
@@ -49,7 +49,7 @@ try {
   const speech = spawn(process.execPath, ['scripts/browser-speech-audio.mjs'], {
     env: {
       ...process.env,
-      SUSURA_BROWSER_SPEECH_MS: String(Math.max(16_000, durationMs - 8_000))
+      CAUL_BROWSER_SPEECH_MS: String(Math.max(16_000, durationMs - 8_000))
     },
     stdio: 'inherit'
   });
@@ -62,8 +62,8 @@ try {
 
   const smokeLine = output
     .split('\n')
-    .find((line) => line.includes('susura-local-parakeet-smoke'));
-  const summary = smokeLine ? JSON.parse(smokeLine.replace(/^.*susura-local-parakeet-smoke /, '')) : null;
+    .find((line) => line.includes('caul-local-parakeet-smoke'));
+  const summary = smokeLine ? JSON.parse(smokeLine.replace(/^.*caul-local-parakeet-smoke /, '')) : null;
 
   const coreAudioStarted = summary?.stages?.includes('Core Audio capture started') ?? false;
   const parakeetLoaded = summary?.stages?.includes('local Parakeet loaded') ?? false;

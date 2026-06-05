@@ -19,5 +19,5 @@ native/macos-audio-helper/.build/
 .env.*
 !.env.example
 
-.susura-dev/
-.susura/
+.caul-dev/
+.caul/

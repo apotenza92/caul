@@ -1,5 +1,5 @@
 [package]
-name = "susura-desktop-ui"
+name = "caul-desktop-ui"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
@@ -9,6 +9,6 @@ rust-version.workspace = true
 [dependencies]
 dioxus.workspace = true
 dioxus-native.workspace = true
-susura-macos-capture = { path = "../macos-capture" }
-susura-audio-core = { path = "../audio-core" }
-susura-session-core = { path = "../session-core" }
+caul-macos-capture = { path = "../macos-capture" }
+caul-audio-core = { path = "../audio-core" }
+caul-session-core = { path = "../session-core" }

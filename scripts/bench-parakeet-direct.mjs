@@ -3,10 +3,10 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-const phrase = process.env.SUSURA_BENCH_PHRASE
+const phrase = process.env.CAUL_BENCH_PHRASE
   ?? 'What is the refund policy for annual plans?';
-const minWordOverlap = Number(process.env.SUSURA_BENCH_MIN_WORD_OVERLAP ?? 0.45);
-const fixtureDir = await mkdtemp(path.join(tmpdir(), 'susura-parakeet-direct-'));
+const minWordOverlap = Number(process.env.CAUL_BENCH_MIN_WORD_OVERLAP ?? 0.45);
+const fixtureDir = await mkdtemp(path.join(tmpdir(), 'caul-parakeet-direct-'));
 const aiffPath = path.join(fixtureDir, 'fixture.aiff');
 const wavPath = path.join(fixtureDir, 'fixture-16k-mono.wav');
 
@@ -14,7 +14,7 @@ await writeFile(path.join(fixtureDir, 'fixture.txt'), phrase, 'utf8');
 await run('say', ['-o', aiffPath, phrase]);
 await run('afconvert', ['-f', 'WAVE', '-d', 'LEI16@16000', '-c', '1', aiffPath, wavPath]);
 
-const output = await run('target/debug/susura-desktop-backend', ['--transcribe-parakeet-wav', wavPath]);
+const output = await run('target/debug/caul-desktop-backend', ['--transcribe-parakeet-wav', wavPath]);
 const resultLine = output
   .split('\n')
   .find((line) => line.includes('"type":"parakeet_direct_bench"'));
@@ -39,7 +39,7 @@ const benchmark = {
   fixtureWavPath: wavPath
 };
 
-console.log(`susura-parakeet-direct-bench ${JSON.stringify(benchmark)}`);
+console.log(`caul-parakeet-direct-bench ${JSON.stringify(benchmark)}`);
 
 if (wordOverlap < minWordOverlap || !result.transcript) {
   process.exit(1);

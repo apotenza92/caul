@@ -5,16 +5,16 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import WebSocket from 'ws';
 
-const durationMs = Number(process.env.SUSURA_BROWSER_SPEECH_MS ?? 30_000);
-const debuggingPort = Number(process.env.SUSURA_BROWSER_DEBUG_PORT ?? 9224);
-const muted = process.env.SUSURA_BROWSER_SPEECH_MUTED === 'true';
-const volume = Number(process.env.SUSURA_BROWSER_SPEECH_VOLUME ?? 0.85);
+const durationMs = Number(process.env.CAUL_BROWSER_SPEECH_MS ?? 30_000);
+const debuggingPort = Number(process.env.CAUL_BROWSER_DEBUG_PORT ?? 9224);
+const muted = process.env.CAUL_BROWSER_SPEECH_MUTED === 'true';
+const volume = Number(process.env.CAUL_BROWSER_SPEECH_VOLUME ?? 0.85);
 const defaultMediaUrl = 'https://upload.wikimedia.org/wikipedia/commons/0/03/Theodore_Roosevelt_%22The_liberty_of_the_people%22_speech.ogg';
-const mediaUrl = process.env.SUSURA_BROWSER_MEDIA_URL
-  ?? (process.env.SUSURA_BROWSER_SPEECH_TEXT ? '' : defaultMediaUrl);
-const phrase = process.env.SUSURA_BROWSER_SPEECH_TEXT
-  ?? 'Susura local Parakeet transcription smoke test. Browser system audio is reaching the app.';
-const directory = await mkdtemp(path.join(tmpdir(), 'susura-browser-speech-'));
+const mediaUrl = process.env.CAUL_BROWSER_MEDIA_URL
+  ?? (process.env.CAUL_BROWSER_SPEECH_TEXT ? '' : defaultMediaUrl);
+const phrase = process.env.CAUL_BROWSER_SPEECH_TEXT
+  ?? 'Caul local Parakeet transcription smoke test. Browser system audio is reaching the app.';
+const directory = await mkdtemp(path.join(tmpdir(), 'caul-browser-speech-'));
 const htmlPath = path.join(directory, 'speech.html');
 const aiffPath = path.join(directory, 'speech.aiff');
 const wavPath = path.join(directory, 'speech.wav');
@@ -30,7 +30,7 @@ await writeFile(htmlPath, `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>Susura Spoken Media Smoke</title>
+    <title>Caul Spoken Media Smoke</title>
     <style>
       html, body {
         margin: 0;
@@ -62,7 +62,7 @@ await writeFile(htmlPath, `<!doctype html>
       const durationMs = ${JSON.stringify(durationMs)};
       const muted = ${JSON.stringify(muted)};
       const volume = ${JSON.stringify(volume)};
-      const shouldLoop = ${JSON.stringify(process.env.SUSURA_BROWSER_SPEECH_LOOP === 'true')};
+      const shouldLoop = ${JSON.stringify(process.env.CAUL_BROWSER_SPEECH_LOOP === 'true')};
 
       function wait(milliseconds) {
         return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -109,7 +109,7 @@ try {
   process.exit(1);
 }
 
-const chromeProfile = await mkdtemp(path.join(tmpdir(), 'susura-chrome-profile-'));
+const chromeProfile = await mkdtemp(path.join(tmpdir(), 'caul-chrome-profile-'));
 const child = spawn(chromePath, [
   '--new-window',
   `--user-data-dir=${chromeProfile}`,

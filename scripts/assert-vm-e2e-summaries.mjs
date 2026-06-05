@@ -3,7 +3,7 @@ import path from 'node:path';
 
 const requiredProfiles = ['macos', 'win', 'linux'];
 const summaryDir = path.join(process.cwd(), 'artifacts', 'vm-e2e');
-const requirePassing = process.env.SUSURA_REQUIRE_VM_E2E === '1';
+const requirePassing = process.env.CAUL_REQUIRE_VM_E2E === '1';
 const missing = [];
 const blocked = [];
 const failing = [];
@@ -42,4 +42,4 @@ if (requirePassing) {
   process.exit(1);
 }
 
-console.warn(`Warning: VM E2E summaries are incomplete: ${message}. Set SUSURA_REQUIRE_VM_E2E=1 to enforce this gate.`);
+console.warn(`Warning: VM E2E summaries are incomplete: ${message}. Set CAUL_REQUIRE_VM_E2E=1 to enforce this gate.`);

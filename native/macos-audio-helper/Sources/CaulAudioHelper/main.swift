@@ -9,8 +9,8 @@ import Foundation
 let fallbackCaptureSampleRate = 48_000.0
 let parakeetSampleRate = 16_000.0
 
-@_cdecl("susuraSystemAudioIOProc")
-func susuraSystemAudioIOProc(
+@_cdecl("caulSystemAudioIOProc")
+func caulSystemAudioIOProc(
   _ device: AudioObjectID,
   _ now: UnsafePointer<AudioTimeStamp>,
   _ inputData: UnsafePointer<AudioBufferList>,
@@ -50,7 +50,7 @@ struct HelperEvent: Encodable {
 
 final class EventWriter: @unchecked Sendable {
   private let encoder = JSONEncoder()
-  private let queue = DispatchQueue(label: "dev.susura.audio-helper.events")
+  private let queue = DispatchQueue(label: "dev.caul.audio-helper.events")
   private var lastLevelEventAt = Date.distantPast
 
   func emit(_ event: HelperEvent) {
@@ -162,7 +162,7 @@ final class ScreenCaptureKitSystemAudioCapture: NSObject, SCStreamDelegate, SCSt
     configuration.excludesCurrentProcessAudio = false
 
     let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
-    try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: DispatchQueue(label: "dev.susura.audio-helper.sck"))
+    try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: DispatchQueue(label: "dev.caul.audio-helper.sck"))
     self.stream = stream
 
     writer.emitImmediate(HelperEvent(type: "capture_stage", message: "starting ScreenCaptureKit audio stream"))
@@ -260,7 +260,7 @@ final class SystemAudioCapture {
   private var aggregateDeviceID = AudioObjectID(kAudioObjectUnknown)
   private var ioProcID: AudioDeviceIOProcID?
   private var inputFormat = AudioStreamBasicDescription()
-  private let ioQueue = DispatchQueue(label: "dev.susura.audio-helper.io", qos: .userInitiated)
+  private let ioQueue = DispatchQueue(label: "dev.caul.audio-helper.io", qos: .userInitiated)
   private var started = false
   private var stopped = false
 
@@ -281,7 +281,7 @@ final class SystemAudioCapture {
   @available(macOS 14.2, *)
   func start(recording: Bool = true) throws {
     let tapDescription = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
-    tapDescription.name = "Susura System Audio"
+    tapDescription.name = "Caul System Audio"
     tapDescription.uuid = UUID()
     tapDescription.isPrivate = true
     tapDescription.muteBehavior = .unmuted
@@ -291,8 +291,8 @@ final class SystemAudioCapture {
     let defaultOutputUID = try readDefaultOutputDeviceUID()
 
     let aggregateDescription: [String: Any] = [
-      String(kAudioAggregateDeviceNameKey): "Susura System Audio",
-      String(kAudioAggregateDeviceUIDKey): "dev.susura.system-audio.\(UUID().uuidString)",
+      String(kAudioAggregateDeviceNameKey): "Caul System Audio",
+      String(kAudioAggregateDeviceUIDKey): "dev.caul.system-audio.\(UUID().uuidString)",
       String(kAudioAggregateDeviceMainSubDeviceKey): defaultOutputUID,
       String(kAudioAggregateDeviceIsPrivateKey): true,
       String(kAudioAggregateDeviceIsStackedKey): false,
@@ -549,7 +549,7 @@ final class SystemAudioCapture {
     if ioProcMode == "function" {
       let clientData = Unmanaged.passUnretained(self).toOpaque()
       try check(
-        AudioDeviceCreateIOProcID(aggregateDeviceID, susuraSystemAudioIOProc, clientData, &newIOProcID),
+        AudioDeviceCreateIOProcID(aggregateDeviceID, caulSystemAudioIOProc, clientData, &newIOProcID),
         "AudioDeviceCreateIOProcID"
       )
     } else {
@@ -576,7 +576,7 @@ final class SystemAudioCapture {
 final class ParakeetDaemon: @unchecked Sendable {
   private let writer: EventWriter
   private let ioProcMode: String
-  private let queue = DispatchQueue(label: "dev.susura.parakeet-daemon", qos: .userInitiated)
+  private let queue = DispatchQueue(label: "dev.caul.parakeet-daemon", qos: .userInitiated)
   private var capture: SystemAudioCapture?
   private var isQuitting = false
 
@@ -685,7 +685,7 @@ final class ParakeetDaemon: @unchecked Sendable {
 
 final class SlidingParakeetTranscriber: @unchecked Sendable {
   private let writer: EventWriter
-  private let queue = DispatchQueue(label: "dev.susura.parakeet", qos: .utility)
+  private let queue = DispatchQueue(label: "dev.caul.parakeet", qos: .utility)
   private var buffer: [Float] = []
   private var isProcessing = false
   private var hasFinished = false
@@ -1331,7 +1331,7 @@ func runModernCommand(arguments: Set<String>, writer: EventWriter) throws {
     signal(SIGINT, SIG_IGN)
     signal(SIGTERM, SIG_IGN)
 
-    let signalQueue = DispatchQueue(label: "dev.susura.audio-helper.signals")
+    let signalQueue = DispatchQueue(label: "dev.caul.audio-helper.signals")
     let interruptSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: signalQueue)
     let terminateSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: signalQueue)
 
