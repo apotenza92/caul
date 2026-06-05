@@ -2649,6 +2649,65 @@ describe('App', () => {
     expect(bridge.updateFrequencyChanges).toEqual(['daily']);
   });
 
+  it('shows update download progress outside the update action row', async () => {
+    const user = userEvent.setup();
+    installTestBridge({
+      updateStatus: testUpdateStatus({
+        availableUpdate: {
+          prerelease: false,
+          releaseName: 'Susura 0.1.9',
+          version: '0.1.9'
+        },
+        downloading: true,
+        lastResult: {
+          ok: true,
+          status: 'downloading',
+          message: 'Downloading update 42%',
+          progress: {
+            percent: 42,
+            transferred: 42,
+            total: 100
+          }
+        }
+      })
+    });
+
+    render(<App />);
+
+    await openSettings(user);
+
+    expect(screen.getByRole('button', { name: 'Download Update' })).toBeDisabled();
+    expect(screen.getByText(/^Last checked: Never\.$/)).toBeInTheDocument();
+    expect(screen.getByText('Downloading update 42%')).toBeInTheDocument();
+    expect(screen.queryByText(/Last checked: Never\. Downloading update 42%/)).not.toBeInTheDocument();
+  });
+
+  it('hides the update download button once the update is downloaded', async () => {
+    const user = userEvent.setup();
+    installTestBridge({
+      updateStatus: testUpdateStatus({
+        availableUpdate: {
+          prerelease: false,
+          releaseName: 'Susura 0.1.9',
+          version: '0.1.9'
+        },
+        lastResult: {
+          ok: true,
+          status: 'ready',
+          message: 'Update downloaded. Restart Susura to install it.'
+        }
+      })
+    });
+
+    render(<App />);
+
+    await openSettings(user);
+
+    expect(screen.queryByRole('button', { name: 'Download Update' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Restart Now' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Release Page' })).toBeInTheDocument();
+  });
+
   it('streams AI response deltas while the request is still running', async () => {
     const user = userEvent.setup();
     const streamedRequests: string[] = [];

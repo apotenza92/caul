@@ -22,6 +22,7 @@ function createUpdaterService({
   appChannel,
   appName,
   isDev,
+  onBeforeInstallDownloadedUpdate,
   forceEnabled = false,
   repositoryUrl = 'https://github.com/apotenza92/susura/releases'
 } = {}) {
@@ -337,6 +338,7 @@ function createUpdaterService({
 
   async function installDownloadedUpdate() {
     if (process.platform === 'darwin' || isLinuxAppImage()) {
+      onBeforeInstallDownloadedUpdate?.();
       autoUpdater.quitAndInstall(false, true);
       return { ok: true };
     }

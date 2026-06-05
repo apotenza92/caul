@@ -124,6 +124,7 @@ let localModelDownload = null;
 let piChatGptLoginPromise = null;
 let piAuthStorageImportPromise = null;
 let isQuitting = false;
+let isInstallingDownloadedUpdate = false;
 let packagedLaunchSmokeStarted = false;
 const packagedPrivacySmokeState = {
   captureProbe: null,
@@ -662,11 +663,22 @@ function getUpdaterService() {
       appChannel: getAppChannel(),
       appName: getAppDisplayName(),
       forceEnabled: process.env.SUSURA_FORCE_UPDATE_CHECKS === '1',
-      isDev
+      isDev,
+      onBeforeInstallDownloadedUpdate: prepareForDownloadedUpdateInstall
     });
   }
 
   return updaterService;
+}
+
+function prepareForDownloadedUpdateInstall() {
+  isInstallingDownloadedUpdate = true;
+  isQuitting = true;
+  BrowserWindow.getAllWindows().forEach((window) => {
+    if (!window.isDestroyed()) {
+      window.close();
+    }
+  });
 }
 
 function getBundledExecutablePath(name) {
@@ -7226,12 +7238,21 @@ app.whenReady().then(async () => {
 app.on('before-quit', () => {
   isQuitting = true;
   globalShortcut.unregisterAll();
+  updaterService?.stopSchedule();
+
+  if (isInstallingDownloadedUpdate) {
+    stopSystemAudioCapture();
+    stopLocalTranscriptionWarmDaemon(true);
+    stopLocalParakeetDaemon({ force: true });
+    cancelParakeetDownload();
+    return;
+  }
+
   if (localTranscriptionProcess?.stdin?.writable) {
     localTranscriptionProcess.stdin.write(`${JSON.stringify({ type: 'quit' })}\n`);
     localTranscriptionProcess.stdin.end();
   }
   stopSystemAudioCapture();
-  updaterService?.stopSchedule();
   stopLocalParakeetDaemon({ force: true });
   cancelParakeetDownload();
   persistentPiRpcBridge?.dispose();

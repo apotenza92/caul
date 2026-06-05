@@ -4533,9 +4533,18 @@ function formatUpdateStatusLine(status: UpdateStatus | null) {
   const lastChecked = status.lastCheckedAt
     ? new Date(status.lastCheckedAt).toLocaleString()
     : 'Never';
+
+  if (status.downloading) {
+    return `Last checked: ${lastChecked}.`;
+  }
+
   const message = status.lastResult?.message ?? 'Automatic checks are ready.';
 
   return `Last checked: ${lastChecked}. ${message}`;
+}
+
+function isUpdateDownloaded(status: UpdateStatus | null) {
+  return status?.lastResult?.status === 'ready' || status?.lastResult?.status === 'downloaded';
 }
 
 function normalisePromptTemplateDraft(template: PromptTemplate) {
@@ -5128,6 +5137,7 @@ function SettingsPage({
   const [selectedTranscriptionModelId, setSelectedTranscriptionModelId] = useState<LocalTranscriptionModelId>('parakeet');
   const hasInitialisedTranscriptionModelRef = useRef(false);
   const autoSelectingReadyModelRef = useRef<LocalTranscriptionModelId | null>(null);
+  const hasDownloadedUpdate = isUpdateDownloaded(updateStatus);
   const settingsSections: Array<{ id: SettingsSection; label: string }> = [
     { id: 'general', label: 'General' },
     { id: 'ai', label: 'Models' },
@@ -5362,37 +5372,46 @@ function SettingsPage({
                         <p>{formatUpdateStatusLine(updateStatus)}</p>
                       </div>
                       {updateStatus?.availableUpdate ? (
-                        <div className="flex flex-wrap gap-2">
-                          <TooltipButton
-                            disabled={updateStatus.checking || updateStatus.downloading}
-                            onClick={() => void getSettingsBridge()?.updates?.downloadAndInstall()}
-                            size="default"
-                            tooltip="Download this update"
-                            type="button"
-                          >
-                            {updateStatus.downloading ? <LoaderCircleIcon className="animate-spin" /> : <DownloadIcon />}
-                            Download Update
-                          </TooltipButton>
-                          {updateStatus.lastResult?.status === 'ready' ? (
+                        <div className="flex flex-col items-start gap-2">
+                          <div className="flex flex-wrap gap-2">
+                            {!hasDownloadedUpdate ? (
+                              <TooltipButton
+                                disabled={updateStatus.checking || updateStatus.downloading}
+                                onClick={() => void getSettingsBridge()?.updates?.downloadAndInstall()}
+                                size="default"
+                                tooltip="Download this update"
+                                type="button"
+                              >
+                                {updateStatus.downloading ? <LoaderCircleIcon className="animate-spin" /> : <DownloadIcon />}
+                                Download Update
+                              </TooltipButton>
+                            ) : null}
+                            {updateStatus.lastResult?.status === 'ready' ? (
+                              <TooltipButton
+                                onClick={() => void getSettingsBridge()?.updates?.installDownloaded()}
+                                size="default"
+                                tooltip="Restart Susura and install the update"
+                                type="button"
+                                variant="outline"
+                              >
+                                Restart Now
+                              </TooltipButton>
+                            ) : null}
                             <TooltipButton
-                              onClick={() => void getSettingsBridge()?.updates?.installDownloaded()}
+                              onClick={() => void getSettingsBridge()?.updates?.openDownloadPage()}
                               size="default"
-                              tooltip="Restart Susura and install the update"
+                              tooltip="Open release page"
                               type="button"
                               variant="outline"
                             >
-                              Restart Now
+                              Release Page
                             </TooltipButton>
+                          </div>
+                          {updateStatus.downloading && updateStatus.lastResult?.message ? (
+                            <p className={layout.settingsDescription} aria-live="polite">
+                              {updateStatus.lastResult.message}
+                            </p>
                           ) : null}
-                          <TooltipButton
-                            onClick={() => void getSettingsBridge()?.updates?.openDownloadPage()}
-                            size="default"
-                            tooltip="Open release page"
-                            type="button"
-                            variant="outline"
-                          >
-                            Release Page
-                          </TooltipButton>
                         </div>
                       ) : null}
                     </div>

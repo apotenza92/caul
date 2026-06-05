@@ -1,6 +1,6 @@
 {
   "name": "susura",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "private": true,
   "description": "A private AI overlay for live calls and screen work.",
   "main": "electron/main.cjs",
