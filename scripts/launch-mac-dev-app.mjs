@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -11,7 +11,11 @@ const bundleIds = [privateBuild ? 'dev.caul.app.dev-private' : 'dev.caul.app.dev
 const captureServices = ['ScreenCapture', 'AudioCapture'];
 const launchServicesRegister = '/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister';
 const userDataDir = join(homedir(), 'Library', 'Application Support', 'caul-dev');
-const modelsDir = join(userDataDir, 'models');
+const setupStatePath = join(userDataDir, 'setup-state.json');
+const preservedDataDirs = [
+  'models',
+  'local-llm'
+];
 const resetPermissions = process.argv.includes('--reset-permissions');
 const resetAllCapturePermissions = process.argv.includes('--reset-all-capture-permissions');
 const fresh = !process.argv.includes('--keep-data');
@@ -23,6 +27,56 @@ function sqliteString(value) {
 
 function shellQuote(value) {
   return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function readJsonFile(filePath) {
+  try {
+    return JSON.parse(readFileSync(filePath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function getSystemAudioPermissionStateToPreserve() {
+  if (resetPermissions || resetAllCapturePermissions) {
+    return null;
+  }
+
+  const existingState = readJsonFile(setupStatePath);
+
+  if (existingState?.systemAudioPermissionGranted === true) {
+    return {
+      systemAudioPermissionDenied: false,
+      systemAudioPermissionGranted: true,
+      systemAudioPermissionRequested: true
+    };
+  }
+
+  if (hasGrantedSystemAudioTccRow()) {
+    return {
+      systemAudioPermissionDenied: false,
+      systemAudioPermissionGranted: true,
+      systemAudioPermissionRequested: true
+    };
+  }
+
+  return null;
+}
+
+function hasGrantedSystemAudioTccRow() {
+  const tccDbPath = join(homedir(), 'Library', 'Application Support', 'com.apple.TCC', 'TCC.db');
+
+  if (!existsSync(tccDbPath)) {
+    return false;
+  }
+
+  const clients = bundleIds.map(sqliteString).join(',');
+  const query = `select auth_value from access where service = 'kTCCServiceAudioCapture' and client in (${clients}) order by last_modified desc limit 1;`;
+  const result = spawnSync('sqlite3', [tccDbPath, query], {
+    encoding: 'utf8'
+  });
+
+  return result.status === 0 && result.stdout.trim() === '2';
 }
 
 function clearScopedTccRows(tccDbPath, options = {}) {
@@ -80,11 +134,20 @@ for (const appBundleName of ['Caul Dev.app', 'Caul Dev-Private.app']) {
 }
 
 if (fresh) {
-  const temporaryModelsDir = join(homedir(), 'Library', 'Application Support', `caul-dev-models-${Date.now()}`);
+  const temporaryDataRoot = join(homedir(), 'Library', 'Application Support', `caul-dev-preserved-${Date.now()}`);
+  const preservedPermissionState = getSystemAudioPermissionStateToPreserve();
 
-  if (!resetModels && existsSync(modelsDir)) {
-    renameSync(modelsDir, temporaryModelsDir);
-    console.log(`Preserved ${modelsDir}`);
+  if (!resetModels) {
+    for (const dataDir of preservedDataDirs) {
+      const sourceDir = join(userDataDir, dataDir);
+      const destinationDir = join(temporaryDataRoot, dataDir);
+
+      if (existsSync(sourceDir)) {
+        mkdirSync(temporaryDataRoot, { recursive: true });
+        renameSync(sourceDir, destinationDir);
+        console.log(`Preserved ${sourceDir}`);
+      }
+    }
   }
 
   rmSync(userDataDir, {
@@ -95,10 +158,33 @@ if (fresh) {
   });
   console.log(`Removed ${userDataDir}`);
 
-  if (!resetModels && existsSync(temporaryModelsDir)) {
+  if (!resetModels && existsSync(temporaryDataRoot)) {
     mkdirSync(userDataDir, { recursive: true });
-    renameSync(temporaryModelsDir, modelsDir);
-    console.log(`Restored ${modelsDir}`);
+
+    for (const dataDir of preservedDataDirs) {
+      const sourceDir = join(temporaryDataRoot, dataDir);
+      const destinationDir = join(userDataDir, dataDir);
+
+      if (existsSync(sourceDir)) {
+        renameSync(sourceDir, destinationDir);
+        console.log(`Restored ${destinationDir}`);
+      }
+    }
+
+    rmSync(temporaryDataRoot, {
+      force: true,
+      recursive: true
+    });
+  }
+
+  if (preservedPermissionState) {
+    mkdirSync(userDataDir, { recursive: true });
+    const nextSetupState = {
+      ...readJsonFile(setupStatePath),
+      ...preservedPermissionState
+    };
+    writeFileSync(setupStatePath, `${JSON.stringify(nextSetupState, null, 2)}\n`);
+    console.log(`Restored System Audio permission state in ${setupStatePath}`);
   }
 }
 

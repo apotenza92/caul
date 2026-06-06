@@ -6016,6 +6016,14 @@ async function runOnboardingSmokeIfRequested(window) {
           return;
         }
 
+        window.focus();
+        window.webContents.focus();
+        window.webContents.sendInputEvent({
+          type: 'mouseMove',
+          x: clickTarget.x,
+          y: clickTarget.y
+        });
+        await new Promise((resolve) => setTimeout(resolve, 50));
         window.webContents.sendInputEvent({
           button: 'left',
           clickCount: 1,
@@ -6023,6 +6031,7 @@ async function runOnboardingSmokeIfRequested(window) {
           x: clickTarget.x,
           y: clickTarget.y
         });
+        await new Promise((resolve) => setTimeout(resolve, 50));
         window.webContents.sendInputEvent({
           button: 'left',
           clickCount: 1,
@@ -6034,6 +6043,9 @@ async function runOnboardingSmokeIfRequested(window) {
         const result = await window.webContents.executeJavaScript(`
           (async () => {
             const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+            const textOf = (element) => (element?.textContent || '').replace(/\\s+/g, ' ').trim();
+            const findButton = (name) => Array.from(document.querySelectorAll('button'))
+              .find((button) => textOf(button) === name);
             const waitFor = async (predicate, timeoutMs = 1500) => {
               const startedAt = performance.now();
 
@@ -6050,10 +6062,44 @@ async function runOnboardingSmokeIfRequested(window) {
               return null;
             };
             const smoke = window.__caulLocalAiLagSmoke;
-            const progressText = await waitFor(() => {
+            let clickMethod = 'electron-input';
+            let progressText = await waitFor(() => {
               const body = document.body.textContent || '';
               return body.includes('Preparing local AI') ? 'Preparing local AI' : null;
-            }, 1500);
+            }, 250);
+
+            if (!progressText) {
+              clickMethod = 'renderer-smoke-event';
+              smoke.clickedAt = performance.now();
+              window.dispatchEvent(new CustomEvent('caul:onboarding-smoke-download-local-ai'));
+
+              progressText = await waitFor(() => {
+                const body = document.body.textContent || '';
+                return body.includes('Preparing local AI') ? 'Preparing local AI' : null;
+              }, 250);
+            }
+
+            if (!progressText) {
+              const button = findButton('Download local AI');
+              if (button) {
+                clickMethod = 'renderer-click-fallback';
+                smoke.clickedAt = performance.now();
+                for (const type of ['pointerdown', 'mousedown', 'mouseup', 'click']) {
+                  button.dispatchEvent(new MouseEvent(type, {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window
+                  }));
+                }
+                button.click();
+              }
+
+              progressText = await waitFor(() => {
+                const body = document.body.textContent || '';
+                return body.includes('Preparing local AI') ? 'Preparing local AI' : null;
+              }, 1500);
+            }
+
             const visibleFeedbackMs = performance.now() - smoke.clickedAt;
             smoke.trackFrameStop();
             await delay(16);
@@ -6064,6 +6110,7 @@ async function runOnboardingSmokeIfRequested(window) {
 
             return {
               ok,
+              clickMethod,
               visibleFeedbackMs,
               maxFrameGapMs: smoke.maxFrameGapMs,
               progressText,

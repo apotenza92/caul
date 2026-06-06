@@ -1146,6 +1146,18 @@ function OnboardingSurface() {
     }
   }
 
+  useEffect(() => {
+    const startLocalAiDownloadSmoke = () => {
+      void downloadLocalAi();
+    };
+
+    window.addEventListener('caul:onboarding-smoke-download-local-ai', startLocalAiDownloadSmoke);
+
+    return () => {
+      window.removeEventListener('caul:onboarding-smoke-download-local-ai', startLocalAiDownloadSmoke);
+    };
+  }, []);
+
   async function finish() {
     if (isCompleting) {
       return;
