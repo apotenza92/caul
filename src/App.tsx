@@ -1452,13 +1452,15 @@ function OnboardingAiModelSetup({
       </div>
 
       {selectedProvider === 'local' ? (
-        <div role="tabpanel" className="grid min-h-20 justify-items-center gap-1.5 text-center">
-          <p className="text-xs leading-5 text-muted-foreground">
+        <div role="tabpanel" className="grid h-20 grid-rows-[1fr_2.25rem] justify-items-center gap-1.5 text-center">
+          <p className="flex items-center text-xs leading-5 text-muted-foreground">
             Local and private. Slower and less intelligent than Cloud.
           </p>
           <div className="flex min-h-9 flex-wrap items-center justify-center gap-2">
             {localModelInstalled ? (
               <StatusPill ready>Ready</StatusPill>
+            ) : caulLocalStatus?.runtime.supported === false ? (
+              <StatusPill ready={false}>Unavailable</StatusPill>
             ) : isLocalDownloading ? (
               <>
                 <Button onClick={onCancelLocalDownload} size="sm" type="button" variant="outline">Cancel</Button>
@@ -1474,15 +1476,10 @@ function OnboardingAiModelSetup({
               </Button>
             )}
           </div>
-          {caulLocalStatus?.runtime.supported === false ? (
-            <p className="text-xs leading-5 text-muted-foreground">
-              Local AI is not available on this computer yet.
-            </p>
-          ) : null}
         </div>
       ) : (
-        <div role="tabpanel" className="grid min-h-20 justify-items-center gap-1.5 text-center">
-          <p className="text-xs leading-5 text-muted-foreground">
+        <div role="tabpanel" className="grid h-20 grid-rows-[1fr_2.25rem] justify-items-center gap-1.5 text-center">
+          <p className="flex items-center text-xs leading-5 text-muted-foreground">
             Sends to ChatGPT. Faster and smarter than Local.
           </p>
           <div className="flex min-h-9 items-center justify-center gap-1.5">
