@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  getSettingsBridge,
   getTranscriptionBridge,
   type LlmModel,
   type LlmReasoning,
@@ -35,6 +36,7 @@ export type TranscriptSession = {
 };
 
 export type AiResponseSession = {
+  historySessionId?: string;
   id: string;
   isWaiting?: boolean;
   request: string;
@@ -71,6 +73,8 @@ export function useLiveTranscription() {
   const [llmOutput, setLlmOutput] = useState(idleLlmText);
   const [llmRequestedAt, setLlmRequestedAt] = useState<string | null>(null);
   const [llmResponses, setLlmResponses] = useState<AiResponseSession[]>([]);
+  const sessionsRef = useRef<TranscriptSession[]>([]);
+  const llmResponsesRef = useRef<AiResponseSession[]>([]);
   const finalTranscriptRef = useRef('');
   const finalTranscriptLinesRef = useRef<TranscriptLine[]>([]);
   const partialTranscriptLinesRef = useRef<Map<string, TranscriptLine>>(new Map());
@@ -127,11 +131,13 @@ export function useLiveTranscription() {
     speculativeRequestRef.current = null;
     clearSpeculativeTimer();
     const sessionHeader = getTranscriptHeader(sessionStartedAt);
-    setSessions((current) => [...current, {
+    const session = {
       id: sessionId,
       output: sessionHeader,
       startedAt: sessionStartedAt.toISOString()
-    }]);
+    };
+    setTranscriptSessions((current) => [...current, session]);
+    saveHistorySession(session);
     setOutput((currentOutput) => {
       const previousOutput = isTranscriptText(currentOutput) ? currentOutput : '';
       return appendTranscript(previousOutput, sessionHeader);
@@ -201,13 +207,16 @@ export function useLiveTranscription() {
       setLlmRequestedAt(requestedAt);
       setLlmOutput(awaitingResponseText);
       activeLlmResponseIdRef.current = responseId;
-      setLlmResponses((current) => [...current, {
+      const historySessionId = activeSessionIdRef.current ?? undefined;
+      setAiResponseSessions((current) => [...current, {
+        historySessionId,
         id: responseId,
         isWaiting: true,
         request: requestTranscript,
         requestedAt,
         response: ''
       }]);
+      saveHistorySessionById(historySessionId);
 
       try {
         const matchingSpeculativeRequest = speculativeRequest
@@ -276,13 +285,16 @@ export function useLiveTranscription() {
     setLlmRequestedAt(requestedAt);
     setLlmOutput(awaitingResponseText);
     activeLlmResponseIdRef.current = responseId;
-    setLlmResponses((current) => [...current, {
+    const historySessionId = findHistorySessionIdForTranscript(transcript ?? output);
+    setAiResponseSessions((current) => [...current, {
+      historySessionId,
       id: responseId,
       isWaiting: true,
       request: requestTranscript,
       requestedAt,
       response: ''
     }]);
+    saveHistorySessionById(historySessionId);
 
     try {
       const response = await requestVisibleLlm({
@@ -552,10 +564,14 @@ export function useLiveTranscription() {
       return;
     }
 
-    setSessions((current) => {
+    setTranscriptSessions((current) => {
       const next = current.map((session) => (
         session.id === sessionId ? { ...session, output: transcript } : session
       ));
+      const savedSession = next.find((session) => session.id === sessionId);
+      if (savedSession) {
+        saveHistorySession(savedSession);
+      }
       setOutput(combineTranscriptSessions(next));
       return next;
     });
@@ -740,7 +756,7 @@ export function useLiveTranscription() {
 
     setLlmOutput(idleLlmText);
     setLlmRequestedAt(null);
-    setLlmResponses([]);
+    setAiResponseSessions([]);
     activeLlmResponseIdRef.current = null;
   }
 
@@ -750,7 +766,7 @@ export function useLiveTranscription() {
     }
 
     setOutput(idleTranscriptText);
-    setSessions([]);
+    setTranscriptSessions([]);
     finalTranscriptRef.current = '';
     finalTranscriptLinesRef.current = [];
     partialTranscriptLinesRef.current = new Map();
@@ -759,9 +775,58 @@ export function useLiveTranscription() {
   }
 
   function updateLlmResponse(id: string, patch: Partial<AiResponseSession>) {
-    setLlmResponses((current) => current.map((response) => (
+    const next = llmResponsesRef.current.map((response) => (
       response.id === id ? { ...response, ...patch } : response
-    )));
+    ));
+    const updated = next.find((response) => response.id === id);
+    setAiResponseSessions(next);
+    saveHistorySessionById(updated?.historySessionId);
+  }
+
+  function setTranscriptSessions(update: TranscriptSession[] | ((current: TranscriptSession[]) => TranscriptSession[])) {
+    const next = typeof update === 'function' ? update(sessionsRef.current) : update;
+    sessionsRef.current = next;
+    setSessions(next);
+  }
+
+  function setAiResponseSessions(update: AiResponseSession[] | ((current: AiResponseSession[]) => AiResponseSession[])) {
+    const next = typeof update === 'function' ? update(llmResponsesRef.current) : update;
+    llmResponsesRef.current = next;
+    setLlmResponses(next);
+  }
+
+  function saveHistorySessionById(sessionId: string | undefined) {
+    if (!sessionId) {
+      return;
+    }
+
+    const session = sessionsRef.current.find((item) => item.id === sessionId);
+    if (session) {
+      saveHistorySession(session);
+    }
+  }
+
+  function saveHistorySession(session: TranscriptSession) {
+    void getSettingsBridge()?.history?.saveSession({
+      aiResponses: llmResponsesRef.current
+        .filter((response) => response.historySessionId === session.id)
+        .map((response) => ({
+          id: response.id,
+          request: response.request,
+          requestedAt: response.requestedAt,
+          response: response.response
+        })),
+      sessionId: session.id,
+      startedAt: session.startedAt,
+      transcript: session.output
+    });
+  }
+
+  function findHistorySessionIdForTranscript(transcript: string) {
+    const trimmedTranscript = transcript.trim();
+
+    return sessionsRef.current.find((session) => session.output.trim() === trimmedTranscript)?.id
+      ?? sessionsRef.current.at(-1)?.id;
   }
 }
 

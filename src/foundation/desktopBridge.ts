@@ -56,6 +56,25 @@ export type LlmStatus = {
   status: 'warming' | 'ready' | 'error' | 'disabled';
 };
 
+export type HistoryStatus = {
+  enabled: boolean;
+  folder: string;
+  message?: string;
+  ok: boolean;
+};
+
+export type HistorySessionUpdate = {
+  aiResponses?: Array<{
+    id: string;
+    request: string;
+    requestedAt: string | null;
+    response: string;
+  }>;
+  sessionId: string;
+  startedAt: string;
+  transcript?: string;
+};
+
 export type LocalTranscriptionModelId = 'parakeet' | 'moonshine-tiny';
 
 export type ParakeetStatus = {
@@ -81,24 +100,97 @@ export type PiStatus = {
   status: 'disconnected' | 'ready';
 };
 
+export type AiProvider = 'cloud' | 'local';
+
+export type ModelBenchmarkStatus = {
+  catalogueLastReviewed: string;
+  recommendationSource: string;
+  staleEntries: Array<{
+    id: string;
+    name: string;
+    reviewedAt: string;
+  }>;
+};
+
+export type LocalLlmStatus = {
+  ok: boolean;
+  model: null | {
+    id: string;
+    installed: boolean;
+    name: string;
+    path: string | null;
+    sizeGb: number;
+  };
+  progress?: {
+    downloadedBytes: number;
+    label: string;
+    percent: number;
+    phase: 'model' | 'runtime';
+    totalBytes: number | null;
+  };
+  provider: 'caul-llama.cpp' | 'caul-mlx';
+  runtime: {
+    assetName: string | null;
+    installed: boolean;
+    path: string | null;
+    supported: boolean;
+    version: string | null;
+  };
+  status: 'downloading' | 'missing' | 'ready';
+};
+
+export type SystemGpuProfile = {
+  available: boolean;
+  name: string | null;
+  unifiedMemory: boolean;
+  vendor: string;
+  vramGb: number;
+};
+
+export type SystemModelResources = {
+  accelerator: string;
+  arch: string;
+  cpuCores: number;
+  currentAvailableMemoryGb?: number;
+  freeMemoryGb: number;
+  gpu?: SystemGpuProfile;
+  localRuntimes?: {
+    caulLlamaCpp?: LocalLlmStatus;
+  };
+  modelMemoryGb?: number;
+  platform: string;
+  totalMemoryGb: number;
+};
+
+export type AiRecommendation = {
+  benchmark: ModelBenchmarkStatus;
+  localRuntime: LocalLlmStatus;
+  provider: AiProvider;
+  recommended: 'cloud' | 'local' | 'none';
+  recommendedModel: null | {
+    id: string;
+    name: string;
+    reason: string;
+    runtime: string;
+  };
+  resources: SystemModelResources;
+  status: 'ready';
+  summary: string;
+  viable: boolean;
+};
+
 export type TranscriptionRecommendation = {
   autoDownloadModel?: boolean;
   autoDownloadParakeet: boolean;
+  benchmark?: ModelBenchmarkStatus;
   ok: boolean;
-  recommended: 'cloud' | 'local-parakeet' | 'local-moonshine-tiny';
+  recommended: 'cloud' | 'local-parakeet' | 'local-moonshine-tiny' | 'none';
   recommendedModel?: {
     id: LocalTranscriptionModelId;
     name: string;
     reason: string;
   };
-  resources: {
-    accelerator: string;
-    arch: string;
-    cpuCores: number;
-    freeMemoryGb: number;
-    platform: string;
-    totalMemoryGb: number;
-  };
+  resources: SystemModelResources;
   score: {
     machineProbeIterationsPerMs: number;
     parakeet: number;
@@ -109,6 +201,11 @@ export type TranscriptionRecommendation = {
 };
 
 export type OnboardingStatus = {
+  ai: AiRecommendation;
+  autoUpdate: {
+    ai: boolean;
+    transcription: boolean;
+  };
   complete: boolean;
   completedAt: string | null;
   ok: boolean;
@@ -118,6 +215,19 @@ export type OnboardingStatus = {
   required: boolean;
   selectedLocalTranscriptionModel: LocalTranscriptionModelId | null;
   transcription: TranscriptionRecommendation;
+};
+
+export type ModelCatalogueRefreshResult = {
+  livePath?: string;
+  ok: boolean;
+  reviewedAt: string;
+  sourceReports: Array<{
+    detail: string;
+    ok: boolean;
+    source: string;
+    url: string;
+  }>;
+  status: OnboardingStatus;
 };
 
 export type UpdateFrequency = 'never' | 'startup' | 'hourly' | 'sixHours' | 'twelveHours' | 'daily' | 'weekly';
@@ -183,6 +293,18 @@ export type PromptTemplateState = {
   ok: boolean;
   selectedTemplateIds: string[];
   templates: PromptTemplate[];
+};
+
+export type PortablePreferences = {
+  autoCollapse?: boolean;
+  autoUpdateAiModel?: boolean;
+  autoUpdateTranscriptionModel?: boolean;
+  generalInstructions?: string;
+  historyEnabled?: boolean;
+  llmModel?: LlmModel;
+  llmReasoning?: LlmReasoning;
+  selectedAiProvider?: AiProvider;
+  selectedLocalTranscriptionModel?: LocalTranscriptionModelId;
 };
 
 export type PrivateOverlayHandleSize = 'small' | 'medium' | 'large';
@@ -263,11 +385,17 @@ export type PrivateOverlayBridge = {
 
 export type SettingsBridge = {
   ai?: {
+    cancelLocalDownload: () => Promise<LocalLlmStatus>;
     disconnect: () => Promise<PiStatus>;
+    downloadLocal: () => Promise<LocalLlmStatus>;
+    localStatus: () => Promise<LocalLlmStatus>;
+    onLocalStatus: (callback: (status: LocalLlmStatus) => void) => () => void;
     openChatGptLogin: () => Promise<{ ok: boolean; message?: string }>;
     openLogin: () => Promise<{ ok: boolean; message?: string }>;
     openModel: () => Promise<{ ok: boolean; message?: string }>;
+    refreshCatalogue: () => Promise<ModelCatalogueRefreshResult>;
     saveModel: (model: string) => Promise<PiStatus>;
+    setProvider: (provider: AiProvider) => Promise<OnboardingStatus>;
     status: () => Promise<PiStatus>;
   };
   onboarding?: {
@@ -275,6 +403,13 @@ export type SettingsBridge = {
     fitContent?: (size: { height: number; width?: number }) => Promise<{ ok: boolean }>;
     open: () => Promise<OnboardingStatus>;
     status: () => Promise<OnboardingStatus>;
+  };
+  history?: {
+    chooseFolder: () => Promise<HistoryStatus>;
+    openFolder: () => Promise<{ ok: boolean; message?: string }>;
+    saveSession: (update: HistorySessionUpdate) => Promise<{ ok: boolean; filePath?: string; message?: string }>;
+    setEnabled: (enabled: boolean) => Promise<HistoryStatus>;
+    status: () => Promise<HistoryStatus>;
   };
   parakeet?: {
     cancelDownload: () => Promise<ParakeetStatus>;
@@ -291,6 +426,10 @@ export type SettingsBridge = {
     reset?: () => Promise<PromptTemplateState>;
     save: (template: PromptTemplate) => Promise<PromptTemplateState>;
     setSelected: (ids: string[]) => Promise<PromptTemplateState>;
+  };
+  preferences?: {
+    load: (legacy?: PortablePreferences) => Promise<{ ok: boolean; preferences: PortablePreferences }>;
+    save: (update: PortablePreferences) => Promise<{ ok: boolean; preferences: PortablePreferences }>;
   };
   updates?: {
     checkNow: () => Promise<UpdateStatus>;

@@ -10,6 +10,7 @@ Caul should feel like a quiet tool that helps in the moment, not a complex meeti
 - Plain text instructions should be the main context mechanism before richer knowledge features.
 - Local-first storage and direct provider calls are preferred where practical.
 - Audio and transcript handling should be obvious, inspectable and easy to disable.
+- Transcript and AI response history should use ordinary browser-readable local files before databases or proprietary formats.
 
 ## Product Stance
 

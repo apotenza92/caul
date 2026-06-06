@@ -38,7 +38,7 @@ import {
   TooltipTrigger
 } from '@/components/ui/tooltip';
 import { Textarea } from '@/components/ui/textarea';
-import { ArrowUpIcon, CheckCircle2Icon, ChevronDownIcon, ChevronRightIcon, CircleAlertIcon, CopyIcon, DownloadIcon, FastForwardIcon, FileIcon, FileInputIcon, FileTextIcon, ImageIcon, InfoIcon, ListChecksIcon, LoaderCircleIcon, LogOutIcon, MicIcon, MicOffIcon, PaperclipIcon, PencilIcon, PlayIcon, PowerIcon, SearchIcon, SendIcon, SettingsIcon, SquareIcon, Trash2Icon, Volume2Icon, VolumeXIcon, XCircleIcon, XIcon } from 'lucide-react';
+import { ArrowUpIcon, CheckCircle2Icon, ChevronDownIcon, ChevronRightIcon, CircleAlertIcon, CopyIcon, DownloadIcon, FastForwardIcon, FileIcon, FileInputIcon, FileTextIcon, FolderOpenIcon, HistoryIcon, ImageIcon, InfoIcon, ListChecksIcon, LoaderCircleIcon, LogOutIcon, MicIcon, MicOffIcon, PaperclipIcon, PencilIcon, PlayIcon, PowerIcon, SearchIcon, SendIcon, SettingsIcon, SquareIcon, Trash2Icon, Volume2Icon, VolumeXIcon, XCircleIcon, XIcon } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import caulAppIconUrl from '../assets/icons/icon-rounded.png?url';
 import caulBetaAppIconUrl from '../assets/icons/beta/icon-rounded.png?url';
@@ -49,14 +49,20 @@ import {
   getPrivateOverlayBridge,
   getSettingsBridge,
   getTranscriptionBridge,
+  type AiRecommendation,
+  type AiProvider,
+  type HistoryStatus,
+  type LocalLlmStatus,
   type LocalTranscriptionModelId,
   type LlmModel,
   type LlmReasoning,
+  type ModelCatalogueRefreshResult,
   type OnboardingStatus,
   type ParakeetStatus,
   type PermissionItem,
   type PermissionsStatus,
   type PiStatus,
+  type PortablePreferences,
   type PrivateOverlayHandleSize,
   type PrivateOverlayState,
   type PromptTemplate,
@@ -90,6 +96,8 @@ const layout = {
   windowTitleBarSettingsButton: 'absolute top-1/2 z-[70] flex size-7 -translate-y-1/2 items-center justify-center rounded-md bg-transparent p-0 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
   windowTitleBarSettingsButtonMac: 'right-1.5',
   windowTitleBarSettingsButtonDesktop: 'left-1.5',
+  windowTitleBarHistoryButtonMac: 'right-9',
+  windowTitleBarHistoryButtonDesktop: 'left-9',
   windowTitleBarMacCloseButton: 'caul-mac-close-button absolute left-3 top-1/2 z-10 size-[14px] -translate-y-1/2 cursor-default rounded-full border-[0.5px] border-[#FB1626] bg-[#FF5C60] p-0 shadow-none hover:bg-[#FF5C60] active:bg-[#D94D4F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF5C60]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
   windowTitleBarMacQuitButton: 'caul-mac-quit-button absolute left-8 top-1/2 z-10 flex size-[14px] -translate-y-1/2 cursor-default items-center justify-center rounded-full border-[0.5px] border-[#9B48D6] bg-[#BF5AF2] p-0 text-[#4F167D] shadow-none hover:bg-[#BF5AF2] active:bg-[#9B48D6] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#BF5AF2]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background [&_svg]:size-2.5 [&_svg]:stroke-[3]',
   page: 'h-full min-h-0 overflow-hidden',
@@ -295,6 +303,9 @@ const llmReasoningLevels: Array<{ label: string; value: LlmReasoning }> = [
   { label: 'High', value: 'high' },
   { label: 'Extra high', value: 'xhigh' }
 ];
+
+const llmModelValues = new Set<LlmModel>(llmModels.map((model) => model.value));
+const llmReasoningValues = new Set<LlmReasoning>(llmReasoningLevels.map((reasoning) => reasoning.value));
 
 type AudioSource = {
   checked: boolean;
@@ -523,6 +534,10 @@ export function App() {
     void loadPromptTemplates();
   }, []);
 
+  useEffect(() => {
+    void loadPortablePreferences();
+  }, []);
+
   async function refreshPermissionsStatus() {
     const bridge = getPermissionsBridge();
 
@@ -583,6 +598,40 @@ export function App() {
       selectedTemplateIds: defaultSelectedPromptTemplateIds,
       templates: starterPromptTemplates
     });
+  }
+
+  async function loadPortablePreferences() {
+    const legacyPreferences: PortablePreferences = {
+      autoCollapse: readBooleanPreference(autoCollapsePreferenceKey, defaultAutoCollapse),
+      generalInstructions: window.localStorage.getItem(generalInstructionsPreferenceKey) ?? defaultGeneralInstructions
+    };
+
+    const result = await getSettingsBridge()?.preferences?.load(legacyPreferences);
+    const preferences = result?.preferences;
+
+    if (!preferences) {
+      return;
+    }
+
+    applyPortablePreferences(preferences);
+  }
+
+  function applyPortablePreferences(preferences: PortablePreferences) {
+    if (typeof preferences.autoCollapse === 'boolean') {
+      setAutoCollapseState(preferences.autoCollapse);
+    }
+
+    if (typeof preferences.generalInstructions === 'string') {
+      setGeneralInstructions(preferences.generalInstructions);
+    }
+
+    if (preferences.llmModel && llmModelValues.has(preferences.llmModel)) {
+      setLlmModel(preferences.llmModel);
+    }
+
+    if (preferences.llmReasoning && llmReasoningValues.has(preferences.llmReasoning)) {
+      setLlmReasoning(preferences.llmReasoning);
+    }
   }
 
   function applyPromptTemplateState(state: PromptTemplateState) {
@@ -696,17 +745,23 @@ export function App() {
 
   function setAutoCollapse(autoCollapse: boolean) {
     setAutoCollapseState(autoCollapse);
-    window.localStorage.setItem(autoCollapsePreferenceKey, autoCollapse ? '1' : '0');
+    void getSettingsBridge()?.preferences?.save({ autoCollapse });
   }
 
   function saveGeneralInstructions(instructions: string) {
     const nextInstructions = instructions;
     setGeneralInstructions(nextInstructions);
-    if (nextInstructions.trim()) {
-      window.localStorage.setItem(generalInstructionsPreferenceKey, nextInstructions);
-    } else {
-      window.localStorage.removeItem(generalInstructionsPreferenceKey);
-    }
+    void getSettingsBridge()?.preferences?.save({ generalInstructions: nextInstructions });
+  }
+
+  function saveLlmModel(model: LlmModel) {
+    setLlmModel(model);
+    void getSettingsBridge()?.preferences?.save({ llmModel: model });
+  }
+
+  function saveLlmReasoning(reasoning: LlmReasoning) {
+    setLlmReasoning(reasoning);
+    void getSettingsBridge()?.preferences?.save({ llmReasoning: reasoning });
   }
 
   function askAiFromTranscript() {
@@ -765,7 +820,6 @@ export function App() {
       return;
     }
 
-    window.localStorage.clear();
     setListenToMicrophone(defaultListenToMicrophone);
     setListenToSystemAudio(defaultListenToSystemAudio);
     setSendToAiWhenListeningStops(defaultSendToAiWhenListeningStops);
@@ -775,6 +829,13 @@ export function App() {
     setPromptTemplates((templates) => preserveCustomisedStarterPromptTemplates(templates));
     setSelectedPromptTemplateIds(defaultSelectedPromptTemplateIds);
     setGeneralInstructions(defaultGeneralInstructions);
+    window.localStorage.clear();
+    await getSettingsBridge()?.preferences?.save({
+      autoCollapse: defaultAutoCollapse,
+      generalInstructions: defaultGeneralInstructions,
+      llmModel: defaultLlmModel,
+      llmReasoning: defaultLlmReasoning
+    });
     const reset = await getSettingsBridge()?.reset();
     const promptTemplateState = await getSettingsBridge()?.promptTemplates?.list();
 
@@ -800,6 +861,10 @@ export function App() {
     setIsSettingsOpen(true);
   }
 
+  function openHistoryFolder() {
+    void getSettingsBridge()?.history?.openFolder();
+  }
+
   return (
     <div className={layout.overlayWindowOuter}>
       <main className={layout.main}>
@@ -808,6 +873,7 @@ export function App() {
           appTitle={appWindowTitle}
           isMac={isMac}
           isSettingsOpen={isSettingsOpen}
+          onOpenHistoryFolder={openHistoryFolder}
           onToggleSettings={() => {
             setSettingsSection('general');
             setIsSettingsOpen((isOpen) => !isOpen);
@@ -871,8 +937,8 @@ export function App() {
                 privateOverlayStatus={privateOverlayStatus}
                 resetSettings={resetSettings}
                 setAutoCollapse={setAutoCollapse}
-                setLlmModel={setLlmModel}
-                setLlmReasoning={setLlmReasoning}
+                setLlmModel={saveLlmModel}
+                setLlmReasoning={saveLlmReasoning}
               />
             ) : null}
           </form>
@@ -919,6 +985,8 @@ type OnboardingStep = 'permissions' | 'parakeet' | 'ai';
 
 function OnboardingSurface() {
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
+  const [localLlmStatus, setLocalLlmStatus] = useState<LocalLlmStatus | null>(null);
+  const [selectedAiProvider, setSelectedAiProviderState] = useState<AiProvider>('local');
   const [isChatGptSigningIn, setIsChatGptSigningIn] = useState(false);
   const permissionsRef = useRef<HTMLElement | null>(null);
   const parakeetRef = useRef<HTMLElement | null>(null);
@@ -940,6 +1008,9 @@ function OnboardingSurface() {
         parakeet: nextStatus
       } : current);
     });
+    const unsubscribeLocalLlm = getSettingsBridge()?.ai?.onLocalStatus?.((nextStatus) => {
+      setLocalLlmStatus(nextStatus);
+    });
 
     const smokeStep = (event: Event) => {
       const detail = (event as CustomEvent).detail;
@@ -960,6 +1031,7 @@ function OnboardingSurface() {
 
     return () => {
       unsubscribe?.();
+      unsubscribeLocalLlm?.();
       window.removeEventListener('caul:onboarding-smoke-step', smokeStep);
     };
   }, []);
@@ -985,6 +1057,8 @@ function OnboardingSurface() {
 
     if (nextStatus) {
       setStatus(nextStatus);
+      setSelectedAiProviderState(nextStatus.ai?.provider ?? 'local');
+      setLocalLlmStatus(getCaulLocalLlmStatus(nextStatus));
     }
   }
 
@@ -1023,12 +1097,48 @@ function OnboardingSurface() {
     await refresh();
   }
 
+  async function selectAiProvider(provider: AiProvider) {
+    setSelectedAiProviderState(provider);
+
+    try {
+      const nextStatus = await getSettingsBridge()?.ai?.setProvider?.(provider);
+      if (nextStatus) {
+        setStatus(nextStatus);
+      }
+    } catch (error) {
+      console.error('Failed to update AI provider:', error);
+    }
+  }
+
+  async function downloadLocalAi() {
+    try {
+      const nextStatus = await getSettingsBridge()?.ai?.downloadLocal?.();
+      if (nextStatus) {
+        setLocalLlmStatus(nextStatus);
+      }
+      await refresh();
+    } catch (error) {
+      console.error('Failed to download local AI:', error);
+    }
+  }
+
+  async function cancelLocalAiDownload() {
+    try {
+      const nextStatus = await getSettingsBridge()?.ai?.cancelLocalDownload?.();
+      if (nextStatus) {
+        setLocalLlmStatus(nextStatus);
+      }
+      await refresh();
+    } catch (error) {
+      console.error('Failed to cancel local AI download:', error);
+    }
+  }
+
   async function finish() {
     await getSettingsBridge()?.onboarding?.complete();
   }
 
   const missingItems = getMissingOnboardingItems(status);
-  const piReady = Boolean(status?.pi.connected);
   const visiblePermissions = getVisiblePermissionItems(status?.permissions);
   const onboardingPermissionRows = getOnboardingPermissionRows(visiblePermissions);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -1142,20 +1252,15 @@ function OnboardingSurface() {
         ) : null}
 
         <OnboardingPanel sectionRef={aiRef} title="AI Model">
-          <StatusRow
-            action={!piReady ? (
-              <div className="flex items-center gap-1.5">
-                <StatusPill ready={false}>{isChatGptSigningIn ? 'Opening browser' : 'Not signed in'}</StatusPill>
-                <Button disabled={isChatGptSigningIn} onClick={() => void signInWithChatGpt()} size="sm" type="button">
-                  {isChatGptSigningIn ? <LoaderCircleIcon className="mr-1.5 size-3.5 animate-spin" /> : null}
-                  {isChatGptSigningIn ? 'Opening' : 'Sign in'}
-                </Button>
-              </div>
-            ) : (
-              <StatusPill ready>Signed in</StatusPill>
-            )}
-            label="ChatGPT"
-            ready={piReady}
+          <OnboardingAiModelSetup
+            isChatGptSigningIn={isChatGptSigningIn}
+            localLlmStatus={localLlmStatus}
+            onCancelLocalDownload={() => void cancelLocalAiDownload()}
+            onDownloadLocalAi={() => void downloadLocalAi()}
+            onSelectProvider={(provider) => void selectAiProvider(provider)}
+            onSignInWithChatGpt={() => void signInWithChatGpt()}
+            selectedProvider={selectedAiProvider}
+            status={status}
           />
         </OnboardingPanel>
 
@@ -1230,10 +1335,6 @@ function getMissingOnboardingItems(status: OnboardingStatus | null) {
     missing.push('Local transcription');
   }
 
-  if (!status.pi.connected) {
-    missing.push('ChatGPT sign in');
-  }
-
   return missing;
 }
 
@@ -1287,6 +1388,201 @@ function StatusRow({
       {action ?? (ready ? <CheckCircle2Icon className="size-4 text-[#34424A]" /> : <XCircleIcon className="size-4 text-muted-foreground" />)}
     </div>
   );
+}
+
+function OnboardingAiModelSetup({
+  isChatGptSigningIn,
+  localLlmStatus,
+  onCancelLocalDownload,
+  onDownloadLocalAi,
+  onSelectProvider,
+  onSignInWithChatGpt,
+  selectedProvider,
+  status
+}: {
+  isChatGptSigningIn: boolean;
+  localLlmStatus: LocalLlmStatus | null;
+  onCancelLocalDownload: () => void;
+  onDownloadLocalAi: () => void;
+  onSelectProvider: (provider: AiProvider) => void;
+  onSignInWithChatGpt: () => void;
+  selectedProvider: AiProvider;
+  status: OnboardingStatus | null;
+}) {
+  const ai = status?.ai;
+  const piReady = Boolean(status?.pi.connected);
+  const localRecommendedModel = ai?.recommended === 'local' ? ai.recommendedModel : null;
+  const caulLocalStatus = localLlmStatus ?? getCaulLocalLlmStatus(status);
+  const isLocalDownloading = caulLocalStatus?.status === 'downloading';
+  const localModelInstalled = Boolean(
+    caulLocalStatus?.runtime.installed
+    && caulLocalStatus.model?.installed
+    && localRecommendedModel
+    && caulLocalStatus.model.id === localRecommendedModel.id
+  );
+  const localStatusValue = localModelInstalled
+    ? 'Ready'
+    : isLocalDownloading
+      ? 'Downloading'
+      : ai?.recommended === 'cloud'
+        ? 'This computer may be better with Cloud'
+        : 'Can be set up later';
+
+  return (
+    <div className="grid gap-2">
+      <div className="inline-flex w-full rounded-md border border-border bg-muted/30 p-0.5" role="tablist" aria-label="AI provider">
+        {(['local', 'cloud'] as AiProvider[]).map((provider) => (
+          <button
+            key={provider}
+            aria-label={provider === 'local' ? 'Local' : 'Cloud'}
+            aria-selected={selectedProvider === provider}
+            className={`inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-[6px] px-2 text-sm font-medium transition-colors ${selectedProvider === provider ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+            onClick={() => onSelectProvider(provider)}
+            role="tab"
+            type="button"
+          >
+            <span>{provider === 'local' ? 'Local' : 'Cloud'}</span>
+            {ai?.recommended === provider ? <RecommendedPill /> : null}
+          </button>
+        ))}
+      </div>
+
+      {selectedProvider === 'local' ? (
+        <div role="tabpanel" className="grid gap-1.5">
+          <p className="text-xs leading-5 text-muted-foreground">
+            Most private. Can be slower.
+          </p>
+          <StatusRow
+            action={localModelInstalled
+              ? <StatusPill ready>Ready</StatusPill>
+              : isLocalDownloading
+                ? <StatusPill ready={false}>Downloading</StatusPill>
+                : <StatusPill ready={false}>Setup later</StatusPill>}
+            label="Local AI"
+            ready={localModelInstalled}
+            value={localStatusValue}
+          />
+          {isLocalDownloading && caulLocalStatus?.progress ? (
+            <div aria-live="polite" className="text-xs tabular-nums text-muted-foreground">
+              {caulLocalStatus.progress.label}: {caulLocalStatus.progress.percent}%
+            </div>
+          ) : null}
+          {!localModelInstalled ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {isLocalDownloading ? (
+                <Button onClick={onCancelLocalDownload} size="sm" type="button" variant="outline">Cancel</Button>
+              ) : (
+                <Button disabled={!caulLocalStatus?.runtime.supported && Boolean(caulLocalStatus)} onClick={onDownloadLocalAi} size="sm" type="button">
+                  Download local AI
+                </Button>
+              )}
+            </div>
+          ) : null}
+          {caulLocalStatus?.runtime.supported === false ? (
+            <p className="text-xs leading-5 text-muted-foreground">
+              Local AI is not available on this computer yet.
+            </p>
+          ) : null}
+        </div>
+      ) : (
+        <div role="tabpanel" className="grid gap-1.5">
+          <p className="text-xs leading-5 text-muted-foreground">
+            Faster answers. Sends prompts to ChatGPT.
+          </p>
+          <StatusRow
+            action={!piReady ? (
+              <div className="flex items-center gap-1.5">
+                <StatusPill ready={false}>{isChatGptSigningIn ? 'Opening browser' : 'Optional'}</StatusPill>
+                <Button disabled={isChatGptSigningIn} onClick={onSignInWithChatGpt} size="sm" type="button">
+                  {isChatGptSigningIn ? <LoaderCircleIcon className="mr-1.5 size-3.5 animate-spin" /> : null}
+                  {isChatGptSigningIn ? 'Opening' : 'Sign in'}
+                </Button>
+              </div>
+            ) : (
+              <StatusPill ready>Signed in</StatusPill>
+            )}
+            label="ChatGPT"
+            ready={piReady}
+            value={piReady ? 'Ready' : 'Optional'}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ModelAutoUpdateCheckbox({
+  checked,
+  description,
+  id,
+  onCheckedChange
+}: {
+  checked: boolean;
+  description: string;
+  id: string;
+  onCheckedChange: (enabled: boolean) => void;
+}) {
+  return (
+    <Field className="mt-1 w-auto self-start" orientation="horizontal">
+      <Checkbox
+        id={id}
+        checked={checked}
+        onCheckedChange={(nextChecked) => onCheckedChange(nextChecked === true)}
+      />
+      <div className="grid gap-0.5">
+        <FieldLabel htmlFor={id}>Auto update model</FieldLabel>
+        <p className="max-w-2xl text-xs leading-5 text-muted-foreground">
+          {description}
+        </p>
+      </div>
+    </Field>
+  );
+}
+
+function RecommendedPill() {
+  return (
+    <span
+      aria-hidden="true"
+      className="pointer-events-none shrink-0 rounded-full border border-amber-500/35 bg-amber-50 px-1.5 py-0 text-[10px] font-semibold leading-4 text-amber-800 shadow-sm dark:border-amber-400/35 dark:bg-amber-400/10 dark:text-amber-300"
+    >
+      Recommended
+    </span>
+  );
+}
+
+function formatReviewedDate(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
+  });
+}
+
+function formatCatalogueRefreshStatus(result: ModelCatalogueRefreshResult | null) {
+  if (!result) {
+    return 'Model recommendations refresh on your app update schedule when auto update is on. You can also check now.';
+  }
+
+  const failedSources = result.sourceReports.filter((report) => !report.ok).length;
+  const checkedSources = result.sourceReports.length;
+  const sourceText = checkedSources === 1 ? '1 source checked' : `${checkedSources} sources checked`;
+  const failureText = failedSources > 0
+    ? `, ${failedSources} could not be reached`
+    : '';
+
+  return `Model list refreshed ${formatReviewedDate(result.reviewedAt)}. ${sourceText}${failureText}.`;
+}
+
+function getCaulLocalLlmStatus(status: OnboardingStatus | null): LocalLlmStatus | null {
+  const runtime = status?.ai.resources.localRuntimes?.caulLlamaCpp;
+
+  return runtime?.provider === 'caul-llama.cpp' || runtime?.provider === 'caul-mlx' ? runtime : null;
 }
 
 function OnboardingTranscriptionStatus({ status }: { status: OnboardingStatus | null }) {
@@ -1917,11 +2213,13 @@ function PrivateOverlayWindowTitleBar({
   appTitle,
   isMac,
   isSettingsOpen,
+  onOpenHistoryFolder,
   onToggleSettings
 }: {
   appTitle: string;
   isMac: boolean;
   isSettingsOpen: boolean;
+  onOpenHistoryFolder: () => void;
   onToggleSettings: () => void;
 }) {
   const [isQuitConfirmationOpen, setIsQuitConfirmationOpen] = useState(false);
@@ -2118,6 +2416,19 @@ function PrivateOverlayWindowTitleBar({
             </Popover>
           </>
         )}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              aria-label="Open history folder"
+              className={`${layout.windowTitleBarSettingsButton} ${isMac ? layout.windowTitleBarHistoryButtonMac : layout.windowTitleBarHistoryButtonDesktop}`}
+              onClick={onOpenHistoryFolder}
+              type="button"
+            >
+              <HistoryIcon className="mx-auto size-4" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Open history folder</TooltipContent>
+        </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
             <button
@@ -4864,9 +5175,8 @@ function TooltipButton({
 }) {
   const [isTooltipFlashed, setIsTooltipFlashed] = useState(false);
   const flashTimeoutRef = useRef<number | null>(null);
-  const buttonTitle = props.disabled
-    ? undefined
-    : typeof tooltip === 'string' && typeof props.title === 'undefined'
+  const shouldUseNativeTitle = props['aria-disabled'] === true || props['aria-disabled'] === 'true';
+  const buttonTitle = shouldUseNativeTitle && typeof tooltip === 'string' && typeof props.title === 'undefined'
     ? tooltip
     : props.title;
   const button = <Button {...props} title={buttonTitle} onClick={handleClick} />;
@@ -5255,7 +5565,12 @@ function SettingsPage({
   const [isResetDialogOpen, setIsResetDialogOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection);
   const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatus | null>(null);
+  const [localLlmStatus, setLocalLlmStatus] = useState<LocalLlmStatus | null>(null);
+  const [catalogueRefreshResult, setCatalogueRefreshResult] = useState<ModelCatalogueRefreshResult | null>(null);
+  const [isRefreshingCatalogue, setIsRefreshingCatalogue] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [historyStatus, setHistoryStatus] = useState<HistoryStatus | null>(null);
+  const [selectedAiProvider, setSelectedAiProviderState] = useState<AiProvider>('local');
   const [selectedTranscriptionModelId, setSelectedTranscriptionModelId] = useState<LocalTranscriptionModelId>('parakeet');
   const hasInitialisedTranscriptionModelRef = useRef(false);
   const autoSelectingReadyModelRef = useRef<LocalTranscriptionModelId | null>(null);
@@ -5288,9 +5603,13 @@ function SettingsPage({
         parakeet: nextStatus
       } : current);
     });
+    const unsubscribeLocalLlm = getSettingsBridge()?.ai?.onLocalStatus?.((nextStatus) => {
+      setLocalLlmStatus(nextStatus);
+    });
 
     return () => {
       unsubscribe?.();
+      unsubscribeLocalLlm?.();
     };
   }, []);
 
@@ -5315,6 +5634,10 @@ function SettingsPage({
       isMounted = false;
       unsubscribe?.();
     };
+  }, []);
+
+  useEffect(() => {
+    void refreshHistoryStatus();
   }, []);
 
   useEffect(() => {
@@ -5348,6 +5671,8 @@ function SettingsPage({
     }
 
     setOnboardingStatus(nextStatus);
+    setSelectedAiProviderState(nextStatus.ai?.provider ?? 'local');
+    setLocalLlmStatus(getCaulLocalLlmStatus(nextStatus));
 
     if (!hasInitialisedTranscriptionModelRef.current) {
       hasInitialisedTranscriptionModelRef.current = true;
@@ -5361,6 +5686,110 @@ function SettingsPage({
       await refreshOnboardingStatus();
     } catch (error) {
       console.error('Failed to download transcription model:', error);
+    }
+  }
+
+  async function selectAiProvider(provider: AiProvider) {
+    setSelectedAiProviderState(provider);
+
+    try {
+      const nextStatus = await getSettingsBridge()?.ai?.setProvider?.(provider);
+      if (nextStatus) {
+        setOnboardingStatus(nextStatus);
+      }
+    } catch (error) {
+      console.error('Failed to update AI provider:', error);
+    }
+  }
+
+  async function downloadLocalAi() {
+    try {
+      const nextStatus = await getSettingsBridge()?.ai?.downloadLocal?.();
+      if (nextStatus) {
+        setLocalLlmStatus(nextStatus);
+      }
+      await refreshOnboardingStatus();
+    } catch (error) {
+      console.error('Failed to download local AI:', error);
+    }
+  }
+
+  async function setAutoUpdateModel(kind: 'ai' | 'transcription', enabled: boolean) {
+    const update: PortablePreferences = kind === 'ai'
+      ? { autoUpdateAiModel: enabled }
+      : { autoUpdateTranscriptionModel: enabled };
+
+    try {
+      await getSettingsBridge()?.preferences?.save(update);
+      await refreshOnboardingStatus();
+    } catch (error) {
+      console.error('Failed to update model auto-update setting:', error);
+    }
+  }
+
+  async function refreshModelCatalogue() {
+    setIsRefreshingCatalogue(true);
+
+    try {
+      const nextResult = await getSettingsBridge()?.ai?.refreshCatalogue?.();
+      if (!nextResult) {
+        return;
+      }
+
+      setCatalogueRefreshResult(nextResult);
+      setOnboardingStatus(nextResult.status);
+      setSelectedAiProviderState(nextResult.status.ai?.provider ?? 'local');
+      setLocalLlmStatus(getCaulLocalLlmStatus(nextResult.status));
+      setSelectedTranscriptionModelId(getInitialTranscriptionModelId(nextResult.status));
+    } catch (error) {
+      console.error('Failed to refresh model catalogue:', error);
+    } finally {
+      setIsRefreshingCatalogue(false);
+    }
+  }
+
+  async function cancelLocalAiDownload() {
+    try {
+      const nextStatus = await getSettingsBridge()?.ai?.cancelLocalDownload?.();
+      if (nextStatus) {
+        setLocalLlmStatus(nextStatus);
+      }
+      await refreshOnboardingStatus();
+    } catch (error) {
+      console.error('Failed to cancel local AI download:', error);
+    }
+  }
+
+  async function refreshHistoryStatus() {
+    try {
+      const nextStatus = await getSettingsBridge()?.history?.status();
+      if (nextStatus) {
+        setHistoryStatus(nextStatus);
+      }
+    } catch (error) {
+      console.error('Failed to load history status:', error);
+    }
+  }
+
+  async function setHistoryEnabled(enabled: boolean) {
+    try {
+      const nextStatus = await getSettingsBridge()?.history?.setEnabled(enabled);
+      if (nextStatus) {
+        setHistoryStatus(nextStatus);
+      }
+    } catch (error) {
+      console.error('Failed to update history setting:', error);
+    }
+  }
+
+  async function chooseHistoryFolder() {
+    try {
+      const nextStatus = await getSettingsBridge()?.history?.chooseFolder();
+      if (nextStatus) {
+        setHistoryStatus(nextStatus);
+      }
+    } catch (error) {
+      console.error('Failed to choose history folder:', error);
     }
   }
 
@@ -5439,7 +5868,7 @@ function SettingsPage({
                 </FieldSet>
 
                 <FieldSet>
-                  <FieldLegend>History</FieldLegend>
+                  <FieldLegend>Caul folder</FieldLegend>
                   <FieldGroup>
                     <Field className="w-auto self-start" orientation="horizontal">
                       <Checkbox
@@ -5449,6 +5878,43 @@ function SettingsPage({
                       />
                       <FieldLabel htmlFor="auto-collapse">Auto-collapse</FieldLabel>
                     </Field>
+                    <Field className="w-auto self-start" orientation="horizontal">
+                      <Checkbox
+                        id="save-html-history"
+                        checked={historyStatus?.enabled ?? true}
+                        onCheckedChange={(checked) => void setHistoryEnabled(checked === true)}
+                      />
+                      <FieldLabel htmlFor="save-html-history">Save HTML history</FieldLabel>
+                    </Field>
+                    <div className="flex max-w-2xl flex-col items-start gap-2">
+                      <div className="max-w-full rounded-md border bg-muted/30 px-2 py-1 font-mono text-xs text-muted-foreground">
+                        {historyStatus?.folder ?? 'Loading history folder...'}
+                      </div>
+                      {historyStatus?.message ? (
+                        <p className={layout.settingsDescription}>{historyStatus.message}</p>
+                      ) : null}
+                      <div className="flex flex-wrap gap-2">
+                        <TooltipButton
+                          onClick={() => void getSettingsBridge()?.history?.openFolder()}
+                          size="default"
+                          tooltip="Open Caul folder"
+                          type="button"
+                          variant="outline"
+                        >
+                          <FolderOpenIcon />
+                          Open Caul Folder
+                        </TooltipButton>
+                        <TooltipButton
+                          onClick={() => void chooseHistoryFolder()}
+                          size="default"
+                          tooltip="Choose a different history folder"
+                          type="button"
+                          variant="outline"
+                        >
+                          Change Folder
+                        </TooltipButton>
+                      </div>
+                    </div>
                   </FieldGroup>
                 </FieldSet>
 
@@ -5581,6 +6047,28 @@ function SettingsPage({
             {activeSection === 'ai' ? (
               <FieldGroup>
                 <FieldSet>
+                  <FieldLegend>Model list</FieldLegend>
+                  <FieldGroup>
+                    <div className="flex max-w-2xl flex-col items-start gap-2">
+                      <p className={layout.settingsDescription} aria-live="polite">
+                        {formatCatalogueRefreshStatus(catalogueRefreshResult)}
+                      </p>
+                      <TooltipButton
+                        disabled={isListening || isBusy || isRefreshingCatalogue}
+                        onClick={() => void refreshModelCatalogue()}
+                        size="default"
+                        tooltip="Refresh local model recommendations"
+                        type="button"
+                        variant="outline"
+                      >
+                        {isRefreshingCatalogue ? <LoaderCircleIcon className="animate-spin" /> : <DownloadIcon />}
+                        Refresh Model List
+                      </TooltipButton>
+                    </div>
+                  </FieldGroup>
+                </FieldSet>
+
+                <FieldSet>
                   <FieldLegend>Transcription model</FieldLegend>
                   <FieldGroup>
                     <TranscriptionModelRow
@@ -5590,61 +6078,124 @@ function SettingsPage({
                       selectedModelId={selectedTranscriptionModelId}
                       status={onboardingStatus}
                     />
+                    <ModelAutoUpdateCheckbox
+                      checked={onboardingStatus?.autoUpdate?.transcription ?? true}
+                      description="When enabled, Caul checks for better supported transcription models on your app update schedule or when you refresh the model list. It never changes models during a call."
+                      id="settings-auto-update-transcription-model"
+                      onCheckedChange={(enabled) => void setAutoUpdateModel('transcription', enabled)}
+                    />
                   </FieldGroup>
                 </FieldSet>
 
                 <FieldSet>
                   <FieldLegend>AI model</FieldLegend>
-                  <FieldGroup className={layout.settingsInlineGroup}>
-                    <Field className="w-auto">
-                      <FieldLabel htmlFor="llm-model">Model</FieldLabel>
-                      <Select
-                        disabled={isListening || isBusy}
-                        name="llm-model"
-                        value={llmModel}
-                        onValueChange={(value) => setLlmModel(value as LlmModel)}
-                      >
-                        <div>
-                          <SelectTrigger id="llm-model" className="w-[9.5rem]">
-                            <SelectValue />
-                          </SelectTrigger>
-                        </div>
-                        <SelectContent>
-                          <SelectGroup>
-                            {llmModels.map((model) => (
-                              <SelectItem key={model.value} value={model.value}>
-                                {model.label}
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        </SelectContent>
-                      </Select>
-                    </Field>
+                  <FieldGroup>
+                    <div className="inline-flex w-full max-w-sm rounded-md border border-border bg-muted/30 p-0.5" role="tablist" aria-label="AI provider">
+                      {(['local', 'cloud'] as AiProvider[]).map((provider) => (
+                        <button
+                          key={provider}
+                          aria-selected={selectedAiProvider === provider}
+                          className={`h-8 flex-1 rounded-[6px] px-3 text-sm font-medium transition-colors ${selectedAiProvider === provider ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                          disabled={isListening || isBusy}
+                          onClick={() => void selectAiProvider(provider)}
+                          role="tab"
+                          type="button"
+                        >
+                          {provider === 'local' ? 'Local' : 'Cloud'}
+                        </button>
+                      ))}
+                    </div>
 
-                    <Field className="w-auto">
-                      <FieldLabel htmlFor="llm-reasoning">Reasoning</FieldLabel>
-                      <Select
-                        disabled={isListening || isBusy}
-                        name="llm-reasoning"
-                        value={llmReasoning}
-                        onValueChange={(value) => setLlmReasoning(value as LlmReasoning)}
-                      >
-                        <div>
-                          <SelectTrigger id="llm-reasoning">
-                            <SelectValue />
-                          </SelectTrigger>
+                    {selectedAiProvider === 'local' ? (
+                      <div className="grid max-w-2xl gap-1 text-sm">
+                        <div className="font-medium">
+                          {onboardingStatus?.ai.recommended === 'local' ? onboardingStatus.ai.recommendedModel?.name : 'No local AI response model is ready'}
                         </div>
-                        <SelectContent>
-                          <SelectGroup>
-                            {llmReasoningLevels.map((reasoning) => (
-                              <SelectItem key={reasoning.value} value={reasoning.value}>
-                                {reasoning.label}
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        </SelectContent>
-                      </Select>
-                    </Field>
+                        <p className={layout.settingsDescription}>
+                          {onboardingStatus?.ai.recommended === 'local' ? onboardingStatus.ai.recommendedModel?.reason : 'Local AI keeps prompts on this machine when a supported runtime and model are available.'}
+                        </p>
+                        <p className={layout.settingsDescription}>
+                          Local runtime: {localLlmStatus?.runtime.installed ? 'installed' : 'not installed'}. Model: {localLlmStatus?.model?.installed ? 'installed' : 'not installed'}.
+                        </p>
+                        {localLlmStatus?.status === 'downloading' && localLlmStatus.progress ? (
+                          <p className={layout.settingsDescription} aria-live="polite">
+                            {localLlmStatus.progress.label}: {localLlmStatus.progress.percent}%
+                          </p>
+                        ) : null}
+                        <div className="flex flex-wrap gap-2">
+                          {localLlmStatus?.status === 'downloading' ? (
+                            <Button onClick={() => void cancelLocalAiDownload()} size="sm" type="button" variant="outline">Cancel</Button>
+                          ) : localLlmStatus?.status !== 'ready' ? (
+                            <Button disabled={localLlmStatus?.runtime.supported === false} onClick={() => void downloadLocalAi()} size="sm" type="button">
+                              Download local AI
+                            </Button>
+                          ) : (
+                            <StatusPill ready>Ready</StatusPill>
+                          )}
+                        </div>
+                        <p className={layout.settingsDescription}>
+                          Source: {onboardingStatus?.ai.benchmark.recommendationSource ?? 'bundled benchmark catalogue'}.
+                        </p>
+                        <ModelAutoUpdateCheckbox
+                          checked={onboardingStatus?.autoUpdate?.ai ?? true}
+                          description="When enabled, Caul checks for better supported AI models on your app update schedule or when you refresh the model list. It never changes models during a call."
+                          id="settings-auto-update-ai-model"
+                          onCheckedChange={(enabled) => void setAutoUpdateModel('ai', enabled)}
+                        />
+                      </div>
+                    ) : (
+                      <FieldGroup className={layout.settingsInlineGroup}>
+                        <Field className="w-auto">
+                          <FieldLabel htmlFor="llm-model">Model</FieldLabel>
+                          <Select
+                            disabled={isListening || isBusy}
+                            name="llm-model"
+                            value={llmModel}
+                            onValueChange={(value) => setLlmModel(value as LlmModel)}
+                          >
+                            <div>
+                              <SelectTrigger id="llm-model" className="w-[9.5rem]">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </div>
+                            <SelectContent>
+                              <SelectGroup>
+                                {llmModels.map((model) => (
+                                  <SelectItem key={model.value} value={model.value}>
+                                    {model.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectGroup>
+                            </SelectContent>
+                          </Select>
+                        </Field>
+
+                        <Field className="w-auto">
+                          <FieldLabel htmlFor="llm-reasoning">Reasoning</FieldLabel>
+                          <Select
+                            disabled={isListening || isBusy}
+                            name="llm-reasoning"
+                            value={llmReasoning}
+                            onValueChange={(value) => setLlmReasoning(value as LlmReasoning)}
+                          >
+                            <div>
+                              <SelectTrigger id="llm-reasoning">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </div>
+                            <SelectContent>
+                              <SelectGroup>
+                                {llmReasoningLevels.map((reasoning) => (
+                                  <SelectItem key={reasoning.value} value={reasoning.value}>
+                                    {reasoning.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectGroup>
+                            </SelectContent>
+                          </Select>
+                        </Field>
+                      </FieldGroup>
+                    )}
                   </FieldGroup>
                 </FieldSet>
               </FieldGroup>

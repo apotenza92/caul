@@ -16,6 +16,16 @@ const {
 const { getPreferredOverlaySizeForEdge } = require('./privateOverlayGeometry.cjs');
 const { createStopFlushController } = require('./transcriptionStopFlush.cjs');
 const { createUpdaterService } = require('./updater.cjs');
+const { createHistoryService } = require('./history.cjs');
+const { createLocalLlmService } = require('./localLlm.cjs');
+const { createProfileService } = require('./profile.cjs');
+const {
+  buildSystemProfile,
+  loadBestModelCatalogue,
+  recommendFromCatalogue,
+  writeLiveModelCatalogue
+} = require('./modelRecommendation.cjs');
+const { refreshModelCatalogue } = require('./modelCatalogueRefresh.cjs');
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const smokeExitMs = Number(process.env.CAUL_SMOKE_EXIT_MS ?? 0);
@@ -96,6 +106,13 @@ const windowStateFileName = 'window-state.json';
 const privateOverlayStateFileName = 'private-overlay-state.json';
 const promptTemplatesFileName = 'prompt-templates.json';
 const setupStateFileName = 'setup-state.json';
+const portableLlmModels = new Set([
+  'openai-codex/gpt-5.2',
+  'openai-codex/gpt-5.4',
+  'openai-codex/gpt-5.4-mini',
+  'openai-codex/gpt-5.5'
+]);
+const portableLlmReasoningLevels = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh']);
 const transcriptionRecommendationTtlMs = 7 * 24 * 60 * 60 * 1000;
 const parakeetArchiveUrl = 'https://blob.handy.computer/parakeet-v3-int8.tar.gz';
 const parakeetModelDirName = 'parakeet-tdt-0.6b-v3-int8';
@@ -103,6 +120,8 @@ const moonshineTinyArchiveUrl = 'https://blob.handy.computer/moonshine-tiny-stre
 const moonshineTinyModelDirName = 'moonshine-tiny-streaming-en';
 const defaultPiChatGptProvider = 'openai-codex';
 const defaultPiChatGptModel = 'openai-codex/gpt-5.5';
+const defaultAiProvider = 'local';
+const onboardingModelCatalogueRefreshTimeoutMs = Number(process.env.CAUL_ONBOARDING_MODEL_CATALOGUE_REFRESH_TIMEOUT_MS ?? 8000);
 const parakeetRequiredFiles = [
   'encoder-model.int8.onnx',
   'decoder_joint-model.int8.onnx',
@@ -673,6 +692,7 @@ function getUpdaterService() {
       appName: getAppDisplayName(),
       forceEnabled: process.env.CAUL_FORCE_UPDATE_CHECKS === '1',
       isDev,
+      onAfterSuccessfulCheck: refreshLiveModelCatalogueAfterUpdateCheck,
       onBeforeInstallDownloadedUpdate: prepareForDownloadedUpdateInstall
     });
   }
@@ -971,7 +991,7 @@ function normalisePromptTemplateState(value) {
   };
 }
 
-function readPromptTemplateState() {
+function readLegacyPromptTemplateStateFromUserData() {
   try {
     return normalisePromptTemplateState(JSON.parse(fsSync.readFileSync(getPromptTemplatesPath(), 'utf8')));
   } catch {
@@ -979,15 +999,17 @@ function readPromptTemplateState() {
   }
 }
 
+function readPromptTemplateState() {
+  return normalisePromptTemplateState(getProfileService().readPrompts());
+}
+
 function writePromptTemplateState(state) {
   const nextState = normalisePromptTemplateState(state);
-  fsSync.mkdirSync(app.getPath('userData'), { recursive: true });
-  fsSync.writeFileSync(getPromptTemplatesPath(), `${JSON.stringify({
+
+  return normalisePromptTemplateState(getProfileService().writePrompts({
     selectedTemplateIds: nextState.selectedTemplateIds,
     templates: nextState.templates
-  }, null, 2)}\n`);
-
-  return nextState;
+  }));
 }
 
 function savePromptTemplate(template) {
@@ -1072,6 +1094,172 @@ function writeSetupState(update) {
   fsSync.writeFileSync(getSetupStatePath(), `${JSON.stringify(state, null, 2)}\n`);
 
   return state;
+}
+
+function getDefaultCaulFolder() {
+  return path.join(app.getPath('documents'), 'Caul');
+}
+
+function getProfileService() {
+  if (!profileService) {
+    profileService = createProfileService({
+      getDefaultFolder: getDefaultCaulFolder,
+      normalisePrompts: normalisePortablePromptTemplateStorage,
+      normaliseSettings: normalisePortableSettings,
+      readLegacyPrompts: readLegacyPromptTemplateStateFromUserData,
+      readLegacySettings: readLegacyPortableSettings,
+      readPointerState: readSetupState,
+      writePointerState: writeSetupState
+    });
+  }
+
+  return profileService;
+}
+
+function normalisePortableSettings(value) {
+  if (!value || typeof value !== 'object') {
+    return {};
+  }
+
+  const settings = {};
+
+  if (typeof value.historyEnabled === 'boolean') {
+    settings.historyEnabled = value.historyEnabled;
+  }
+
+  if (value.selectedLocalTranscriptionModel === 'parakeet' || value.selectedLocalTranscriptionModel === 'moonshine-tiny') {
+    settings.selectedLocalTranscriptionModel = value.selectedLocalTranscriptionModel;
+  }
+
+  if (value.selectedAiProvider === 'cloud' || value.selectedAiProvider === 'local') {
+    settings.selectedAiProvider = value.selectedAiProvider;
+  }
+
+  if (portableLlmModels.has(value.llmModel)) {
+    settings.llmModel = value.llmModel;
+  }
+
+  if (portableLlmReasoningLevels.has(value.llmReasoning)) {
+    settings.llmReasoning = value.llmReasoning;
+  }
+
+  if (typeof value.generalInstructions === 'string') {
+    settings.generalInstructions = value.generalInstructions;
+  }
+
+  if (typeof value.autoCollapse === 'boolean') {
+    settings.autoCollapse = value.autoCollapse;
+  }
+
+  if (typeof value.autoUpdateTranscriptionModel === 'boolean') {
+    settings.autoUpdateTranscriptionModel = value.autoUpdateTranscriptionModel;
+  }
+
+  if (typeof value.autoUpdateAiModel === 'boolean') {
+    settings.autoUpdateAiModel = value.autoUpdateAiModel;
+  }
+
+  return settings;
+}
+
+function normalisePortablePromptTemplateStorage(value) {
+  const state = normalisePromptTemplateState(value);
+
+  return {
+    selectedTemplateIds: state.selectedTemplateIds,
+    templates: state.templates
+  };
+}
+
+function readLegacyPortableSettings() {
+  const state = readSetupState();
+  const settings = {};
+
+  if (typeof state.historyEnabled === 'boolean') {
+    settings.historyEnabled = state.historyEnabled;
+  }
+
+  if (state.selectedLocalTranscriptionModel === 'parakeet' || state.selectedLocalTranscriptionModel === 'moonshine-tiny') {
+    settings.selectedLocalTranscriptionModel = state.selectedLocalTranscriptionModel;
+  }
+
+  if (state.selectedAiProvider === 'cloud' || state.selectedAiProvider === 'local') {
+    settings.selectedAiProvider = state.selectedAiProvider;
+  }
+
+  return settings;
+}
+
+function readProfileSettings() {
+  return getProfileService().readSettings();
+}
+
+function updateProfileSettings(update) {
+  return getProfileService().updateSettings(update);
+}
+
+function readHistoryState() {
+  const settings = readProfileSettings();
+
+  return {
+    ...readSetupState(),
+    ...(typeof settings.historyEnabled === 'boolean' ? { historyEnabled: settings.historyEnabled } : {})
+  };
+}
+
+function writeHistoryState(update) {
+  const privateUpdate = { ...update };
+
+  if (Object.hasOwn(privateUpdate, 'historyEnabled')) {
+    updateProfileSettings({ historyEnabled: Boolean(privateUpdate.historyEnabled) });
+    delete privateUpdate.historyEnabled;
+  }
+
+  if (Object.keys(privateUpdate).length > 0) {
+    writeSetupState(privateUpdate);
+  }
+
+  return readHistoryState();
+}
+
+function loadPortablePreferences(request) {
+  const current = readProfileSettings();
+  const legacy = normalisePortableSettings(request?.legacy);
+  const merged = {
+    ...legacy,
+    ...current
+  };
+
+  if (JSON.stringify(merged) !== JSON.stringify(current)) {
+    updateProfileSettings(merged);
+  }
+
+  return {
+    ok: true,
+    preferences: readProfileSettings()
+  };
+}
+
+function savePortablePreferences(update) {
+  return {
+    ok: true,
+    preferences: updateProfileSettings(update)
+  };
+}
+
+function getHistoryService() {
+  if (!historyService) {
+    historyService = createHistoryService({
+      dialog,
+      getDocumentsPath: () => app.getPath('documents'),
+      moveProfileFiles: (fromFolder, toFolder) => getProfileService().movePortableFiles(fromFolder, toFolder),
+      openPath: (folder) => shell.openPath(folder),
+      readState: readHistoryState,
+      writeState: writeHistoryState
+    });
+  }
+
+  return historyService;
 }
 
 function seedPackagedOnboardingCompletionSmokeState() {
@@ -2118,6 +2306,9 @@ let persistentPiRpcBridge = null;
 let backupPersistentPiRpcBridge = null;
 let packagedLaunchSmokeCompleted = false;
 let llmWarmStatus = isPiLlmBridgeEnabled() ? 'warming' : 'disabled';
+let historyService = null;
+let localLlmService = null;
+let profileService = null;
 
 function isPiLlmBridgeEnabled() {
   if (rendererRealLlmSmoke) {
@@ -2133,7 +2324,7 @@ function isPiLlmBridgeEnabled() {
 
 function assertPiLlmBridgeEnabled() {
   if (!isPiLlmBridgeEnabled()) {
-    throw new Error('AI is not configured yet. Open onboarding or Settings to sign in and choose a Pi model.');
+    throw new Error('AI is not configured yet. Open onboarding or Settings to sign in with ChatGPT or set up local AI.');
   }
 }
 
@@ -2543,7 +2734,7 @@ function normaliseLocalTranscriptionModelId(modelId) {
 }
 
 function getSelectedLocalTranscriptionModelId() {
-  const selectedModel = readSetupState().selectedLocalTranscriptionModel;
+  const selectedModel = readProfileSettings().selectedLocalTranscriptionModel;
 
   return selectedModel === 'parakeet' || selectedModel === 'moonshine-tiny'
     ? selectedModel
@@ -2558,7 +2749,7 @@ function getPreferredLocalModelId() {
   }
 
   const recommendation = getTranscriptionRecommendation();
-  return recommendation.recommendedModel?.id ?? (recommendation.recommended === 'local-parakeet' ? 'parakeet' : 'moonshine-tiny');
+  return recommendation.recommendedModel?.id ?? 'parakeet';
 }
 
 function getParakeetStatus(modelId = getPreferredLocalModelId()) {
@@ -2590,7 +2781,7 @@ function getParakeetStatus(modelId = getPreferredLocalModelId()) {
 function setPreferredLocalTranscriptionModel(modelId) {
   const selectedLocalTranscriptionModel = normaliseLocalTranscriptionModelId(modelId);
 
-  writeSetupState({ selectedLocalTranscriptionModel });
+  updateProfileSettings({ selectedLocalTranscriptionModel });
   emitParakeetStatus();
 
   return getParakeetStatus(selectedLocalTranscriptionModel);
@@ -2616,11 +2807,14 @@ function getTranscriptionRecommendation() {
 }
 
 function buildTranscriptionRecommendation() {
-  const cpuCores = Math.max(1, os.cpus().length);
-  const totalMemoryGb = Math.round((os.totalmem() / 1024 / 1024 / 1024) * 10) / 10;
-  const freeMemoryGb = Math.round((os.freemem() / 1024 / 1024 / 1024) * 10) / 10;
+  const profile = getLocalSystemProfile();
+  const catalogue = getModelCatalogue();
+  const benchmarkRecommendation = recommendFromCatalogue(catalogue, profile);
+  const cpuCores = profile.cpuCores;
+  const totalMemoryGb = profile.totalMemoryGb;
+  const freeMemoryGb = profile.freeMemoryGb;
   const probe = runShortMachineProbe();
-  const isAppleSilicon = process.platform === 'darwin' && process.arch === 'arm64';
+  const isAppleSilicon = profile.accelerator === 'apple-silicon';
   const parakeetScore = Math.round(
     (totalMemoryGb * 5)
     + (cpuCores * 7)
@@ -2632,38 +2826,36 @@ function buildTranscriptionRecommendation() {
     + (cpuCores * 10)
     + Math.min(45, probe.score)
   );
-  const parakeetLooksGood = totalMemoryGb >= 8 && cpuCores >= 4 && parakeetScore >= 95;
-  const moonshineLooksGood = totalMemoryGb >= 4 && cpuCores >= 2 && moonshineScore >= 70;
-  const recommended = parakeetLooksGood ? 'local-parakeet' : 'local-moonshine-tiny';
-  const recommendedModel = parakeetLooksGood
+  const recommended = benchmarkRecommendation.transcription.recommendation;
+  const recommendedModel = benchmarkRecommendation.transcription.model
     ? {
-      id: 'parakeet',
-      name: 'Parakeet v3',
-      reason: 'Best local quality for this computer.'
+      id: benchmarkRecommendation.transcription.model.id,
+      name: benchmarkRecommendation.transcription.model.name,
+      reason: benchmarkRecommendation.transcription.reason
     }
-    : {
-      id: 'moonshine-tiny',
-      name: 'Moonshine tiny',
-      reason: moonshineLooksGood
-        ? 'Lightweight local fallback for this computer.'
-        : 'Lightest available local option.'
-    };
-
+    : undefined;
   const autoDownloadModel = process.env.CAUL_DISABLE_MODEL_AUTO_DOWNLOAD !== '1';
 
   return {
     ok: true,
-    autoDownloadParakeet: autoDownloadModel,
-    autoDownloadModel,
+    autoDownloadParakeet: autoDownloadModel && Boolean(recommendedModel),
+    autoDownloadModel: autoDownloadModel && Boolean(recommendedModel),
+    benchmark: {
+      catalogueLastReviewed: catalogue.lastReviewed,
+      recommendationSource: benchmarkRecommendation.transcription.source,
+      staleEntries: benchmarkRecommendation.staleCatalogueEntries
+    },
     createdAtMs: Date.now(),
     recommended,
     recommendedModel,
     resources: {
-      accelerator: isAppleSilicon ? 'apple-silicon' : 'unknown',
-      arch: process.arch,
+      accelerator: profile.accelerator,
+      arch: profile.arch,
       cpuCores,
       freeMemoryGb,
-      platform: process.platform,
+      gpu: profile.gpu,
+      localRuntimes: profile.localRuntimes,
+      platform: profile.platform,
       totalMemoryGb
     },
     score: {
@@ -2674,8 +2866,213 @@ function buildTranscriptionRecommendation() {
     status: 'ready',
     summary: recommended === 'local-parakeet'
       ? 'Recommended: Parakeet local transcription'
-      : 'Recommended: Moonshine local transcription'
+      : recommended === 'local-moonshine-tiny'
+        ? 'Recommended: Moonshine local transcription'
+        : 'No local transcription model is recommended for this machine'
   };
+}
+
+function getAiRecommendation() {
+  const profile = getLocalSystemProfile();
+  const catalogue = getModelCatalogue();
+  const benchmarkRecommendation = recommendFromCatalogue(catalogue, profile);
+
+  return {
+    benchmark: {
+      catalogueLastReviewed: catalogue.lastReviewed,
+      recommendationSource: benchmarkRecommendation.ai.source,
+      staleEntries: benchmarkRecommendation.staleCatalogueEntries
+    },
+    localRuntime: benchmarkRecommendation.ai.localRuntime,
+    provider: getSelectedAiProvider(),
+    recommended: benchmarkRecommendation.ai.recommendation,
+    recommendedModel: benchmarkRecommendation.ai.model
+      ? {
+        id: benchmarkRecommendation.ai.model.id,
+        name: benchmarkRecommendation.ai.model.name,
+        reason: benchmarkRecommendation.ai.reason,
+        runtime: benchmarkRecommendation.ai.model.runtime
+      }
+      : null,
+    resources: profile,
+    status: 'ready',
+    summary: benchmarkRecommendation.ai.recommendation === 'local'
+      ? `Recommended: ${benchmarkRecommendation.ai.model.name} local AI responses`
+      : benchmarkRecommendation.ai.recommendation === 'cloud'
+        ? 'Cloud AI is recommended for this machine'
+        : 'No AI response model is recommended for this machine',
+    viable: benchmarkRecommendation.ai.viable
+  };
+}
+
+function getModelCatalogue() {
+  try {
+    return loadBestModelCatalogue({
+      allowLive: true,
+      userDataPath: app.getPath('userData')
+    });
+  } catch (error) {
+    console.error('Failed to load model catalogue:', error);
+
+    return {
+      version: 1,
+      lastReviewed: 'unknown',
+      sources: {
+        asrLeaderboard: { name: 'Hugging Face Open ASR Leaderboard' },
+        llmLeaderboard: { name: 'Artificial Analysis LLM Leaderboard' }
+      },
+      transcription: [],
+      aiResponse: []
+    };
+  }
+}
+
+let liveModelCatalogueRefreshPromise = null;
+let onboardingLiveModelCatalogueRefreshAttempted = false;
+
+async function refreshLiveModelCatalogue({ includeStatus = true, resetRuntime = true, timeoutMs = 0 } = {}) {
+  const bundledCatalogue = loadBestModelCatalogue({
+    allowLive: false,
+    userDataPath: app.getPath('userData')
+  });
+  const refreshTask = refreshModelCatalogue(bundledCatalogue)
+    .then((result) => ({
+      result,
+      livePath: writeLiveModelCatalogue(app.getPath('userData'), result.catalogue)
+    }));
+  const { result, livePath } = timeoutMs > 0
+    ? await withTimeout(refreshTask, timeoutMs, 'Model catalogue refresh timed out.')
+    : await refreshTask;
+
+  if (resetRuntime) {
+    localLlmService?.stop?.();
+    localLlmService = null;
+    writeSetupState({ transcriptionRecommendation: null });
+  }
+
+  return {
+    ok: true,
+    livePath,
+    reviewedAt: result.reviewedAt,
+    sourceReports: result.sourceReports,
+    ...(includeStatus ? { status: await getOnboardingStatus({ refreshCatalogue: false }) } : {})
+  };
+}
+
+async function ensureLiveModelCatalogueForOnboarding() {
+  if (onboardingLiveModelCatalogueRefreshAttempted) {
+    return;
+  }
+
+  const settings = readProfileSettings();
+  if (settings.autoUpdateAiModel === false && settings.autoUpdateTranscriptionModel === false) {
+    return;
+  }
+
+  const currentCatalogue = loadBestModelCatalogue({
+    allowLive: true,
+    userDataPath: app.getPath('userData')
+  });
+  if (currentCatalogue.source === 'live-cache') {
+    return;
+  }
+
+  onboardingLiveModelCatalogueRefreshAttempted = true;
+
+  try {
+    await refreshLiveModelCatalogue({
+      includeStatus: false,
+      resetRuntime: false,
+      timeoutMs: onboardingModelCatalogueRefreshTimeoutMs
+    });
+  } catch (error) {
+    console.error('Onboarding model catalogue refresh failed; using bundled fallback:', error);
+  }
+}
+
+async function refreshLiveModelCatalogueAfterUpdateCheck() {
+  const settings = readProfileSettings();
+
+  if (!readSetupState().onboardingCompletedAt) {
+    return;
+  }
+
+  if (settings.autoUpdateAiModel === false && settings.autoUpdateTranscriptionModel === false) {
+    return;
+  }
+
+  if (captureStatus.state !== 'idle' || localTranscriptionActive) {
+    return;
+  }
+
+  if (!liveModelCatalogueRefreshPromise) {
+    liveModelCatalogueRefreshPromise = refreshLiveModelCatalogue({ includeStatus: false, resetRuntime: false })
+      .catch((error) => {
+        console.error('Scheduled model catalogue refresh failed:', error);
+      })
+      .finally(() => {
+        liveModelCatalogueRefreshPromise = null;
+      });
+  }
+
+  await liveModelCatalogueRefreshPromise;
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  let timeout = null;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeout = setTimeout(() => {
+      reject(new Error(message));
+    }, timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise])
+    .finally(() => {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    });
+}
+
+function getLocalLlmService() {
+  if (!localLlmService) {
+    localLlmService = createLocalLlmService({
+      app,
+      catalogue: getModelCatalogue(),
+      emitStatus: emitLocalLlmStatus
+    });
+  }
+
+  return localLlmService;
+}
+
+function emitLocalLlmStatus() {
+  const status = getLocalLlmService().status();
+
+  BrowserWindow.getAllWindows().forEach((window) => {
+    window.webContents.send('caul:local-llm-status', status);
+  });
+}
+
+function getLocalSystemProfile() {
+  const profile = buildSystemProfile();
+  profile.localRuntimes.caulLlamaCpp = getLocalLlmService().status();
+
+  return profile;
+}
+
+function getSelectedAiProvider() {
+  const provider = readProfileSettings().selectedAiProvider;
+
+  return provider === 'cloud' || provider === 'local' ? provider : defaultAiProvider;
+}
+
+function setSelectedAiProvider(provider) {
+  const selectedAiProvider = provider === 'cloud' ? 'cloud' : 'local';
+
+  updateProfileSettings({ selectedAiProvider });
+
+  return getOnboardingStatus();
 }
 
 function runShortMachineProbe() {
@@ -2709,7 +3106,7 @@ function emitParakeetStatus() {
 
 function downloadLocalTranscriptionModel(modelId = getPreferredLocalModelId()) {
   const selectedLocalTranscriptionModel = normaliseLocalTranscriptionModelId(modelId);
-  writeSetupState({ selectedLocalTranscriptionModel });
+  updateProfileSettings({ selectedLocalTranscriptionModel });
 
   return selectedLocalTranscriptionModel === 'moonshine-tiny'
     ? downloadMoonshineTinyModel()
@@ -3099,7 +3496,7 @@ function openPiSetup(mode = 'login') {
 
   return {
     ok: false,
-    message: 'Pi model setup is handled inside Caul. Sign in with ChatGPT first.'
+    message: 'Cloud AI setup is handled inside Caul. Sign in with ChatGPT first.'
   };
 }
 
@@ -3107,14 +3504,10 @@ function openPiChatGptLogin() {
   const cliPath = getPiCliPath();
 
   if (!cliPath) {
-    return { ok: false, message: 'Bundled Pi is unavailable.' };
+    return { ok: false, message: 'Bundled ChatGPT sign-in is unavailable.' };
   }
 
   fsSync.mkdirSync(getPiAgentDir(), { recursive: true });
-
-  if (process.platform !== 'darwin') {
-    return { ok: false, message: 'ChatGPT sign in is currently available on macOS.' };
-  }
 
   if (piChatGptLoginPromise) {
     return piChatGptLoginPromise;
@@ -3332,26 +3725,37 @@ function disconnectPi() {
   return getPiStatus();
 }
 
-async function getOnboardingStatus() {
+async function getOnboardingStatus({ refreshCatalogue = true } = {}) {
+  if (refreshCatalogue) {
+    await ensureLiveModelCatalogueForOnboarding();
+  }
+
   const permissions = await getPermissionsStatus();
   const permissionsComplete = permissions.permissions.every((permission) => (
     permission.status === 'granted' || permission.status === 'unsupported'
   ));
   const parakeet = getParakeetStatus();
   const pi = getPiStatus();
+  const ai = getAiRecommendation();
   const transcription = getTranscriptionRecommendation();
+  const profileSettings = readProfileSettings();
   const selectedLocalTranscriptionModel = getSelectedLocalTranscriptionModelId();
   const transcriptionModelReady = Boolean(
     selectedLocalTranscriptionModel
     && parakeet.installed
     && parakeet.modelId === selectedLocalTranscriptionModel
   );
-  const complete = permissionsComplete && transcriptionModelReady && pi.connected;
+  const complete = permissionsComplete && transcriptionModelReady;
 
   return {
     ok: true,
+    autoUpdate: {
+      ai: profileSettings.autoUpdateAiModel !== false,
+      transcription: profileSettings.autoUpdateTranscriptionModel !== false
+    },
     complete,
     completedAt: readSetupState().onboardingCompletedAt ?? null,
+    ai,
     parakeet,
     permissions,
     pi,
@@ -4128,8 +4532,6 @@ class PersistentPiRpcBridge {
 }
 
 async function requestLlmResponse(transcript, options = {}) {
-  assertPiLlmBridgeEnabled();
-
   const requestStartedAt = Date.now();
   const trace = options.trace && typeof options.trace === 'object'
     ? options.trace
@@ -4151,7 +4553,7 @@ async function requestLlmResponse(transcript, options = {}) {
   }
 
   emitTranscriptionEvent({ type: 'llm-query', requestId, text: trimmedTranscript });
-  const text = await runPiTextRequest(trimmedTranscript, { ...options, attachments }, (delta) => {
+  const onDelta = (delta) => {
     if (rendererRealLlmSmoke) {
       console.log(`caul-llm-timing ${JSON.stringify({
         event: 'electron_delta_emit',
@@ -4161,10 +4563,20 @@ async function requestLlmResponse(transcript, options = {}) {
     }
 
     emitTranscriptionEvent({ type: 'llm-response-delta', requestId, text: delta });
-  });
+  };
+  const selectedAiProvider = getSelectedAiProvider();
+  const text = selectedAiProvider === 'local'
+    ? await getLocalLlmService().request(trimmedTranscript, { onDelta })
+    : await requestCloudLlmResponse(trimmedTranscript, { ...options, attachments }, onDelta);
   emitTranscriptionEvent({ type: 'llm-response', requestId, text });
 
   return { ok: true, text };
+}
+
+function requestCloudLlmResponse(transcript, options, onDelta) {
+  assertPiLlmBridgeEnabled();
+
+  return runPiTextRequest(transcript, options, onDelta);
 }
 
 function normaliseLlmRequestAttachments(attachments) {
@@ -7301,6 +7713,8 @@ app.on('before-quit', () => {
     stopLocalTranscriptionWarmDaemon(true);
     stopLocalParakeetDaemon({ force: true });
     cancelParakeetDownload();
+    getLocalLlmService().cancelDownload();
+    getLocalLlmService().stop();
     return;
   }
 
@@ -7311,6 +7725,8 @@ app.on('before-quit', () => {
   stopSystemAudioCapture();
   stopLocalParakeetDaemon({ force: true });
   cancelParakeetDownload();
+  getLocalLlmService().cancelDownload();
+  getLocalLlmService().stop();
   persistentPiRpcBridge?.dispose();
   persistentPiRpcBridge = null;
   backupPersistentPiRpcBridge?.dispose();
@@ -7428,6 +7844,12 @@ ipcMain.handle('caul:settings-relaunch', () => {
   return { ok: true };
 });
 
+ipcMain.handle('caul:preferences-load', (_event, request) => loadPortablePreferences(request));
+
+ipcMain.handle('caul:preferences-save', (_event, request) => savePortablePreferences(request));
+
+ipcMain.handle('caul:model-catalogue-refresh', () => refreshLiveModelCatalogue());
+
 ipcMain.handle('caul:updates-status', () => getUpdaterService().status());
 
 ipcMain.handle('caul:updates-set-frequency', (_event, request) => (
@@ -7441,6 +7863,22 @@ ipcMain.handle('caul:updates-download-and-install', () => getUpdaterService().do
 ipcMain.handle('caul:updates-install-downloaded', () => getUpdaterService().installDownloadedUpdate());
 
 ipcMain.handle('caul:updates-open-download-page', () => getUpdaterService().openDownloadPage());
+
+ipcMain.handle('caul:history-status', () => getHistoryService().getStatus());
+
+ipcMain.handle('caul:history-set-enabled', (_event, request) => (
+  getHistoryService().setEnabled(request?.enabled)
+));
+
+ipcMain.handle('caul:history-open-folder', () => getHistoryService().openFolder());
+
+ipcMain.handle('caul:history-choose-folder', (event) => (
+  getHistoryService().chooseFolder(BrowserWindow.fromWebContents(event.sender))
+));
+
+ipcMain.handle('caul:history-save-session', (_event, request) => (
+  getHistoryService().saveSession(request)
+));
 
 ipcMain.handle('caul:onboarding-status', () => getOnboardingStatus());
 
@@ -7472,6 +7910,14 @@ ipcMain.handle('caul:pi-save-model', (_event, request) => {
   const model = typeof request === 'object' && request !== null ? request.model : '';
   return savePiModel(model);
 });
+
+ipcMain.handle('caul:ai-provider', (_event, request) => setSelectedAiProvider(request?.provider));
+
+ipcMain.handle('caul:local-llm-status', () => getLocalLlmService().status());
+
+ipcMain.handle('caul:local-llm-download', () => getLocalLlmService().download());
+
+ipcMain.handle('caul:local-llm-cancel-download', () => getLocalLlmService().cancelDownload());
 
 ipcMain.handle('caul:pi-disconnect', () => disconnectPi());
 

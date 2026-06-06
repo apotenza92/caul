@@ -114,6 +114,74 @@
         width: 22px;
       }
 
+      .hero-download {
+        align-items: center;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-sm);
+        position: relative;
+        z-index: 1;
+        width: 100%;
+      }
+
+      .hero-download .download-btn {
+        font-size: 1rem;
+        justify-content: center;
+        min-height: 48px;
+        min-width: min(100%, 280px);
+        padding: 0.78rem 1.35rem;
+      }
+
+      .hero-download .download-btn[aria-disabled="true"] {
+        box-shadow: none;
+        cursor: default;
+        opacity: 0.72;
+        pointer-events: none;
+        transform: none;
+      }
+
+      .hero-detected-label {
+        color: var(--text-subtle);
+        font-size: 0.76rem;
+        line-height: 1.4;
+        min-height: 1.1rem;
+      }
+
+      .download-options {
+        position: relative;
+        width: 100%;
+        z-index: 1;
+      }
+
+      .download-options summary {
+        color: var(--accent);
+        cursor: pointer;
+        display: inline-flex;
+        font-size: 0.84rem;
+        font-weight: 600;
+        list-style: none;
+        padding: 0.15rem 0;
+      }
+
+      .download-options summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .download-options summary::after {
+        content: "⌄";
+        display: inline-block;
+        margin-left: 0.45rem;
+        transition: transform 0.2s ease;
+      }
+
+      .download-options[open] summary::after {
+        transform: rotate(180deg);
+      }
+
+      .download-options[open] .selection-flow {
+        margin-top: var(--space-md);
+      }
+
       .channel-toggle,
       .platform-toggle,
       .arch-toggle,
@@ -420,6 +488,10 @@
           border-radius: 8px !important;
           margin-left: 0 !important;
         }
+
+        .hero-download .download-btn {
+          min-width: 100%;
+        }
       }
     </style>
   </head>
@@ -429,7 +501,22 @@
       <h1>Download Caul</h1>
       <p class="subtitle">Named from the Latin root for whispering or murmuring, Caul is fast, private AI for live calls, with local transcription first and your existing ChatGPT subscription for the AI model.</p>
 
-      <div class="selection-flow" id="selection-flow">
+      <section class="hero-download" aria-label="Recommended download">
+        <a id="hero-download-btn" class="download-btn" href="#" aria-disabled="true" tabindex="-1">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <path d="M7 10l5 5 5-5"/>
+            <path d="M12 15V3"/>
+          </svg>
+          <span id="hero-download-label">Choose your download</span>
+        </a>
+        <p id="hero-detected-label" class="hero-detected-label"></p>
+      </section>
+
+      <details id="download-options" class="download-options">
+        <summary>Choose another download</summary>
+
+        <div class="selection-flow" id="selection-flow">
         <a class="github-icon-link" href="https://github.com/apotenza92/caul" aria-label="View Caul on GitHub">
           <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <path d="M12 .5a12 12 0 0 0-3.8 23.39c.6.11.82-.26.82-.58v-2.22c-3.34.73-4.04-1.42-4.04-1.42-.55-1.4-1.34-1.77-1.34-1.77-1.09-.74.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.83 2.8 1.3 3.49.99.11-.78.42-1.3.76-1.6-2.67-.31-5.47-1.34-5.47-5.94 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.53.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.65.25 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.62-2.81 5.63-5.49 5.93.43.38.82 1.11.82 2.24v3.32c0 .32.22.7.83.58A12 12 0 0 0 12 .5Z"/>
@@ -469,8 +556,8 @@
         </div>
 
         <div id="arch-toggle" class="arch-toggle" aria-label="Architecture">
-          <button id="arch-arm64" class="arch-btn active" type="button">ARM64</button>
-          <button id="arch-x64" class="arch-btn" type="button">x64</button>
+          <button id="arch-x64" class="arch-btn active" type="button">x64</button>
+          <button id="arch-arm64" class="arch-btn" type="button">ARM64</button>
         </div>
 
         <div id="format-toggle" class="format-toggle" aria-label="Linux package format">
@@ -514,7 +601,8 @@
           </div>
         </div>
         </section>
-      </div>
+        </div>
+      </details>
 
       <section id="coming-soon" class="coming-soon">
         <strong>Coming soon</strong>
@@ -575,17 +663,23 @@
         "caul-x64.deb": 129315974,
         "caul-x64.rpm": 121116809
       };
+      const detectedSystem = detectSystem();
       const state = {
         channel: "stable",
-        platform: "mac",
-        arch: "arm64",
+        platform: detectedSystem.platform || "windows",
+        arch: detectedSystem.platform === "mac" ? "arm64" : detectedSystem.arch || "x64",
         linuxFormat: "appimage"
       };
+      let manualSelection = false;
       const releaseAvailable = {
-        stable: false,
+        stable: true,
         beta: false
       };
       const darkMode = window.matchMedia("(prefers-color-scheme: dark)");
+
+      if (state.platform === "linux" && state.arch === "arm64") {
+        state.linuxFormat = "appimage";
+      }
 
       function getIconSrc() {
         if (state.channel === "beta") {
@@ -624,6 +718,145 @@
       function labelWithSize(label, url) {
         const size = formatAssetSize(assetSizes[assetNameFromUrl(url)]);
         return size ? `${label} · ${size}` : label;
+      }
+
+      function detectSystem(extra = {}) {
+        const uaData = navigator.userAgentData || {};
+        const platformText = `${extra.platform || uaData.platform || navigator.platform || ""} ${navigator.userAgent || ""}`.toLowerCase();
+        const architectureText = `${extra.architecture || uaData.architecture || ""} ${extra.bitness || ""} ${navigator.userAgent || ""}`.toLowerCase();
+        const platform = platformText.includes("win")
+          ? "windows"
+          : platformText.includes("mac")
+            ? "mac"
+            : platformText.includes("linux") || platformText.includes("x11")
+              ? "linux"
+              : "";
+        const arch = /arm64|aarch64|arm/.test(architectureText) ? "arm64" : "x64";
+
+        return {
+          arch,
+          known: Boolean(platform),
+          platform
+        };
+      }
+
+      async function refineDetectedSystem() {
+        const userAgentData = navigator.userAgentData;
+        if (!userAgentData?.getHighEntropyValues) {
+          return;
+        }
+
+        try {
+          const values = await userAgentData.getHighEntropyValues(["architecture", "bitness", "platform"]);
+          const refined = detectSystem(values);
+          if (!manualSelection && refined.known) {
+            state.platform = refined.platform;
+            state.arch = refined.platform === "mac" ? "arm64" : refined.arch;
+            if (state.platform === "linux" && state.arch === "arm64" && state.linuxFormat === "rpm") {
+              state.linuxFormat = "appimage";
+            }
+            updateDownload();
+          }
+        } catch {
+          // Low-entropy user-agent detection is good enough when high-entropy hints are unavailable.
+        }
+      }
+
+      function resolveDownload(selection) {
+        const channelDownloads = downloads[selection.channel] || downloads.stable;
+
+        if (!releaseAvailable[selection.channel]) {
+          return {
+            available: false,
+            message: selection.channel === "beta"
+              ? "Caul beta downloads will appear after the first Caul beta release."
+              : "Caul downloads will appear after the first Caul release."
+          };
+        }
+
+        if (selection.platform === "windows") {
+          const url = channelDownloads.windows?.[selection.arch] || "";
+          const label = selection.arch === "arm64"
+            ? "Download for Windows 11 ARM64"
+            : "Download for Windows x64";
+
+          return url
+            ? { available: true, label, url }
+            : { available: false, message: "Caul for Windows beta is coming soon." };
+        }
+
+        if (selection.platform === "linux") {
+          const suffix = selection.arch === "arm64" ? "Arm64" : "X64";
+          const architectureLabel = selection.arch === "arm64" ? "ARM64" : "x64";
+          const appImage = channelDownloads.linux?.[`appImage${suffix}`] || "";
+          const deb = channelDownloads.linux?.[`deb${suffix}`] || "";
+          const rpm = channelDownloads.linux?.[`rpm${suffix}`] || "";
+          const url = selection.linuxFormat === "deb"
+            ? deb
+            : selection.linuxFormat === "rpm"
+              ? rpm
+              : appImage;
+          const label = selection.linuxFormat === "deb"
+            ? `Download .deb for Ubuntu ${architectureLabel}`
+            : selection.linuxFormat === "rpm"
+              ? `Download .rpm for Fedora ${architectureLabel}`
+              : `Download AppImage for Linux ${architectureLabel}`;
+
+          return url
+            ? { available: true, label, url }
+            : { available: false, message: "Caul for Linux beta is coming soon." };
+        }
+
+        return {
+          available: true,
+          homebrewCommand: selection.channel === "beta"
+            ? "brew tap apotenza92/tap && brew install --cask caul@beta"
+            : "brew tap apotenza92/tap && brew install --cask caul",
+          homebrewLabel: selection.channel === "beta"
+            ? "Or install via Homebrew (Beta):"
+            : "Or install via Homebrew:",
+          label: "Download for Apple Silicon Mac",
+          url: channelDownloads.mac || downloads.stable.mac
+        };
+      }
+
+      function setDownloadLink(link, labelElement, resolved) {
+        if (!resolved.available) {
+          link.href = "#";
+          link.setAttribute("aria-disabled", "true");
+          link.setAttribute("tabindex", "-1");
+          labelElement.textContent = "Choose your download";
+          return;
+        }
+
+        link.href = resolved.url;
+        link.removeAttribute("aria-disabled");
+        link.removeAttribute("tabindex");
+        labelElement.textContent = labelWithSize(resolved.label, resolved.url);
+      }
+
+      function updateHeroDownload(resolved) {
+        const heroDownload = document.getElementById("hero-download-btn");
+        const heroLabel = document.getElementById("hero-download-label");
+        const detectedLabel = document.getElementById("hero-detected-label");
+
+        if (!detectedSystem.known && !manualSelection) {
+          heroDownload.href = "#";
+          heroDownload.setAttribute("aria-disabled", "true");
+          heroDownload.setAttribute("tabindex", "-1");
+          heroLabel.textContent = "Choose your download";
+          detectedLabel.textContent = "We could not detect your system. Choose one below.";
+          return;
+        }
+
+        setDownloadLink(heroDownload, heroLabel, resolved);
+        detectedLabel.textContent = manualSelection
+          ? "Using your selected download."
+          : "Recommended for your system.";
+      }
+
+      function markManualSelection() {
+        manualSelection = true;
       }
 
       async function loadReleaseInfo() {
@@ -705,8 +938,7 @@
         const extraDownloadLinks = document.getElementById("extra-download-links");
         const comingSoon = document.getElementById("coming-soon");
         const comingSoonLabel = document.getElementById("coming-soon-label");
-        const channelDownloads = downloads[state.channel];
-        const fallbackDownloads = downloads.stable;
+        const resolved = resolveDownload(state);
 
         document.body.classList.toggle("beta-mode", state.channel === "beta");
         icon.src = getIconSrc();
@@ -729,127 +961,74 @@
           setActive(".format-btn", "format-appimage");
         }
 
-        if (!releaseAvailable[state.channel]) {
+        updateHeroDownload(resolved);
+
+        if (!resolved.available) {
           downloadSection.style.display = "none";
           homebrewSection.style.display = "none";
           comingSoon.style.display = "block";
-          comingSoonLabel.textContent = state.channel === "beta"
-            ? "Caul beta downloads will appear after the first Caul beta release."
-            : "Caul downloads will appear after the first Caul release.";
-          return;
-        }
-
-        if (state.platform === "windows") {
-          const windowsDownloads = channelDownloads.windows || {};
-          const windowsDownload = windowsDownloads[state.arch] || "";
-
-          if (!windowsDownload) {
-            downloadSection.style.display = "none";
-            comingSoon.style.display = "block";
-            comingSoonLabel.textContent = "Caul for Windows beta is coming soon.";
-            return;
-          }
-
-          downloadSection.style.display = "flex";
-          homebrewSection.style.display = "none";
-          comingSoon.style.display = "none";
-          download.href = windowsDownload;
-          const label = state.arch === "arm64"
-            ? "Download for Windows 11 ARM64"
-            : "Download for Windows x64";
-          downloadLabel.textContent = labelWithSize(label, windowsDownload);
-          download.removeAttribute("aria-disabled");
-          download.removeAttribute("tabindex");
-          return;
-        }
-
-        if (state.platform === "linux") {
-          const linuxDownloads = channelDownloads.linux || {};
-          const suffix = state.arch === "arm64" ? "Arm64" : "X64";
-          const architectureLabel = state.arch === "arm64" ? "ARM64" : "x64";
-          const appImage = linuxDownloads[`appImage${suffix}`] || "";
-          const deb = linuxDownloads[`deb${suffix}`] || "";
-          const rpm = linuxDownloads[`rpm${suffix}`] || "";
-          const selectedDownload = state.linuxFormat === "deb"
-            ? deb
-            : state.linuxFormat === "rpm"
-              ? rpm
-              : appImage;
-
-          if (!selectedDownload) {
-            downloadSection.style.display = "none";
-            comingSoon.style.display = "block";
-            comingSoonLabel.textContent = "Caul for Linux beta is coming soon.";
-            return;
-          }
-
-          downloadSection.style.display = "flex";
-          homebrewSection.style.display = "none";
-          comingSoon.style.display = "none";
-          download.href = selectedDownload;
-          const label = state.linuxFormat === "deb"
-            ? `Download .deb for Ubuntu ${architectureLabel}`
-            : state.linuxFormat === "rpm"
-              ? `Download .rpm for Fedora ${architectureLabel}`
-              : `Download AppImage for Linux ${architectureLabel}`;
-          downloadLabel.textContent = labelWithSize(label, selectedDownload);
-          download.removeAttribute("aria-disabled");
-          download.removeAttribute("tabindex");
+          comingSoonLabel.textContent = resolved.message;
           return;
         }
 
         downloadSection.style.display = "flex";
-        homebrewSection.style.display = "block";
+        homebrewSection.style.display = state.platform === "mac" ? "block" : "none";
         comingSoon.style.display = "none";
-        homebrewCode.textContent = state.channel === "beta"
-          ? "brew tap apotenza92/tap && brew install --cask caul@beta"
-          : "brew tap apotenza92/tap && brew install --cask caul";
-        homebrewLabel.textContent = state.channel === "beta"
-          ? "Or install via Homebrew (Beta):"
-          : "Or install via Homebrew:";
-        download.href = channelDownloads.mac || fallbackDownloads.mac;
-        downloadLabel.textContent = labelWithSize("Download for Apple Silicon Mac", download.href);
-        download.removeAttribute("aria-disabled");
-        download.removeAttribute("tabindex");
+        homebrewCode.textContent = resolved.homebrewCommand || "";
+        homebrewLabel.textContent = resolved.homebrewLabel || "Or install via Homebrew:";
+        setDownloadLink(download, downloadLabel, resolved);
       }
 
       document.getElementById("channel-stable").addEventListener("click", () => {
+        markManualSelection();
         state.channel = "stable";
         updateDownload();
       });
       document.getElementById("channel-beta").addEventListener("click", () => {
+        markManualSelection();
         state.channel = "beta";
         updateDownload();
       });
       document.getElementById("platform-mac").addEventListener("click", () => {
+        markManualSelection();
         state.platform = "mac";
+        state.arch = "arm64";
         updateDownload();
       });
       document.getElementById("platform-windows").addEventListener("click", () => {
+        markManualSelection();
         state.platform = "windows";
+        state.arch = "x64";
         updateDownload();
       });
       document.getElementById("platform-linux").addEventListener("click", () => {
+        markManualSelection();
         state.platform = "linux";
+        state.arch = "x64";
         updateDownload();
       });
       document.getElementById("arch-arm64").addEventListener("click", () => {
+        markManualSelection();
         state.arch = "arm64";
         updateDownload();
       });
       document.getElementById("arch-x64").addEventListener("click", () => {
+        markManualSelection();
         state.arch = "x64";
         updateDownload();
       });
       document.getElementById("format-appimage").addEventListener("click", () => {
+        markManualSelection();
         state.linuxFormat = "appimage";
         updateDownload();
       });
       document.getElementById("format-deb").addEventListener("click", () => {
+        markManualSelection();
         state.linuxFormat = "deb";
         updateDownload();
       });
       document.getElementById("format-rpm").addEventListener("click", () => {
+        markManualSelection();
         state.linuxFormat = "rpm";
         updateDownload();
       });
@@ -873,6 +1052,7 @@
 
       loadReleaseInfo().then(updateDownload);
       updateDownload();
+      refineDetectedSystem();
       darkMode.addEventListener("change", updateDownload);
     </script>
   </body>

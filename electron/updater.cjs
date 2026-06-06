@@ -22,6 +22,7 @@ function createUpdaterService({
   appChannel,
   appName,
   isDev,
+  onAfterSuccessfulCheck,
   onBeforeInstallDownloadedUpdate,
   forceEnabled = false,
   repositoryUrl = 'https://github.com/apotenza92/caul/releases'
@@ -222,6 +223,7 @@ function createUpdaterService({
       const targetRelease = findTargetRelease(releases, appChannel === 'beta');
       const currentVersion = app.getVersion();
       writeLastCheckTime();
+      await notifyAfterSuccessfulCheck({ automatic });
 
       if (!targetRelease || !isVersionNewer(targetRelease.version, currentVersion)) {
         availableUpdate = null;
@@ -274,6 +276,18 @@ function createUpdaterService({
       };
       emitStatus();
       return status();
+    }
+  }
+
+  async function notifyAfterSuccessfulCheck({ automatic }) {
+    if (typeof onAfterSuccessfulCheck !== 'function') {
+      return;
+    }
+
+    try {
+      await onAfterSuccessfulCheck({ automatic });
+    } catch (error) {
+      console.error('Post-update-check hook failed:', error);
     }
   }
 

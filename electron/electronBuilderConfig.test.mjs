@@ -68,3 +68,11 @@ describe('electron-builder macOS config', () => {
     expect(config.productName).toBe('Caul Dev-Private');
   });
 });
+
+describe('electron-builder Windows config', () => {
+  it('uses the product name without the version in Windows Apps uninstall entries', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    expect(loadConfig().nsis.uninstallDisplayName).toBe('${productName}');
+  });
+});

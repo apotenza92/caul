@@ -8,7 +8,7 @@ This folder is the durable project memory for future agents and contributors. Ke
 
 The `Publish Download Page` workflow mirrors only the static download page and icon assets into the public `apotenza92.github.io` site repo, keeping the published site independent from the source tree layout.
 
-The page currently offers stable and beta downloads for Apple Silicon macOS, Windows ARM64/x64, Linux ARM64/x64 AppImage, Ubuntu/Debian `.deb` and Linux x64 Fedora/RHEL `.rpm`. macOS also includes Homebrew cask commands for stable and beta channels. Intel macOS builds are not supported. Windows/Linux ARM64 has local Parallels VM release-smoke coverage. Windows/Linux x64 is CI-built from the same platform backend and should not be described as locally smoke-tested until dedicated x64 coverage exists.
+The page currently offers a primary autodetected stable download button plus optional stable/beta selectors for Apple Silicon macOS, Windows x64/ARM64, Linux x64/ARM64 AppImage, Ubuntu/Debian `.deb` and Linux x64 Fedora/RHEL `.rpm`. macOS also includes Homebrew cask commands for stable and beta channels inside the optional selector area. Intel macOS builds are not supported. Windows/Linux ARM64 has local Parallels VM release-smoke coverage. Windows/Linux x64 is CI-built from the same platform backend and should not be described as locally smoke-tested until dedicated x64 coverage exists.
 
 ## Updates
 
@@ -22,6 +22,7 @@ Packaged stable and beta apps include GitHub-backed update checks. Stable builds
 - `cross-platform-release-plan.md`: Windows and Linux build, package and E2E release plan.
 - `competitor-notes.md`: Public findings from Cluely, Natively and Pluely.
 - `resources.md`: Preferred platform docs, reference projects and libraries.
+- `model-recommendation.md`: Benchmark-grounded model catalogue and recommendation policy.
 - `llm-first-chunk-optimisation.md`: Benchmark loop for reducing stop-to-first-visible-LLM-text latency.
 
 ## Documentation Rules
@@ -34,7 +35,7 @@ Packaged stable and beta apps include GitHub-backed update checks. Stable builds
 
 ## Current Focus
 
-The current implementation milestone is a clean multi-platform Electron package backed by Rust process boundaries for reliable Apple Silicon macOS, Windows and Ubuntu/Linux capture. The app should keep first-run permissions, Parakeet model setup and Pi provider setup explicit before listening or AI requests are enabled. macOS remains the reference implementation, while macOS, Windows and Linux ARM64 have local VM release gates for packaged capture, transcription, AI response, onboarding and pre-setup privacy. Windows/Linux x64 artefacts are CI-built from the same backend and published with that caveat. Broader Linux distribution support remains deferred until it has dedicated test coverage.
+The current implementation milestone is a clean multi-platform Electron package backed by Rust process boundaries for reliable Apple Silicon macOS, Windows and Ubuntu/Linux capture. The app should keep first-run permissions and local transcription model setup explicit before listening is enabled, while ChatGPT sign-in remains optional and required only before cloud AI requests. macOS remains the reference implementation, while macOS, Windows and Linux ARM64 have local VM release gates for packaged capture, transcription, AI response, onboarding and pre-setup privacy. Windows/Linux x64 artefacts are CI-built from the same backend and published with that caveat. Broader Linux distribution support remains deferred until it has dedicated test coverage.
 
 Release validation uses Parallels VM E2E gates for macOS, Windows and Ubuntu Linux. The gates must prove packaged launch or install, onboarding, audio capture, local transcription, renderer AI response and pre-setup privacy. macOS and Windows require Electron content protection on both the overlay and floating handle. Linux records the same protection path as best effort because Electron content protection is only supported on macOS and Windows. Fedora currently remains an RPM install/package gate.
 

@@ -55,7 +55,7 @@ const profiles = {
     packageEnv: 'CAUL_WINDOWS_PACKAGE_PATH',
     repoEnv: 'CAUL_WINDOWS_VM_REPO',
     defaultRepo: 'C:\\Users\\alex\\caul-cross-platform',
-    defaultPackagePath: 'C:\\Users\\alex\\caul-cross-platform\\release\\win-arm64-unpacked',
+    defaultPackagePath: 'C:\\Users\\alex\\caul-cross-platform\\release\\Caul-windows-arm64-setup.exe',
     modelEnv: 'CAUL_WINDOWS_PARAKEET_MODEL_DIR',
     defaultModelDir: 'C:\\Users\\alex\\AppData\\Roaming\\com.pais.handy\\models\\parakeet-tdt-0.6b-v3-int8'
   }
@@ -202,24 +202,8 @@ process.exit(1);
 
 async function runWindowsPackageSmoke() {
   const repoPath = process.env[profile.repoEnv] ?? profile.defaultRepo;
-  const backendPath = `${repoPath}\\release\\win-arm64-unpacked\\resources\\bin\\caul-desktop-backend.exe`;
-  const packageCheck = await runPrlctl([
-    'exec',
-    vmName,
-    'cmd.exe',
-    '/c',
-    [
-      `if not exist ${cmdQuote(packagePath)} (echo missing ${packagePath} && exit /b 2)`,
-      `if not exist ${cmdQuote(backendPath)} (echo missing ${backendPath} && exit /b 2)`,
-      `if exist ${cmdQuote(packagePath)}\\Caul.exe (echo unpacked package ready) else (for %F in (${cmdQuote(packagePath)}) do @if %~zF LEQ 0 (echo empty ${packagePath} && exit /b 2))`
-    ].join(' && ')
-  ]);
-
-  if (!packageCheck.ok) {
-    await failVmE2e(`Windows packaged smoke failed while validating ${packagePath}.`, {
-      details: packageCheck.text
-    });
-  }
+  const installation = await prepareWindowsPackageForSmoke();
+  const { appExe, backendPath, uninstallDisplayName } = installation;
 
   const audioProbe = await runWindowsSystemAudioSmoke(backendPath);
   const summary = audioProbe.summary;
@@ -299,9 +283,9 @@ async function runWindowsPackageSmoke() {
   }
 
   const transcriptionSummary = await runWindowsTranscriptionSmoke(repoPath, backendPath);
-  const rendererSummary = await runWindowsRendererTranscriptionSmoke(repoPath);
-  const aiSummary = await runWindowsRendererAiSmoke(repoPath);
-  const privacyCaptureSummary = await runWindowsExternalPrivacyCaptureSmoke(repoPath);
+  const rendererSummary = await runWindowsRendererTranscriptionSmoke(appExe);
+  const aiSummary = await runWindowsRendererAiSmoke(appExe);
+  const privacyCaptureSummary = await runWindowsExternalPrivacyCaptureSmoke(appExe);
 
   const launchSmoke = await runPrlctl([
     'exec',
@@ -320,7 +304,7 @@ async function runWindowsPackageSmoke() {
       '$env:CAUL_DISABLE_UPDATE_CHECKS = "1"',
       '$env:CAUL_USER_DATA_DIR = $userData',
       '$env:CAUL_SMOKE_OUTPUT_FILE = $smokeOutputFile',
-      `$process = Start-Process -PassThru -FilePath ${powershellString(`${repoPath}\\release\\win-arm64-unpacked\\Caul.exe`)}`,
+      `$process = Start-Process -PassThru -FilePath ${powershellString(appExe)}`,
       '$deadline = (Get-Date).AddSeconds(20)',
       'while ((Get-Date) -lt $deadline) { if ((Test-Path $smokeOutputFile) -and ((Get-Content $smokeOutputFile -Raw) -match "caul-packaged-launch-smoke")) { break }; Start-Sleep -Milliseconds 250 }',
       'if (!$process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }',
@@ -367,6 +351,8 @@ async function runWindowsPackageSmoke() {
   console.log(`Profile: ${profileName}`);
   console.log(`Guest IP Addresses: ${ipAddresses || 'not reported by prlctl'}`);
   console.log(`Package artefact: ${packagePath}`);
+  console.log(`Installed app: ${appExe}`);
+  console.log(`Windows Apps display name: ${uninstallDisplayName}`);
   console.log(`Packaged backend: ${backendPath}`);
   console.log(`Audio frames: ${summary.audio_frames}`);
   console.log(`Level events: ${summary.level_events}`);
@@ -401,6 +387,73 @@ async function runWindowsPackageSmoke() {
   };
   await writeVmE2eSummary(profileName, vmE2eSummary);
   console.log(`caul-vm-e2e ${JSON.stringify(vmE2eSummary)}`);
+}
+
+async function prepareWindowsPackageForSmoke() {
+  const install = await runPrlctl([
+    'exec',
+    vmName,
+    ...powershellEncodedArgs([
+      '$ErrorActionPreference = "Stop"',
+      `$packagePath = ${powershellString(packagePath)}`,
+      'if (!(Test-Path $packagePath)) { throw "Missing package artefact: $packagePath" }',
+      '$isDirectory = (Get-Item $packagePath).PSIsContainer',
+      '$appRoot = $null',
+      'if ($isDirectory) {',
+      '  $appRoot = $packagePath',
+      '} else {',
+      '  $packageItem = Get-Item $packagePath',
+      '  if ($packageItem.Length -le 0) { throw "Package artefact is empty: $packagePath" }',
+      '  Get-Process Caul -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue',
+      '  $process = Start-Process -PassThru -Wait -FilePath $packagePath -ArgumentList "/S"',
+      '  if ($process.ExitCode -ne 0) { throw "Installer exited with code $($process.ExitCode)" }',
+      '  $candidateRoots = @(',
+      '    (Join-Path $env:LOCALAPPDATA "Programs\\Caul"),',
+      '    (Join-Path $env:ProgramFiles "Caul")',
+      '  )',
+      '  $appRoot = $candidateRoots | Where-Object { Test-Path (Join-Path $_ "Caul.exe") } | Select-Object -First 1',
+      '}',
+      'if (!$appRoot) { throw "Installed Caul app root was not found." }',
+      '$appExe = Join-Path $appRoot "Caul.exe"',
+      '$backendPath = Join-Path $appRoot "resources\\bin\\caul-desktop-backend.exe"',
+      'if (!(Test-Path $appExe)) { throw "Missing installed app executable: $appExe" }',
+      'if (!(Test-Path $backendPath)) { throw "Missing installed backend: $backendPath" }',
+      '$uninstallDisplayName = $null',
+      '$uninstallRoots = @(',
+      '  "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall",',
+      '  "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall"',
+      ')',
+      'foreach ($root in $uninstallRoots) {',
+      '  if (!(Test-Path $root)) { continue }',
+      '  $entry = Get-ChildItem $root | ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_.DisplayName -eq "Caul" -or $_.DisplayName -eq "Caul Beta" } | Select-Object -First 1',
+      '  if ($entry) { $uninstallDisplayName = $entry.DisplayName; break }',
+      '}',
+      'if (!$isDirectory -and !$uninstallDisplayName) { throw "Could not find Caul product-only uninstall display name in Windows Apps registry entries." }',
+      '$summary = [pscustomobject]@{',
+      '  appExe = $appExe;',
+      '  backendPath = $backendPath;',
+      '  installedFromSetup = -not $isDirectory;',
+      '  uninstallDisplayName = $uninstallDisplayName',
+      '}',
+      'Write-Output ("caul-windows-install-smoke " + ($summary | ConvertTo-Json -Compress))'
+    ].join('; '))
+  ], { timeout: 180_000, maxBuffer: 10 * 1024 * 1024 });
+
+  const summary = parsePrefixedJson(install.text, 'caul-windows-install-smoke');
+
+  if (!install.ok || !summary?.appExe || !summary?.backendPath) {
+    await failVmE2e(`Windows packaged smoke failed while installing or validating ${packagePath}.`, {
+      details: install.text
+    });
+  }
+
+  if (summary.installedFromSetup && !['Caul', 'Caul Beta'].includes(summary.uninstallDisplayName)) {
+    await failVmE2e('Windows Apps uninstall display name includes unexpected text.', {
+      details: install.text
+    });
+  }
+
+  return summary;
 }
 
 async function runWindowsSystemAudioSmoke(backendPath) {
@@ -454,7 +507,7 @@ async function runWindowsSystemAudioSmoke(backendPath) {
   return { summary, text };
 }
 
-async function runWindowsExternalPrivacyCaptureSmoke(repoPath) {
+async function runWindowsExternalPrivacyCaptureSmoke(appExe) {
   const capturePath = path.join(tmpdir(), `caul-win-privacy-${Date.now()}.png`);
   const probe = await runPrlctl([
     'exec',
@@ -467,7 +520,7 @@ async function runWindowsExternalPrivacyCaptureSmoke(repoPath) {
       '$env:CAUL_WINDOWS_EXTERNAL_CAPTURE_PROBE = "1"',
       '$env:CAUL_WINDOWS_EXTERNAL_CAPTURE_PROBE_MS = "12000"',
       '$env:CAUL_SMOKE_OUTPUT_FILE = $smokeOutputFile',
-      `$process = Start-Process -PassThru -FilePath ${powershellString(`${repoPath}\\release\\win-arm64-unpacked\\Caul.exe`)}`,
+      `$process = Start-Process -PassThru -FilePath ${powershellString(appExe)}`,
       '$deadline = (Get-Date).AddSeconds(8)',
       'while ((Get-Date) -lt $deadline) { if ((Test-Path $smokeOutputFile) -and ((Get-Content $smokeOutputFile -Raw) -match "caul-windows-capture-probe")) { break }; Start-Sleep -Milliseconds 200 }',
       'if (Test-Path $smokeOutputFile) { Get-Content $smokeOutputFile }',
@@ -986,10 +1039,9 @@ async function runWindowsTranscriptionSmoke(repoPath, backendPath) {
   return assertTranscriptionSmoke(smoke.text, 'Windows');
 }
 
-async function runWindowsRendererTranscriptionSmoke(repoPath) {
+async function runWindowsRendererTranscriptionSmoke(appExe) {
   const modelDir = process.env[profile.modelEnv] ?? profile.defaultModelDir;
   const userData = '$env:TEMP\\caul-win-renderer-transcription-smoke';
-  const appPath = `${repoPath}\\release\\win-arm64-unpacked\\Caul.exe`;
   const prepScript = [
     '$ErrorActionPreference = [System.Management.Automation.ActionPreference]::Stop',
     `$userData = ${powershellString('$env:TEMP\\caul-win-renderer-transcription-smoke')}`,
@@ -1044,7 +1096,7 @@ async function runWindowsRendererTranscriptionSmoke(repoPath) {
       '$env:CAUL_RENDERER_TRANSCRIPTION_SMOKE_NO_LLM = "1"',
       '$env:CAUL_USER_DATA_DIR = $userData',
       '$env:CAUL_SMOKE_OUTPUT_FILE = $smokeOutputFile',
-      `$process = Start-Process -PassThru -FilePath ${powershellString(appPath)}`,
+      `$process = Start-Process -PassThru -FilePath ${powershellString(appExe)}`,
       '$deadline = (Get-Date).AddSeconds(70)',
       'while ((Get-Date) -lt $deadline) { if ((Test-Path $smokeOutputFile) -and ((Get-Content $smokeOutputFile -Raw).Contains("caul-renderer-transcription-smoke "))) { break }; Start-Sleep -Milliseconds 500 }',
       'if (!$process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }',
@@ -1063,7 +1115,7 @@ async function runWindowsRendererTranscriptionSmoke(repoPath) {
   return assertRendererTranscriptionSmoke(smoke.text, 'Windows');
 }
 
-async function runWindowsRendererAiSmoke(repoPath) {
+async function runWindowsRendererAiSmoke(appExe) {
   const smoke = await runPrlctl([
     'exec',
     vmName,
@@ -1073,7 +1125,7 @@ async function runWindowsRendererAiSmoke(repoPath) {
       'New-Item -ItemType Directory -Force -Path $userData | Out-Null',
       '$env:CAUL_RENDERER_LLM_SMOKE = "1"',
       '$env:CAUL_USER_DATA_DIR = $userData',
-      `& ${powershellString(`${repoPath}\\release\\win-arm64-unpacked\\Caul.exe`)}`
+      `& ${powershellString(appExe)}`
     ].join('; '))
   ], { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 });
 

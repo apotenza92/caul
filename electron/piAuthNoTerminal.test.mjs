@@ -27,6 +27,7 @@ describe('Pi authentication shell integration', () => {
     expect(mainSource).toContain('openUrlInDefaultBrowser(info.url)');
     expect(mainSource).toContain("spawn('/usr/bin/open'");
     expect(mainSource).toContain('shell.openExternal(url)');
+    expect(mainSource).not.toContain('ChatGPT sign in is currently available on macOS');
     expect(mainSource).not.toContain('createPiAuthWindow');
     expect(mainSource).not.toContain('piAuthWindow');
     expect(mainSource).not.toContain('onManualCodeInput');

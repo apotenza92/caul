@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { initialCaptureStatus, type CaptureRunState } from './foundation/capture';
-import type { LocalTranscriptionModelId, OnboardingStatus, ParakeetStatus, PermissionItem, PiStatus, PrivateOverlayState, PromptTemplate, PromptTemplateAttachment, PromptTemplateState, TranscriptionBridgeEvent, UpdateFrequency, UpdateStatus } from './foundation/desktopBridge';
+import type { AiProvider, HistorySessionUpdate, HistoryStatus, LocalLlmStatus, LocalTranscriptionModelId, OnboardingStatus, ParakeetStatus, PermissionItem, PiStatus, PortablePreferences, PrivateOverlayState, PromptTemplate, PromptTemplateAttachment, PromptTemplateState, TranscriptionBridgeEvent, UpdateFrequency, UpdateStatus } from './foundation/desktopBridge';
 import type { RuntimeContext } from './foundation/runtime';
 
 function currentLongDatePattern() {
@@ -100,6 +100,45 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: 'Close settings' }));
 
     expect(screen.queryByRole('dialog', { name: 'Settings' })).not.toBeInTheDocument();
+  });
+
+  it('opens the history folder from the title bar', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge();
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Open history folder' }));
+
+    expect(bridge.historyFolderOpens).toBe(1);
+  });
+
+  it('shows and updates Caul folder history settings', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge({
+      historyStatus: testHistoryStatus({
+        folder: '/Users/alex/Documents/Caul',
+        message: 'Moved Caul folder, but 1 HTML history file could not be moved.'
+      })
+    });
+
+    render(<App />);
+
+    await openSettings(user);
+
+    expect(await screen.findByLabelText('Save HTML history')).toBeChecked();
+    expect(screen.getByText('/Users/alex/Documents/Caul')).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Caul folder' })).toBeInTheDocument();
+    expect(screen.getByText('Moved Caul folder, but 1 HTML history file could not be moved.')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Open Caul Folder' }));
+    await user.click(screen.getByRole('button', { name: 'Change Folder' }));
+    await user.click(screen.getByLabelText('Save HTML history'));
+
+    expect(bridge.historyFolderOpens).toBe(1);
+    expect(bridge.historyFolderChooses).toBe(1);
+    expect(await screen.findByText('/Users/alex/Documents/Changed Caul History')).toBeInTheDocument();
+    expect(bridge.historyEnabledChanges).toEqual([false]);
   });
 
   it('closes settings when clicking the negative space around it', async () => {
@@ -380,7 +419,6 @@ describe('App', () => {
 
     expect(await screen.findByText('Preparing local transcription')).toBeInTheDocument();
     expect(screen.queryByLabelText('Transcription model')).not.toBeInTheDocument();
-    expect(screen.queryByText('Recommended')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Use' })).not.toBeInTheDocument();
 
     await waitFor(() => expect(bridge.parakeetDownloads).toBe(1));
@@ -428,7 +466,6 @@ describe('App', () => {
     expect(screen.queryByLabelText('Transcription model')).not.toBeInTheDocument();
     expect(screen.queryByText('Parakeet v3')).not.toBeInTheDocument();
     expect(screen.queryByText('Moonshine tiny')).not.toBeInTheDocument();
-    expect(screen.queryByText('Recommended')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Use' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
   });
@@ -513,7 +550,6 @@ describe('App', () => {
     expect(await screen.findByText('Ready')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Use' })).not.toBeInTheDocument();
     expect(screen.queryByText('Moonshine tiny')).not.toBeInTheDocument();
-    expect(screen.queryByText('Recommended')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Transcription model')).not.toBeInTheDocument();
   });
 
@@ -549,9 +585,124 @@ describe('App', () => {
 
     render(<App />);
 
+    await user.click(await screen.findByRole('tab', { name: 'Cloud' }));
     await user.click(await screen.findByRole('button', { name: 'Sign in' }));
 
     expect(bridge.chatGptLoginOpens).toBe(1);
+  });
+
+  it('defaults onboarding AI setup to a simple local recommendation', async () => {
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
+    installTestBridge({
+      onboardingStatus: testOnboardingStatus({
+        ai: testAiRecommendation({
+          recommended: 'local',
+          recommendedModel: {
+            id: 'qwen2.5-3b-instruct-q4_k_m',
+            name: 'Qwen 2.5 3B Instruct Q4',
+            reason: 'Qwen 2.5 3B Instruct Q4 is the best local AI response fit for this machine from the bundled benchmark catalogue.',
+            runtime: 'llama.cpp'
+          },
+          summary: 'Recommended: Qwen 2.5 3B Instruct Q4 local AI responses',
+          viable: true
+        })
+      })
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole('tab', { name: 'Local', selected: true })).toBeInTheDocument();
+    expect(screen.getByText('Recommended')).toBeInTheDocument();
+    expect(screen.getByText('Most private. Can be slower.')).toBeInTheDocument();
+    expect(screen.getByText('Local AI')).toBeInTheDocument();
+    expect(screen.queryByText('Qwen 2.5 3B Instruct Q4')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Artificial Analysis LLM Leaderboard/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sign in' })).not.toBeInTheDocument();
+  });
+
+  it('keeps model auto-update details out of onboarding', async () => {
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
+    installTestBridge();
+
+    render(<App />);
+
+    await screen.findByRole('tab', { name: 'Local', selected: true });
+    expect(screen.queryByRole('checkbox', { name: 'Auto update model' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/checks trusted online model sources during setup/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/uses the bundled model list offline/)).not.toBeInTheDocument();
+  });
+
+  it('shows model auto-update preferences in settings', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge({
+      portablePreferences: {
+        autoUpdateAiModel: false,
+        autoUpdateTranscriptionModel: false
+      }
+    });
+
+    render(<App />);
+
+    await openSettings(user);
+    await openSettingsSection(user, 'Models');
+
+    const autoUpdateControls = await screen.findAllByRole('checkbox', { name: 'Auto update model' });
+    expect(autoUpdateControls).toHaveLength(2);
+    expect(autoUpdateControls[0]).not.toBeChecked();
+    expect(autoUpdateControls[1]).not.toBeChecked();
+
+    await user.click(autoUpdateControls[0]);
+    await user.click(autoUpdateControls[1]);
+
+    await waitFor(() => expect(bridge.portablePreferenceSaves).toEqual([
+      { autoUpdateTranscriptionModel: true },
+      { autoUpdateAiModel: true }
+    ]));
+  });
+
+  it('refreshes model recommendations from Settings', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge();
+
+    render(<App />);
+
+    await openSettings(user);
+    await openSettingsSection(user, 'Models');
+
+    expect(screen.getByText(/Model recommendations refresh on your app update schedule/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Refresh Model List' }));
+
+    await waitFor(() => expect(bridge.modelCatalogueRefreshes).toBe(1));
+    expect(await screen.findByText(/Model list refreshed/)).toHaveTextContent('2 sources checked');
+  });
+
+  it('switches onboarding AI setup to cloud sign in without blocking start', async () => {
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const user = userEvent.setup();
+    const bridge = installTestBridge();
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('tab', { name: 'Cloud' }));
+
+    expect(bridge.selectedAiProviders).toEqual(['cloud']);
+    expect(screen.getByText('Faster answers. Sends prompts to ChatGPT.')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Sign in' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Start using Caul' })).toBeEnabled();
+  });
+
+  it('starts the Caul-managed local AI download from onboarding', async () => {
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const user = userEvent.setup();
+    const bridge = installTestBridge();
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Download local AI' }));
+
+    expect(bridge.localLlmDownloads).toBe(1);
+    expect(await screen.findByText('Ready')).toBeInTheDocument();
   });
 
   it('shows a loading state while ChatGPT sign in opens from onboarding', async () => {
@@ -568,6 +719,7 @@ describe('App', () => {
 
     render(<App />);
 
+    await user.click(await screen.findByRole('tab', { name: 'Cloud' }));
     await user.click(await screen.findByRole('button', { name: 'Sign in' }));
 
     expect(screen.getByRole('button', { name: 'Opening' })).toBeDisabled();
@@ -622,19 +774,13 @@ describe('App', () => {
     expect(await screen.findAllByText('Still needed')).not.toHaveLength(0);
     expect(screen.getAllByText('Screen & System Audio Recording')).not.toHaveLength(0);
     expect(screen.getAllByText('Local transcription')).not.toHaveLength(0);
-    expect(screen.getAllByText('ChatGPT sign in')).not.toHaveLength(0);
+    expect(screen.queryByText('ChatGPT sign in')).not.toBeInTheDocument();
   });
 
-  it('enables onboarding start when setup is complete', async () => {
+  it('enables onboarding start without ChatGPT sign in when transcription setup is complete', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
     const user = userEvent.setup();
-    const bridge = installTestBridge({
-      piStatus: testPiStatus({
-        connected: true,
-        selectedModel: 'openai-codex/gpt-5.5',
-        status: 'ready'
-      })
-    });
+    const bridge = installTestBridge();
 
     render(<App />);
 
@@ -668,6 +814,7 @@ describe('App', () => {
 
   it('does not show extra ChatGPT sign-in status text in onboarding', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const user = userEvent.setup();
     installTestBridge({
       piStatus: testPiStatus({
         connected: true,
@@ -678,6 +825,7 @@ describe('App', () => {
 
     render(<App />);
 
+    await user.click(await screen.findByRole('tab', { name: 'Cloud' }));
     await screen.findByText('ChatGPT');
 
     expect(screen.queryByText('Sign in required')).not.toBeInTheDocument();
@@ -1985,7 +2133,7 @@ describe('App', () => {
 
   it('edits general instructions from the AI toolbar', async () => {
     const user = userEvent.setup();
-    installTestBridge();
+    const bridge = installTestBridge();
 
     render(<App />);
 
@@ -2003,7 +2151,7 @@ describe('App', () => {
     await user.clear(instructionsInput);
     await user.type(instructionsInput, 'Keep the answer concise.');
 
-    expect(window.localStorage.getItem('caul.general-instructions')).toBe('Keep the answer concise.');
+    await waitFor(() => expect(bridge.portablePreferences.generalInstructions).toBe('Keep the answer concise.'));
     expect(screen.getByRole('dialog', { name: 'Instructions' })).toBeInTheDocument();
   });
 
@@ -2032,7 +2180,7 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
 
     const requestTranscript = bridge.llmRequests.at(-1)?.transcript ?? '';
-    expect(window.localStorage.getItem('caul.general-instructions')).toBeNull();
+    await waitFor(() => expect(bridge.portablePreferences.generalInstructions).toBe(''));
     expect(requestTranscript).not.toContain('General instructions:');
     expect(requestTranscript).toContain('Discussed renewal timelines.');
   });
@@ -2534,8 +2682,13 @@ describe('App', () => {
 
     await openSettings(user);
     await openSettingsSection(user, 'Models');
+    await user.click(screen.getByRole('tab', { name: 'Cloud' }));
     await selectSetting(user, 'Model', '5.5');
     await selectSetting(user, 'Reasoning', 'Low');
+    await waitFor(() => expect(bridge.portablePreferences).toMatchObject({
+      llmModel: 'openai-codex/gpt-5.5',
+      llmReasoning: 'low'
+    }));
     await openHome(user);
     await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
 
@@ -2555,6 +2708,39 @@ describe('App', () => {
       reasoning: 'low',
       transcript: expect.stringContaining('Summarise the deployment status.')
     }]);
+  });
+
+  it('restores model, reasoning and instructions from portable preferences', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge({
+      portablePreferences: {
+        generalInstructions: 'Prefer concise answers.',
+        llmModel: 'openai-codex/gpt-5.5',
+        llmReasoning: 'low'
+      }
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(bridge.portablePreferences.llmModel).toBe('openai-codex/gpt-5.5'));
+    await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
+
+    act(() => {
+      bridge.emit({
+        type: 'completed',
+        utteranceId: 1,
+        text: 'Summarise this.'
+      });
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
+
+    expect(bridge.llmRequests.at(-1)).toEqual({
+      model: 'openai-codex/gpt-5.5',
+      requestId: expect.stringMatching(/^manual-/),
+      reasoning: 'low',
+      transcript: expect.stringContaining('General instructions:\nPrefer concise answers.')
+    });
   });
 
   it('resets settings to their defaults', async () => {
@@ -2580,6 +2766,7 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: 'Open Onboarding' })).not.toBeInTheDocument();
     expect(screen.queryByText('Restores window size and position, floating button position, model and listening sources, and starter prompt templates.')).not.toBeInTheDocument();
     await openSettingsSection(user, 'Models');
+    await user.click(screen.getByRole('tab', { name: 'Cloud' }));
     await selectSetting(user, 'Model', '5.5');
     await selectSetting(user, 'Reasoning', 'Low');
     await openSettingsSection(user, 'General');
@@ -3012,6 +3199,7 @@ describe('App', () => {
     await openSettings(user);
     await user.click(screen.getByRole('checkbox', { name: 'Auto-collapse' }));
     expect(screen.getByRole('checkbox', { name: 'Auto-collapse' })).not.toBeChecked();
+    await waitFor(() => expect(bridge.portablePreferences.autoCollapse).toBe(false));
     await openHome(user);
 
     await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
@@ -3036,7 +3224,7 @@ describe('App', () => {
 
   it('defaults Auto-collapse on and restores it when settings reset', async () => {
     const user = userEvent.setup();
-    installTestBridge();
+    const bridge = installTestBridge();
 
     render(<App />);
 
@@ -3045,13 +3233,13 @@ describe('App', () => {
 
     await user.click(screen.getByRole('checkbox', { name: 'Auto-collapse' }));
     expect(screen.getByRole('checkbox', { name: 'Auto-collapse' })).not.toBeChecked();
-    expect(window.localStorage.getItem('caul.auto-collapse')).toBe('0');
+    await waitFor(() => expect(bridge.portablePreferences.autoCollapse).toBe(false));
 
     await user.click(screen.getByRole('button', { name: 'Reset Settings' }));
     await user.click(screen.getByRole('button', { name: 'Reset Settings' }));
 
     expect(screen.getByRole('checkbox', { name: 'Auto-collapse' })).toBeChecked();
-    expect(window.localStorage.getItem('caul.auto-collapse')).toBeNull();
+    await waitFor(() => expect(bridge.portablePreferences.autoCollapse).toBe(true));
   });
 
   it('clears transcript and AI response feeds from the global action toolbar', async () => {
@@ -3519,6 +3707,38 @@ describe('App', () => {
     expect(screen.getByLabelText('Transcription output')).toHaveTextContent('more stable first phrase');
   });
 
+  it('saves transcript and AI response snapshots to HTML history', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge();
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
+
+    act(() => {
+      bridge.emit({
+        endMs: 1200,
+        startMs: 0,
+        text: 'history transcript line',
+        type: 'completed',
+        utteranceId: 1
+      });
+    });
+
+    await waitFor(() => expect(bridge.historySessionSaves.some((save) => (
+      save.transcript?.includes('history transcript line')
+    ))).toBe(true));
+
+    await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
+
+    await waitFor(() => expect(bridge.historySessionSaves.some((save) => (
+      save.aiResponses?.some((response) => (
+        response.request.includes('history transcript line')
+        && response.response === 'manual llm answer'
+      ))
+    ))).toBe(true));
+  });
+
   it('keeps start disabled until LLM prewarming completes', async () => {
     let emitLlmStatus: ((status: { ok: boolean; ready: boolean; status: 'warming' | 'ready' | 'error' | 'disabled' }) => void) | null = null;
 
@@ -3709,7 +3929,9 @@ function installTestBridge(overrides: {
   selectedLocalTranscriptionModel?: LocalTranscriptionModelId | null;
   privateOverlayState?: PrivateOverlayState;
   promptTemplateState?: PromptTemplateState;
+  portablePreferences?: PortablePreferences;
   updateStatus?: UpdateStatus;
+  historyStatus?: HistoryStatus;
   openChatGptLogin?: () => Promise<{ ok: boolean; message?: string }>;
   requestLlm?: (options: {
     attachments?: PromptTemplateAttachment[];
@@ -3739,17 +3961,25 @@ function installTestBridge(overrides: {
   const openedPermissions: string[] = [];
   const requestedPermissions: string[] = [];
   let promptTemplateState = overrides.promptTemplateState ?? testPromptTemplateState();
+  let portablePreferences: PortablePreferences = overrides.portablePreferences ?? {};
+  const portablePreferenceSaves: PortablePreferences[] = [];
   let settingsResets = 0;
   let quits = 0;
   let relaunches = 0;
   const savedPiModels: string[] = [];
+  const selectedAiProviders: AiProvider[] = [];
   const selectedLocalTranscriptionModels: string[] = [];
+  let localLlmDownloads = 0;
+  let modelCatalogueRefreshes = 0;
   let chatGptLoginOpens = 0;
   let onboardingCompletes = 0;
   let parakeetDownloads = 0;
   const removedLocalTranscriptionModels: string[] = [];
   let parakeetStatus = overrides.parakeetStatus ?? testParakeetStatus();
   let piStatus = overrides.piStatus ?? testPiStatus();
+  let selectedAiProvider: AiProvider = overrides.onboardingStatus?.ai.provider ?? 'local';
+  let localLlmStatus = getCaulLocalLlmStatusForTest(overrides.onboardingStatus) ?? testLocalLlmStatus();
+  let emitLocalLlmStatus: ((status: LocalLlmStatus) => void) | null = null;
   let selectedLocalTranscriptionModel: LocalTranscriptionModelId | null = Object.hasOwn(overrides, 'selectedLocalTranscriptionModel')
     ? overrides.selectedLocalTranscriptionModel ?? null
     : overrides.onboardingStatus?.selectedLocalTranscriptionModel ?? parakeetStatus.modelId ?? null;
@@ -3770,9 +4000,14 @@ function installTestBridge(overrides: {
   let privateOverlayState = overrides.privateOverlayState ?? testPrivateOverlayState();
   let emitPrivateOverlayState: ((state: PrivateOverlayState) => void) | null = null;
   let updateStatus = overrides.updateStatus ?? testUpdateStatus();
+  let historyStatus = overrides.historyStatus ?? testHistoryStatus();
   let updateChecks = 0;
   let updateFrequencyChanges: UpdateFrequency[] = [];
   let emitUpdateStatus: ((status: UpdateStatus) => void) | null = null;
+  let historyFolderOpens = 0;
+  let historyFolderChooses = 0;
+  const historyEnabledChanges: boolean[] = [];
+  const historySessionSaves: HistorySessionUpdate[] = [];
 
   function updatePrivateOverlayState(update: Partial<PrivateOverlayState> | ((state: PrivateOverlayState) => PrivateOverlayState)) {
     privateOverlayState = typeof update === 'function'
@@ -3786,12 +4021,26 @@ function installTestBridge(overrides: {
     return privateOverlayState;
   }
 
-  const getCurrentOnboardingStatus = async () => overrides.onboardingStatus ?? testOnboardingStatus({
-    parakeet: parakeetStatus,
-    permissions: await window.caul!.permissions!.status(),
-    pi: piStatus,
-    selectedLocalTranscriptionModel
-  });
+  const getCurrentOnboardingStatus = async () => {
+    const current = overrides.onboardingStatus ?? testOnboardingStatus({
+      parakeet: parakeetStatus,
+      permissions: await window.caul!.permissions!.status(),
+      pi: piStatus,
+      selectedLocalTranscriptionModel
+    });
+
+    return {
+      ...current,
+      ai: {
+        ...current.ai,
+        provider: selectedAiProvider
+      },
+      autoUpdate: {
+        ai: portablePreferences.autoUpdateAiModel !== false,
+        transcription: portablePreferences.autoUpdateTranscriptionModel !== false
+      }
+    };
+  };
 
   window.caul = {
     capture: {
@@ -3972,9 +4221,43 @@ function installTestBridge(overrides: {
     },
     settings: {
       ai: {
+        cancelLocalDownload: async () => {
+          localLlmStatus = testLocalLlmStatus({ status: 'missing' });
+          emitLocalLlmStatus?.(localLlmStatus);
+          return localLlmStatus;
+        },
         disconnect: async () => {
           piStatus = testPiStatus({ connected: false, selectedModel: null, status: 'disconnected' });
           return piStatus;
+        },
+        downloadLocal: async () => {
+          localLlmDownloads += 1;
+          localLlmStatus = testLocalLlmStatus({
+            model: {
+              id: 'qwen2.5-3b-instruct-q4_k_m',
+              installed: true,
+              name: 'Qwen 2.5 3B Instruct Q4',
+              path: '/tmp/caul/local-llm/models/qwen2.5-3b-instruct-q4_k_m.gguf',
+              sizeGb: 2.2
+            },
+            runtime: {
+              assetName: 'llama-test.tar.gz',
+              installed: true,
+              path: '/tmp/caul/local-llm/llama-server',
+              supported: true,
+              version: 'test'
+            },
+            status: 'ready'
+          });
+          emitLocalLlmStatus?.(localLlmStatus);
+          return localLlmStatus;
+        },
+        localStatus: async () => localLlmStatus,
+        onLocalStatus: (callback) => {
+          emitLocalLlmStatus = callback;
+          return () => {
+            emitLocalLlmStatus = null;
+          };
         },
         openChatGptLogin: async () => {
           chatGptLoginOpens += 1;
@@ -3985,10 +4268,37 @@ function installTestBridge(overrides: {
         },
         openLogin: async () => ({ ok: true }),
         openModel: async () => ({ ok: true }),
+        refreshCatalogue: async () => {
+          modelCatalogueRefreshes += 1;
+          return {
+            ok: true,
+            reviewedAt: '2026-06-08',
+            sourceReports: [
+              {
+                detail: 'Intelligence Index 19',
+                ok: true,
+                source: 'Artificial Analysis',
+                url: 'https://artificialanalysis.ai/models/gemma-4-e4b'
+              },
+              {
+                detail: 'latest release v0.25.0',
+                ok: true,
+                source: 'MLX LM',
+                url: 'https://api.github.com/repos/ml-explore/mlx-lm/releases/latest'
+              }
+            ],
+            status: await getCurrentOnboardingStatus()
+          };
+        },
         saveModel: async (model) => {
           savedPiModels.push(model);
           piStatus = testPiStatus({ connected: true, selectedModel: model, status: 'ready' });
           return piStatus;
+        },
+        setProvider: async (provider) => {
+          selectedAiProvider = provider;
+          selectedAiProviders.push(provider);
+          return getCurrentOnboardingStatus();
         },
         status: async () => piStatus
       },
@@ -3999,6 +4309,30 @@ function installTestBridge(overrides: {
         },
         open: async () => getCurrentOnboardingStatus(),
         status: async () => getCurrentOnboardingStatus()
+      },
+      history: {
+        chooseFolder: async () => {
+          historyFolderChooses += 1;
+          historyStatus = testHistoryStatus({ folder: '/Users/alex/Documents/Changed Caul History' });
+          return historyStatus;
+        },
+        openFolder: async () => {
+          historyFolderOpens += 1;
+          return { ok: true };
+        },
+        saveSession: async (update) => {
+          historySessionSaves.push(update);
+          return { ok: true, filePath: `${historyStatus.folder}/2026-06/2026-06-06.html` };
+        },
+        setEnabled: async (enabled) => {
+          historyEnabledChanges.push(enabled);
+          historyStatus = {
+            ...historyStatus,
+            enabled
+          };
+          return historyStatus;
+        },
+        status: async () => historyStatus
       },
       parakeet: {
         cancelDownload: async () => {
@@ -4083,6 +4417,23 @@ function installTestBridge(overrides: {
           };
 
           return promptTemplateState;
+        }
+      },
+      preferences: {
+        load: async (legacy) => {
+          portablePreferences = {
+            ...legacy,
+            ...portablePreferences
+          };
+          return { ok: true, preferences: portablePreferences };
+        },
+        save: async (update) => {
+          portablePreferenceSaves.push(update);
+          portablePreferences = {
+            ...portablePreferences,
+            ...update
+          };
+          return { ok: true, preferences: portablePreferences };
         }
       },
       updates: {
@@ -4197,8 +4548,21 @@ function installTestBridge(overrides: {
     prepares,
     requestedPermissions,
     savedPiModels,
+    selectedAiProviders,
     selectedLocalTranscriptionModels,
+    get localLlmDownloads() {
+      return localLlmDownloads;
+    },
+    get modelCatalogueRefreshes() {
+      return modelCatalogueRefreshes;
+    },
     starts,
+    get portablePreferences() {
+      return portablePreferences;
+    },
+    get portablePreferenceSaves() {
+      return portablePreferenceSaves;
+    },
     get privateOverlayHandleDragEnds() {
       return privateOverlayHandleDragEnds;
     },
@@ -4272,6 +4636,18 @@ function installTestBridge(overrides: {
     get updateFrequencyChanges() {
       return updateFrequencyChanges;
     },
+    get historyFolderOpens() {
+      return historyFolderOpens;
+    },
+    get historyFolderChooses() {
+      return historyFolderChooses;
+    },
+    get historyEnabledChanges() {
+      return historyEnabledChanges;
+    },
+    get historySessionSaves() {
+      return historySessionSaves;
+    },
     emit: (event: TranscriptionBridgeEvent) => {
       emitTranscriptionEvent?.(event);
     }
@@ -4301,6 +4677,15 @@ function testUpdateStatus(overrides: Partial<UpdateStatus> = {}): UpdateStatus {
     lastCheckedAt: null,
     lastResult: null,
     ...overrides
+  };
+}
+
+function testHistoryStatus(overrides: Partial<HistoryStatus> = {}): HistoryStatus {
+  return {
+    enabled: overrides.enabled ?? true,
+    folder: overrides.folder ?? '/Users/alex/Documents/Caul',
+    message: overrides.message,
+    ok: overrides.ok ?? true
   };
 }
 
@@ -4433,6 +4818,11 @@ function testTranscriptionRecommendation(overrides: Partial<OnboardingStatus['tr
   return {
     autoDownloadModel: overrides.autoDownloadModel ?? true,
     autoDownloadParakeet: overrides.autoDownloadParakeet ?? true,
+    benchmark: overrides.benchmark ?? {
+      catalogueLastReviewed: '2026-06-06',
+      recommendationSource: 'Hugging Face Open ASR Leaderboard',
+      staleEntries: []
+    },
     ok: overrides.ok ?? true,
     recommended: overrides.recommended ?? 'local-parakeet',
     recommendedModel: overrides.recommendedModel ?? {
@@ -4445,6 +4835,16 @@ function testTranscriptionRecommendation(overrides: Partial<OnboardingStatus['tr
       arch: 'arm64',
       cpuCores: 10,
       freeMemoryGb: 12,
+      gpu: {
+        available: true,
+        name: 'Apple Silicon unified GPU',
+        unifiedMemory: true,
+        vendor: 'apple',
+        vramGb: 32
+      },
+      localRuntimes: {
+        caulLlamaCpp: testLocalLlmStatus()
+      },
       platform: 'darwin',
       totalMemoryGb: 32
     },
@@ -4456,6 +4856,76 @@ function testTranscriptionRecommendation(overrides: Partial<OnboardingStatus['tr
     status: overrides.status ?? 'ready',
     summary: overrides.summary ?? 'Recommended: local transcription'
   };
+}
+
+function testLocalLlmStatus(overrides: Partial<LocalLlmStatus> = {}): LocalLlmStatus {
+  return {
+    ok: overrides.ok ?? true,
+    model: overrides.model ?? {
+      id: 'qwen2.5-3b-instruct-q4_k_m',
+      installed: false,
+      name: 'Qwen 2.5 3B Instruct Q4',
+      path: '/tmp/caul/local-llm/models/qwen2.5-3b-instruct-q4_k_m.gguf',
+      sizeGb: 2.2
+    },
+    progress: overrides.progress,
+    provider: 'caul-llama.cpp',
+    runtime: overrides.runtime ?? {
+      assetName: 'llama-test.tar.gz',
+      installed: false,
+      path: null,
+      supported: true,
+      version: 'test'
+    },
+    status: overrides.status ?? 'missing'
+  };
+}
+
+function testAiRecommendation(overrides: Partial<OnboardingStatus['ai']> = {}): OnboardingStatus['ai'] {
+  const localStatus = testLocalLlmStatus();
+  return {
+    benchmark: overrides.benchmark ?? {
+      catalogueLastReviewed: '2026-06-06',
+      recommendationSource: 'Artificial Analysis LLM Leaderboard',
+      staleEntries: []
+    },
+    localRuntime: overrides.localRuntime ?? localStatus,
+    provider: overrides.provider ?? 'local',
+    recommended: overrides.recommended ?? 'local',
+    recommendedModel: overrides.recommendedModel ?? {
+      id: 'qwen2.5-3b-instruct-q4_k_m',
+      name: 'Qwen 2.5 3B Instruct Q4',
+      reason: 'Qwen 2.5 3B Instruct Q4 is the best local AI response fit for this machine from the bundled benchmark catalogue.',
+      runtime: 'llama.cpp'
+    },
+    resources: overrides.resources ?? {
+      accelerator: 'apple-silicon',
+      arch: 'arm64',
+      cpuCores: 10,
+      freeMemoryGb: 12,
+      gpu: {
+        available: true,
+        name: 'Apple Silicon unified GPU',
+        unifiedMemory: true,
+        vendor: 'apple',
+        vramGb: 32
+      },
+      localRuntimes: {
+        caulLlamaCpp: localStatus
+      },
+      platform: 'darwin',
+      totalMemoryGb: 32
+    },
+    status: overrides.status ?? 'ready',
+    summary: overrides.summary ?? 'Recommended: Qwen 2.5 3B Instruct Q4 local AI responses',
+    viable: overrides.viable ?? true
+  };
+}
+
+function getCaulLocalLlmStatusForTest(status: OnboardingStatus | undefined) {
+  const runtime = status?.ai.resources.localRuntimes?.caulLlamaCpp;
+
+  return runtime?.provider === 'caul-llama.cpp' || runtime?.provider === 'caul-mlx' ? runtime : null;
 }
 
 function testOnboardingStatus(overrides: Partial<OnboardingStatus> = {}): OnboardingStatus {
@@ -4492,10 +4962,14 @@ function testOnboardingStatus(overrides: Partial<OnboardingStatus> = {}): Onboar
     permissions.permissions.every((permission) => permission.status === 'granted')
     && parakeet.installed
     && selectedLocalTranscriptionModel === parakeet.modelId
-    && pi.connected
   );
 
   return {
+    ai: overrides.ai ?? testAiRecommendation(),
+    autoUpdate: overrides.autoUpdate ?? {
+      ai: true,
+      transcription: true
+    },
     complete,
     completedAt: overrides.completedAt ?? null,
     ok: overrides.ok ?? true,

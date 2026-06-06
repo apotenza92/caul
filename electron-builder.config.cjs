@@ -116,6 +116,7 @@ module.exports = {
   files: [
     'dist/**/*',
     'electron/**/*',
+    'model-catalog.json',
     'package.json',
     'assets/icons/**/*'
   ],
@@ -142,6 +143,10 @@ module.exports = {
         arch: winArchitectures
       }
     ]
+  },
+  nsis: {
+    include: 'build/installer.nsh',
+    uninstallDisplayName: '${productName}'
   },
   linux: {
     artifactName: `caul${isBeta ? '-beta' : ''}-\${arch}.\${ext}`,

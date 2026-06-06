@@ -1,0 +1,348 @@
+{
+  "version": 1,
+  "lastReviewed": "2026-06-06",
+  "sources": {
+    "asrLeaderboard": {
+      "name": "Hugging Face Open ASR Leaderboard",
+      "url": "https://huggingface.co/datasets/huggingworld/open-asr-leaderboard",
+      "paperUrl": "https://arxiv.org/abs/2510.06961"
+    },
+    "llmLeaderboard": {
+      "name": "Artificial Analysis LLM Leaderboard",
+      "url": "https://artificialanalysis.ai/leaderboards/models"
+    },
+    "llmPreference": {
+      "name": "LMArena",
+      "url": "https://huggingface.co/spaces/lmarena-ai/arena-leaderboard"
+    },
+    "llamaCpp": {
+      "name": "llama.cpp releases",
+      "url": "https://github.com/ggml-org/llama.cpp/releases"
+    },
+    "mlxLm": {
+      "name": "MLX LM",
+      "url": "https://github.com/ml-explore/mlx-lm"
+    },
+    "gemma": {
+      "name": "Google DeepMind Gemma",
+      "url": "https://deepmind.google/models/gemma/"
+    }
+  },
+  "runtimes": {
+    "llamaCpp": {
+      "version": "b9542",
+      "licence": "MIT",
+      "assets": {
+        "darwin-arm64": {
+          "archiveName": "llama-b9542-bin-macos-arm64.tar.gz",
+          "url": "https://github.com/ggml-org/llama.cpp/releases/download/b9542/llama-b9542-bin-macos-arm64.tar.gz",
+          "sizeBytes": 10517575
+        },
+        "linux-arm64": {
+          "archiveName": "llama-b9542-bin-ubuntu-arm64.tar.gz",
+          "url": "https://github.com/ggml-org/llama.cpp/releases/download/b9542/llama-b9542-bin-ubuntu-arm64.tar.gz",
+          "sizeBytes": 12395608
+        },
+        "linux-x64": {
+          "archiveName": "llama-b9542-bin-ubuntu-x64.tar.gz",
+          "url": "https://github.com/ggml-org/llama.cpp/releases/download/b9542/llama-b9542-bin-ubuntu-x64.tar.gz",
+          "sizeBytes": 15364337
+        },
+        "win32-arm64": {
+          "archiveName": "llama-b9542-bin-win-cpu-arm64.zip",
+          "url": "https://github.com/ggml-org/llama.cpp/releases/download/b9542/llama-b9542-bin-win-cpu-arm64.zip",
+          "sizeBytes": 10531781
+        },
+        "win32-x64": {
+          "archiveName": "llama-b9542-bin-win-cpu-x64.zip",
+          "url": "https://github.com/ggml-org/llama.cpp/releases/download/b9542/llama-b9542-bin-win-cpu-x64.zip",
+          "sizeBytes": 16923499
+        }
+      }
+    }
+  },
+  "transcription": [
+    {
+      "id": "parakeet",
+      "name": "Parakeet v3",
+      "providerModelId": "nvidia/parakeet-tdt-0.6b-v3",
+      "runtime": "caul-desktop-backend",
+      "implemented": true,
+      "licence": "CC-BY-4.0",
+      "downloadSizeMb": 620,
+      "estimatedMemoryGb": 2.2,
+      "minimumTotalMemoryGb": 8,
+      "minimumFreeMemoryGb": 2,
+      "minimumCpuCores": 4,
+      "accelerators": ["apple-silicon", "cpu"],
+      "platforms": ["darwin", "win32", "linux"],
+      "languageCoverage": ["en"],
+      "streaming": true,
+      "benchmark": {
+        "rankSource": "Hugging Face Open ASR Leaderboard",
+        "werSource": "Hugging Face Open ASR Leaderboard",
+        "rtfxSource": "Hugging Face Open ASR Leaderboard",
+        "accuracyBand": "strong",
+        "latencyBand": "live"
+      },
+      "implementationMaturity": "production",
+      "reviewedAt": "2026-06-06",
+      "provenanceUrl": "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3"
+    },
+    {
+      "id": "moonshine-tiny",
+      "name": "Moonshine tiny",
+      "providerModelId": "UsefulSensors/moonshine",
+      "runtime": "caul-desktop-backend",
+      "implemented": true,
+      "licence": "Apache-2.0",
+      "downloadSizeMb": 110,
+      "estimatedMemoryGb": 0.8,
+      "minimumTotalMemoryGb": 4,
+      "minimumFreeMemoryGb": 1,
+      "minimumCpuCores": 2,
+      "accelerators": ["cpu"],
+      "platforms": ["darwin", "win32", "linux"],
+      "languageCoverage": ["en"],
+      "streaming": true,
+      "benchmark": {
+        "rankSource": "Hugging Face Open ASR Leaderboard and model card comparisons",
+        "werSource": "Moonshine model card",
+        "rtfxSource": "Caul measured smoke results",
+        "accuracyBand": "lightweight",
+        "latencyBand": "live"
+      },
+      "implementationMaturity": "production",
+      "reviewedAt": "2026-06-06",
+      "provenanceUrl": "https://github.com/usefulsensors/moonshine"
+    },
+    {
+      "id": "canary-qwen-2.5b",
+      "name": "Canary-Qwen 2.5B",
+      "providerModelId": "nvidia/canary-qwen-2.5b",
+      "runtime": "not-implemented",
+      "implemented": false,
+      "licence": "CC-BY-NC-4.0",
+      "downloadSizeMb": 6200,
+      "estimatedMemoryGb": 10,
+      "minimumTotalMemoryGb": 16,
+      "minimumFreeMemoryGb": 10,
+      "minimumCpuCores": 8,
+      "accelerators": ["gpu"],
+      "platforms": ["darwin", "win32", "linux"],
+      "languageCoverage": ["multilingual"],
+      "streaming": false,
+      "benchmark": {
+        "rankSource": "Hugging Face Open ASR Leaderboard",
+        "werSource": "Hugging Face Open ASR Leaderboard",
+        "rtfxSource": "Hugging Face Open ASR Leaderboard",
+        "accuracyBand": "frontier-open",
+        "latencyBand": "offline"
+      },
+      "implementationMaturity": "research",
+      "reviewedAt": "2026-06-06",
+      "provenanceUrl": "https://huggingface.co/nvidia/canary-qwen-2.5b"
+    }
+  ],
+  "aiResponse": [
+    {
+      "id": "qwen2.5-1.5b-instruct-q4_k_m",
+      "name": "Qwen 2.5 1.5B Instruct Q4",
+      "runtime": "llama.cpp",
+      "local": true,
+      "cloud": false,
+      "implemented": false,
+      "openWeights": true,
+      "licence": "Apache-2.0",
+      "modelSizeB": 1.5,
+      "downloadSizeGb": 1.05,
+      "estimatedMemoryGb": 3.2,
+      "minimumTotalMemoryGb": 6,
+      "minimumFreeMemoryGb": 2.2,
+      "minimumCpuCores": 4,
+      "minimumVramGb": 0,
+      "contextWindowTokens": 32768,
+      "quantisation": ["Q4_K_M"],
+      "toolSupport": false,
+      "reasoningSupport": false,
+      "platforms": ["darwin", "win32", "linux"],
+      "caulSmokeStatus": "failed-basic-instruction",
+      "defaultPriority": 0,
+      "fileName": "qwen2.5-1.5b-instruct-q4_k_m.gguf",
+      "downloadUrl": "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
+      "benchmark": {
+        "qualitySource": "Artificial Analysis LLM Leaderboard and Qwen 2.5 model card family comparisons",
+        "preferenceSource": "LMArena model family comparisons",
+        "speedSource": "llama.cpp local runtime profile and Caul local smoke measurements",
+        "qualityBand": "small-local",
+        "latencyBand": "fast-local"
+      },
+      "reviewedAt": "2026-06-06",
+      "provenanceUrl": "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF"
+    },
+    {
+      "id": "qwen2.5-3b-instruct-q4_k_m",
+      "name": "Qwen 2.5 3B Instruct Q4",
+      "runtime": "llama.cpp",
+      "local": true,
+      "cloud": false,
+      "implemented": true,
+      "openWeights": true,
+      "licence": "Apache-2.0",
+      "modelSizeB": 3,
+      "downloadSizeGb": 2.2,
+      "estimatedMemoryGb": 4.5,
+      "minimumTotalMemoryGb": 8,
+      "minimumFreeMemoryGb": 3.5,
+      "minimumCpuCores": 4,
+      "minimumVramGb": 0,
+      "contextWindowTokens": 32768,
+      "quantisation": ["Q4_K_M"],
+      "toolSupport": false,
+      "reasoningSupport": false,
+      "platforms": ["darwin", "win32", "linux"],
+      "caulSmokeStatus": "passed-basic-instruction",
+      "defaultPriority": 20,
+      "fileName": "qwen2.5-3b-instruct-q4_k_m.gguf",
+      "downloadUrl": "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
+      "benchmark": {
+        "qualitySource": "Artificial Analysis LLM Leaderboard and Qwen model card family comparisons",
+        "preferenceSource": "LMArena model family comparisons",
+        "speedSource": "llama.cpp local runtime profile",
+        "qualityBand": "small-local",
+        "latencyBand": "fast-local"
+      },
+      "reviewedAt": "2026-06-06",
+      "provenanceUrl": "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF"
+    },
+    {
+      "id": "qwen3-1.7b-mlx-4bit",
+      "name": "Qwen3 1.7B MLX 4-bit",
+      "runtime": "mlx-lm",
+      "local": true,
+      "cloud": false,
+      "implemented": true,
+      "openWeights": true,
+      "licence": "Apache-2.0",
+      "modelSizeB": 1.7,
+      "downloadSizeGb": 1.1,
+      "estimatedMemoryGb": 3,
+      "minimumTotalMemoryGb": 8,
+      "minimumFreeMemoryGb": 3,
+      "minimumCpuCores": 4,
+      "minimumVramGb": 0,
+      "contextWindowTokens": 40960,
+      "quantisation": ["4-bit MLX"],
+      "toolSupport": false,
+      "reasoningSupport": true,
+      "platforms": ["darwin"],
+      "defaultPriority": 35,
+      "providerModelId": "Qwen/Qwen3-1.7B-MLX-4bit",
+      "benchmark": {
+        "qualitySource": "Artificial Analysis Qwen3 1.7B Intelligence Index and Qwen3 model card family comparisons",
+        "preferenceSource": "LMArena model family comparisons",
+        "speedSource": "MLX LM OpenAI-compatible server and Caul local smoke measurements",
+        "qualityBand": "tiny-local",
+        "latencyBand": "fast-local"
+      },
+      "reviewedAt": "2026-06-06",
+      "provenanceUrl": "https://huggingface.co/Qwen/Qwen3-1.7B-MLX-4bit"
+    },
+    {
+      "id": "gemma-4-e2b-it",
+      "name": "Gemma 4 E2B IT",
+      "runtime": "not-implemented",
+      "local": true,
+      "cloud": false,
+      "implemented": false,
+      "openWeights": true,
+      "licence": "Gemma Terms of Use",
+      "modelSizeB": 2,
+      "downloadSizeGb": 4,
+      "estimatedMemoryGb": 6,
+      "minimumTotalMemoryGb": 12,
+      "minimumFreeMemoryGb": 5,
+      "minimumCpuCores": 6,
+      "minimumVramGb": 0,
+      "contextWindowTokens": 32768,
+      "quantisation": [],
+      "toolSupport": false,
+      "reasoningSupport": true,
+      "platforms": ["darwin", "win32", "linux"],
+      "benchmark": {
+        "qualitySource": "Artificial Analysis LLM Leaderboard and Google DeepMind Gemma model family information",
+        "preferenceSource": "LMArena model family comparisons",
+        "speedSource": "Not implemented in Caul local runtime yet",
+        "qualityBand": "small-local",
+        "latencyBand": "unknown"
+      },
+      "reviewedAt": "2026-06-06",
+      "provenanceUrl": "https://deepmind.google/models/gemma/"
+    },
+    {
+      "id": "gemma-4-12b-it-q4_k_m",
+      "name": "Gemma 4 12B IT Q4",
+      "runtime": "llama.cpp",
+      "local": true,
+      "cloud": false,
+      "implemented": false,
+      "openWeights": true,
+      "licence": "Apache-2.0",
+      "modelSizeB": 12,
+      "downloadSizeGb": 6.5,
+      "estimatedMemoryGb": 12,
+      "minimumTotalMemoryGb": 16,
+      "minimumFreeMemoryGb": 10,
+      "minimumCpuCores": 8,
+      "minimumVramGb": 0,
+      "contextWindowTokens": 131072,
+      "quantisation": ["Q4_K_M"],
+      "toolSupport": true,
+      "reasoningSupport": true,
+      "platforms": ["darwin", "win32", "linux"],
+      "caulSmokeStatus": "pending",
+      "defaultPriority": 0,
+      "fileName": "gemma-4-12b-it-Q4_K_M.gguf",
+      "downloadUrl": "https://huggingface.co/bartowski/gemma-4-12B-it-GGUF/resolve/main/gemma-4-12B-it-Q4_K_M.gguf",
+      "benchmark": {
+        "qualitySource": "Google DeepMind Gemma 4 12B launch benchmarks and Artificial Analysis Gemma 4 family benchmarks",
+        "preferenceSource": "LMArena and Gemma 4 family comparisons",
+        "speedSource": "Google DeepMind Gemma 4 12B local hardware guidance; Caul smoke pending",
+        "qualityBand": "strong-local",
+        "latencyBand": "balanced-local"
+      },
+      "reviewedAt": "2026-06-06",
+      "provenanceUrl": "https://deepmind.google/models/gemma/gemma-4/"
+    },
+    {
+      "id": "openai-codex/gpt-5.5",
+      "name": "GPT-5.5 through ChatGPT",
+      "runtime": "pi-chatgpt",
+      "local": false,
+      "cloud": true,
+      "implemented": true,
+      "openWeights": false,
+      "licence": "Proprietary",
+      "modelSizeB": null,
+      "downloadSizeGb": 0,
+      "estimatedMemoryGb": 0,
+      "minimumTotalMemoryGb": 0,
+      "minimumFreeMemoryGb": 0,
+      "minimumCpuCores": 0,
+      "minimumVramGb": 0,
+      "contextWindowTokens": 400000,
+      "quantisation": [],
+      "toolSupport": true,
+      "reasoningSupport": true,
+      "benchmark": {
+        "qualitySource": "Artificial Analysis LLM Leaderboard",
+        "preferenceSource": "LMArena",
+        "speedSource": "Caul Pi bridge smoke measurements",
+        "qualityBand": "frontier-cloud",
+        "latencyBand": "network"
+      },
+      "reviewedAt": "2026-06-06",
+      "provenanceUrl": "https://developers.openai.com/"
+    }
+  ]
+}

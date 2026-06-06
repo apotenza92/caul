@@ -64,10 +64,24 @@ contextBridge.exposeInMainWorld('caul', {
   settings: {
     ai: {
       disconnect: () => ipcRenderer.invoke('caul:pi-disconnect'),
+      cancelLocalDownload: () => ipcRenderer.invoke('caul:local-llm-cancel-download'),
+      downloadLocal: () => ipcRenderer.invoke('caul:local-llm-download'),
+      localStatus: () => ipcRenderer.invoke('caul:local-llm-status'),
+      onLocalStatus: (callback) => {
+        const listener = (_event, payload) => callback(payload);
+
+        ipcRenderer.on('caul:local-llm-status', listener);
+
+        return () => {
+          ipcRenderer.off('caul:local-llm-status', listener);
+        };
+      },
       openChatGptLogin: () => ipcRenderer.invoke('caul:pi-chatgpt-login'),
       openLogin: () => ipcRenderer.invoke('caul:pi-login'),
       openModel: () => ipcRenderer.invoke('caul:pi-model'),
+      refreshCatalogue: () => ipcRenderer.invoke('caul:model-catalogue-refresh'),
       saveModel: (model) => ipcRenderer.invoke('caul:pi-save-model', { model }),
+      setProvider: (provider) => ipcRenderer.invoke('caul:ai-provider', { provider }),
       status: () => ipcRenderer.invoke('caul:pi-status')
     },
     onboarding: {
@@ -75,6 +89,13 @@ contextBridge.exposeInMainWorld('caul', {
       fitContent: (size) => ipcRenderer.invoke('caul:onboarding-fit-content', size),
       open: () => ipcRenderer.invoke('caul:onboarding-open'),
       status: () => ipcRenderer.invoke('caul:onboarding-status')
+    },
+    history: {
+      chooseFolder: () => ipcRenderer.invoke('caul:history-choose-folder'),
+      openFolder: () => ipcRenderer.invoke('caul:history-open-folder'),
+      saveSession: (update) => ipcRenderer.invoke('caul:history-save-session', update),
+      setEnabled: (enabled) => ipcRenderer.invoke('caul:history-set-enabled', { enabled }),
+      status: () => ipcRenderer.invoke('caul:history-status')
     },
     parakeet: {
       cancelDownload: () => ipcRenderer.invoke('caul:parakeet-cancel-download'),
@@ -99,6 +120,10 @@ contextBridge.exposeInMainWorld('caul', {
       reset: () => ipcRenderer.invoke('caul:prompt-templates-reset'),
       save: (template) => ipcRenderer.invoke('caul:prompt-templates-save', { template }),
       setSelected: (ids) => ipcRenderer.invoke('caul:prompt-templates-set-selected', { ids })
+    },
+    preferences: {
+      load: (legacy) => ipcRenderer.invoke('caul:preferences-load', { legacy }),
+      save: (update) => ipcRenderer.invoke('caul:preferences-save', update)
     },
     updates: {
       checkNow: () => ipcRenderer.invoke('caul:updates-check-now'),
