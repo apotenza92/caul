@@ -635,6 +635,11 @@
             document.getElementById("version-display").textContent = stable.tag_name;
             document.getElementById("version-display").classList.add("visible");
             updateAssetSizes(stable);
+
+            if (hasReleaseAsset(stable, "Caul-Beta-macos-arm64.zip")) {
+              releaseAvailable.beta = true;
+              setBetaDownloads(stable.tag_name);
+            }
           }
 
           const betaResponse = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=20`);
@@ -644,24 +649,32 @@
             if (beta) {
               releaseAvailable.beta = true;
               updateAssetSizes(beta);
-              const base = `https://github.com/${repo}/releases/download/${beta.tag_name}`;
-              downloads.beta.mac = `${base}/Caul-Beta-macos-arm64.zip`;
-              downloads.beta.windows = {
-                arm64: `${base}/Caul-Beta-windows-arm64-setup.exe`,
-                x64: `${base}/Caul-Beta-windows-x64-setup.exe`
-              };
-              downloads.beta.linux = {
-                appImageArm64: `${base}/caul-beta-arm64.AppImage`,
-                debArm64: `${base}/caul-beta-arm64.deb`,
-                appImageX64: `${base}/caul-beta-x64.AppImage`,
-                debX64: `${base}/caul-beta-x64.deb`,
-                rpmX64: `${base}/caul-beta-x64.rpm`
-              };
+              setBetaDownloads(beta.tag_name);
             }
           }
         } catch {
           // Release metadata may be unavailable during GitHub API downtime or rate limits.
         }
+      }
+
+      function hasReleaseAsset(release, name) {
+        return Array.isArray(release?.assets) && release.assets.some((asset) => asset.name === name);
+      }
+
+      function setBetaDownloads(tagName) {
+        const base = `https://github.com/${repo}/releases/download/${tagName}`;
+        downloads.beta.mac = `${base}/Caul-Beta-macos-arm64.zip`;
+        downloads.beta.windows = {
+          arm64: `${base}/Caul-Beta-windows-arm64-setup.exe`,
+          x64: `${base}/Caul-Beta-windows-x64-setup.exe`
+        };
+        downloads.beta.linux = {
+          appImageArm64: `${base}/caul-beta-arm64.AppImage`,
+          debArm64: `${base}/caul-beta-arm64.deb`,
+          appImageX64: `${base}/caul-beta-x64.AppImage`,
+          debX64: `${base}/caul-beta-x64.deb`,
+          rpmX64: `${base}/caul-beta-x64.rpm`
+        };
       }
 
       function updateAssetSizes(release) {
