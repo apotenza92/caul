@@ -1335,6 +1335,10 @@ function getMissingOnboardingItems(status: OnboardingStatus | null) {
     missing.push('Local transcription');
   }
 
+  if (!isOnboardingAiReady(status)) {
+    missing.push(status.ai.provider === 'cloud' ? 'ChatGPT sign-in' : 'Local AI');
+  }
+
   return missing;
 }
 
@@ -1344,6 +1348,14 @@ function isOnboardingTranscriptionModelReady(status: OnboardingStatus) {
     && status.parakeet.installed
     && status.parakeet.modelId === status.selectedLocalTranscriptionModel
   );
+}
+
+function isOnboardingAiReady(status: OnboardingStatus) {
+  const localRuntime = getCaulLocalLlmStatus(status);
+  const localReady = Boolean(localRuntime?.runtime.installed && localRuntime.model?.installed);
+  const cloudReady = Boolean(status.pi.connected);
+
+  return status.ai.provider === 'cloud' ? cloudReady : localReady;
 }
 
 function OnboardingPanel({
@@ -1426,7 +1438,7 @@ function OnboardingAiModelSetup({
       ? 'Downloading'
       : ai?.recommended === 'cloud'
         ? 'This computer may be better with Cloud'
-        : 'Can be set up later';
+        : 'Not set up';
 
   return (
     <div className="grid gap-2">
@@ -1450,18 +1462,15 @@ function OnboardingAiModelSetup({
       {selectedProvider === 'local' ? (
         <div role="tabpanel" className="grid gap-1.5">
           <p className="text-xs leading-5 text-muted-foreground">
-            Most private. Can be slower.
+            Runs on this computer. Nothing is sent to the internet. Usually slower than Cloud.
           </p>
-          <StatusRow
-            action={localModelInstalled
-              ? <StatusPill ready>Ready</StatusPill>
-              : isLocalDownloading
-                ? <StatusPill ready={false}>Downloading</StatusPill>
-                : <StatusPill ready={false}>Setup later</StatusPill>}
-            label="Local AI"
-            ready={localModelInstalled}
-            value={localStatusValue}
-          />
+          {localModelInstalled ? (
+            <StatusRow
+              action={<StatusPill ready>Ready</StatusPill>}
+              label="Local AI"
+              ready
+            />
+          ) : null}
           {isLocalDownloading && caulLocalStatus?.progress ? (
             <div aria-live="polite" className="text-xs tabular-nums text-muted-foreground">
               {caulLocalStatus.progress.label}: {caulLocalStatus.progress.percent}%
@@ -1478,6 +1487,9 @@ function OnboardingAiModelSetup({
               )}
             </div>
           ) : null}
+          {!localModelInstalled && !isLocalDownloading && ai?.recommended === 'cloud' ? (
+            <p className="text-xs leading-5 text-muted-foreground">{localStatusValue}</p>
+          ) : null}
           {caulLocalStatus?.runtime.supported === false ? (
             <p className="text-xs leading-5 text-muted-foreground">
               Local AI is not available on this computer yet.
@@ -1487,24 +1499,22 @@ function OnboardingAiModelSetup({
       ) : (
         <div role="tabpanel" className="grid gap-1.5">
           <p className="text-xs leading-5 text-muted-foreground">
-            Faster answers. Sends prompts to ChatGPT.
+            Sends transcripts to ChatGPT. Usually faster and smarter than Local.
           </p>
-          <StatusRow
-            action={!piReady ? (
-              <div className="flex items-center gap-1.5">
-                <StatusPill ready={false}>{isChatGptSigningIn ? 'Opening browser' : 'Optional'}</StatusPill>
-                <Button disabled={isChatGptSigningIn} onClick={onSignInWithChatGpt} size="sm" type="button">
-                  {isChatGptSigningIn ? <LoaderCircleIcon className="mr-1.5 size-3.5 animate-spin" /> : null}
-                  {isChatGptSigningIn ? 'Opening' : 'Sign in'}
-                </Button>
-              </div>
-            ) : (
-              <StatusPill ready>Signed in</StatusPill>
-            )}
-            label="ChatGPT"
-            ready={piReady}
-            value={piReady ? 'Ready' : 'Optional'}
-          />
+          {!piReady ? (
+            <div className="flex items-center gap-1.5">
+              <Button disabled={isChatGptSigningIn} onClick={onSignInWithChatGpt} size="sm" type="button">
+                {isChatGptSigningIn ? <LoaderCircleIcon className="mr-1.5 size-3.5 animate-spin" /> : null}
+                {isChatGptSigningIn ? 'Opening' : 'Sign in'}
+              </Button>
+            </div>
+          ) : (
+            <StatusRow
+              action={<StatusPill ready>Ready</StatusPill>}
+              label="ChatGPT"
+              ready
+            />
+          )}
         </div>
       )}
     </div>

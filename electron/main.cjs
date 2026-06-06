@@ -3740,12 +3740,18 @@ async function getOnboardingStatus({ refreshCatalogue = true } = {}) {
   const transcription = getTranscriptionRecommendation();
   const profileSettings = readProfileSettings();
   const selectedLocalTranscriptionModel = getSelectedLocalTranscriptionModelId();
+  const selectedAiProvider = getSelectedAiProvider();
+  const localAiReady = ai.localRuntime?.status === 'ready'
+    && Boolean(ai.localRuntime?.runtime?.installed)
+    && Boolean(ai.localRuntime?.model?.installed);
+  const cloudAiReady = Boolean(pi.connected);
+  const aiReady = selectedAiProvider === 'local' ? localAiReady : cloudAiReady;
   const transcriptionModelReady = Boolean(
     selectedLocalTranscriptionModel
     && parakeet.installed
     && parakeet.modelId === selectedLocalTranscriptionModel
   );
-  const complete = permissionsComplete && transcriptionModelReady;
+  const complete = permissionsComplete && transcriptionModelReady && aiReady;
 
   return {
     ok: true,

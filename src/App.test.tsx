@@ -613,8 +613,7 @@ describe('App', () => {
 
     expect(await screen.findByRole('tab', { name: 'Local', selected: true })).toBeInTheDocument();
     expect(screen.getByText('Recommended')).toBeInTheDocument();
-    expect(screen.getByText('Most private. Can be slower.')).toBeInTheDocument();
-    expect(screen.getByText('Local AI')).toBeInTheDocument();
+    expect(screen.getByText('Runs on this computer. Nothing is sent to the internet. Usually slower than Cloud.')).toBeInTheDocument();
     expect(screen.queryByText('Qwen 2.5 3B Instruct Q4')).not.toBeInTheDocument();
     expect(screen.queryByText(/Artificial Analysis LLM Leaderboard/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Sign in' })).not.toBeInTheDocument();
@@ -677,7 +676,7 @@ describe('App', () => {
     expect(await screen.findByText(/Model list refreshed/)).toHaveTextContent('2 sources checked');
   });
 
-  it('switches onboarding AI setup to cloud sign in without blocking start', async () => {
+  it('requires ChatGPT sign in when Cloud is selected', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
     const user = userEvent.setup();
     const bridge = installTestBridge();
@@ -687,9 +686,9 @@ describe('App', () => {
     await user.click(await screen.findByRole('tab', { name: 'Cloud' }));
 
     expect(bridge.selectedAiProviders).toEqual(['cloud']);
-    expect(screen.getByText('Faster answers. Sends prompts to ChatGPT.')).toBeInTheDocument();
+    expect(screen.getByText('Sends transcripts to ChatGPT. Usually faster and smarter than Local.')).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'Sign in' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Start using Caul' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Start using Caul' })).toBeDisabled();
   });
 
   it('starts the Caul-managed local AI download from onboarding', async () => {
@@ -702,7 +701,8 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: 'Download local AI' }));
 
     expect(bridge.localLlmDownloads).toBe(1);
-    expect(await screen.findByText('Ready')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText('Ready').length).toBeGreaterThan(0));
+    expect(screen.getByRole('button', { name: 'Start using Caul' })).toBeEnabled();
   });
 
   it('shows a loading state while ChatGPT sign in opens from onboarding', async () => {
@@ -723,7 +723,6 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: 'Sign in' }));
 
     expect(screen.getByRole('button', { name: 'Opening' })).toBeDisabled();
-    expect(screen.getByText('Opening browser')).toBeInTheDocument();
 
     resolveLogin({ ok: true });
 
@@ -774,13 +773,27 @@ describe('App', () => {
     expect(await screen.findAllByText('Still needed')).not.toHaveLength(0);
     expect(screen.getAllByText('Screen & System Audio Recording')).not.toHaveLength(0);
     expect(screen.getAllByText('Local transcription')).not.toHaveLength(0);
+    expect(screen.getAllByText('Local AI')).not.toHaveLength(0);
     expect(screen.queryByText('ChatGPT sign in')).not.toBeInTheDocument();
   });
 
-  it('enables onboarding start without ChatGPT sign in when transcription setup is complete', async () => {
+  it('enables onboarding start when local AI and transcription setup are complete', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
     const user = userEvent.setup();
-    const bridge = installTestBridge();
+    const readyLocalAi = testReadyLocalLlmStatus();
+    const bridge = installTestBridge({
+      onboardingStatus: testOnboardingStatus({
+        ai: testAiRecommendation({
+          localRuntime: readyLocalAi,
+          resources: {
+            ...testAiRecommendation().resources,
+            localRuntimes: {
+              caulLlamaCpp: readyLocalAi
+            }
+          }
+        })
+      })
+    });
 
     render(<App />);
 
@@ -794,11 +807,19 @@ describe('App', () => {
 
   it('uses a ready Parakeet model automatically during onboarding', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const readyLocalAi = testReadyLocalLlmStatus();
     const bridge = installTestBridge({
-      piStatus: testPiStatus({
-        connected: true,
-        selectedModel: 'openai-codex/gpt-5.5',
-        status: 'ready'
+      onboardingStatus: testOnboardingStatus({
+        ai: testAiRecommendation({
+          localRuntime: readyLocalAi,
+          resources: {
+            ...testAiRecommendation().resources,
+            localRuntimes: {
+              caulLlamaCpp: readyLocalAi
+            }
+          }
+        }),
+        selectedLocalTranscriptionModel: null
       }),
       selectedLocalTranscriptionModel: null
     });
@@ -807,7 +828,7 @@ describe('App', () => {
 
     const startButton = await screen.findByRole('button', { name: 'Start using Caul' });
     await waitFor(() => expect(startButton).toBeEnabled());
-    expect(screen.getByText('Ready')).toBeInTheDocument();
+    expect(screen.getAllByText('Ready').length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Use' })).not.toBeInTheDocument();
     await waitFor(() => expect(bridge.selectedLocalTranscriptionModels).toEqual(['parakeet']));
   });
@@ -4028,17 +4049,40 @@ function installTestBridge(overrides: {
       pi: piStatus,
       selectedLocalTranscriptionModel
     });
+    const nextAi = {
+      ...current.ai,
+      localRuntime: localLlmStatus,
+      provider: selectedAiProvider,
+      resources: {
+        ...current.ai.resources,
+        localRuntimes: {
+          ...current.ai.resources.localRuntimes,
+          caulLlamaCpp: localLlmStatus
+        }
+      }
+    };
+    const localAiReady = Boolean(localLlmStatus.runtime.installed && localLlmStatus.model?.installed);
+    const cloudAiReady = Boolean(piStatus.connected);
+    const aiReady = selectedAiProvider === 'cloud' ? cloudAiReady : localAiReady;
+    const transcriptionReady = Boolean(
+      selectedLocalTranscriptionModel
+      && parakeetStatus.installed
+      && parakeetStatus.modelId === selectedLocalTranscriptionModel
+    );
+    const permissions = await window.caul!.permissions!.status();
+    const permissionsReady = permissions.permissions.every((permission) => permission.status === 'granted');
+    const complete = permissionsReady && transcriptionReady && aiReady;
 
     return {
       ...current,
-      ai: {
-        ...current.ai,
-        provider: selectedAiProvider
-      },
+      ai: nextAi,
       autoUpdate: {
         ai: portablePreferences.autoUpdateAiModel !== false,
         transcription: portablePreferences.autoUpdateTranscriptionModel !== false
-      }
+      },
+      complete,
+      required: !complete,
+      selectedLocalTranscriptionModel
     };
   };
 
@@ -4881,6 +4925,26 @@ function testLocalLlmStatus(overrides: Partial<LocalLlmStatus> = {}): LocalLlmSt
   };
 }
 
+function testReadyLocalLlmStatus(): LocalLlmStatus {
+  return testLocalLlmStatus({
+    model: {
+      id: 'qwen2.5-3b-instruct-q4_k_m',
+      installed: true,
+      name: 'Qwen 2.5 3B Instruct Q4',
+      path: '/tmp/caul/local-llm/models/qwen2.5-3b-instruct-q4_k_m.gguf',
+      sizeGb: 2.2
+    },
+    runtime: {
+      assetName: 'llama-test.tar.gz',
+      installed: true,
+      path: '/tmp/caul/local-llm/llama-server',
+      supported: true,
+      version: 'test'
+    },
+    status: 'ready'
+  });
+}
+
 function testAiRecommendation(overrides: Partial<OnboardingStatus['ai']> = {}): OnboardingStatus['ai'] {
   const localStatus = testLocalLlmStatus();
   return {
@@ -4955,17 +5019,23 @@ function testOnboardingStatus(overrides: Partial<OnboardingStatus> = {}): Onboar
   };
   const parakeet = overrides.parakeet ?? testParakeetStatus();
   const pi = overrides.pi ?? testPiStatus();
+  const ai = overrides.ai ?? testAiRecommendation();
   const selectedLocalTranscriptionModel = Object.hasOwn(overrides, 'selectedLocalTranscriptionModel')
     ? overrides.selectedLocalTranscriptionModel ?? null
     : parakeet.modelId ?? null;
+  const localRuntime = ai.localRuntime ?? ai.resources.localRuntimes?.caulLlamaCpp;
+  const localAiReady = Boolean(localRuntime?.runtime.installed && localRuntime.model?.installed);
+  const cloudAiReady = Boolean(pi.connected);
+  const aiReady = ai.provider === 'cloud' ? cloudAiReady : localAiReady;
   const complete = overrides.complete ?? (
     permissions.permissions.every((permission) => permission.status === 'granted')
     && parakeet.installed
     && selectedLocalTranscriptionModel === parakeet.modelId
+    && aiReady
   );
 
   return {
-    ai: overrides.ai ?? testAiRecommendation(),
+    ai,
     autoUpdate: overrides.autoUpdate ?? {
       ai: true,
       transcription: true
