@@ -1465,8 +1465,8 @@ function OnboardingAiModelSetup({
               <>
                 <Button onClick={onCancelLocalDownload} size="sm" type="button" variant="outline">Cancel</Button>
                 {caulLocalStatus?.progress ? (
-                  <span aria-live="polite" className="text-xs tabular-nums text-muted-foreground">
-                    {caulLocalStatus.progress.percent}%
+                  <span aria-live="polite" className="max-w-52 truncate text-xs tabular-nums text-muted-foreground" title={`${caulLocalStatus.progress.label} ${caulLocalStatus.progress.percent}%`}>
+                    {caulLocalStatus.progress.label} · {caulLocalStatus.progress.percent}%
                   </span>
                 ) : null}
               </>

@@ -311,6 +311,44 @@ describe('local LLM service', () => {
     }
   });
 
+  it('reports local AI download progress as one forward-moving sequence', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'caul-local-llm-test-'));
+    const server = createDownloadServer();
+    const progressEvents = [];
+
+    try {
+      const port = await listen(server);
+      const service = createLocalLlmService({
+        app: { getPath: () => root },
+        catalogue: createTestCatalogue({
+          modelUrl: `http://127.0.0.1:${port}/model.gguf`,
+          runtimeUrl: `http://127.0.0.1:${port}/runtime.tar.gz`
+        }),
+        emitStatus: (status) => {
+          if (status.progress) {
+            progressEvents.push(status.progress);
+          }
+        },
+        httpsModule: http,
+        spawn: fakeExtractorSpawn(root)
+      });
+
+      await service.download();
+
+      const percents = progressEvents.map((progress) => progress.percent);
+      expect(percents.length).toBeGreaterThan(2);
+      expect(percents).toEqual([...percents].sort((left, right) => left - right));
+      expect(progressEvents.map((progress) => progress.label)).toEqual(expect.arrayContaining([
+        'Downloading local AI runtime',
+        'Installing local AI runtime',
+        'Downloading local AI model'
+      ]));
+    } finally {
+      await closeServer(server);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
   it('starts the loopback llama.cpp server and streams a chat response', async () => {
     const root = mkdtempSync(join(tmpdir(), 'caul-local-llm-test-'));
     const spawn = createFakeLlamaSpawn();

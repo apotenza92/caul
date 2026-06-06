@@ -154,13 +154,22 @@ function createLocalLlmService({
     activeDownload = downloadState;
     emitStatus(status());
 
+    const needsRuntime = !getServerPath();
+    const needsModel = !fs.existsSync(getModelPath(model));
+
     try {
-      if (!getServerPath()) {
-        await downloadRuntime(runtimeAsset, downloadState);
+      if (needsRuntime) {
+        await downloadRuntime(runtimeAsset, downloadState, {
+          end: needsModel ? 24 : 100,
+          start: 0
+        });
       }
 
-      if (!fs.existsSync(getModelPath(model))) {
-        await downloadModel(model, downloadState);
+      if (needsModel) {
+        await downloadModel(model, downloadState, {
+          end: 100,
+          start: needsRuntime ? 25 : 0
+        });
       }
     } finally {
       activeDownload = null;
@@ -279,12 +288,21 @@ function createLocalLlmService({
     emitStatus(status());
 
     try {
-      if (!getMlxServerPath()) {
-        await installMlxRuntime(downloadState);
+      const needsRuntime = !getMlxServerPath();
+      const needsModel = !hasMlxSnapshot(getModelPath(model));
+
+      if (needsRuntime) {
+        await installMlxRuntime(downloadState, {
+          end: needsModel ? 25 : 100,
+          start: 0
+        });
       }
 
-      if (!hasMlxSnapshot(getModelPath(model))) {
-        await downloadMlxModel(model, downloadState);
+      if (needsModel) {
+        await downloadMlxModel(model, {
+          end: 100,
+          start: needsRuntime ? 26 : 0
+        }, downloadState);
       }
     } finally {
       activeDownload = null;
@@ -294,22 +312,30 @@ function createLocalLlmService({
     return status();
   }
 
-  async function installMlxRuntime(downloadState) {
+  async function installMlxRuntime(downloadState, progressRange = { end: 100, start: 0 }) {
     fs.mkdirSync(getMlxToolRoot(), { recursive: true });
     fs.mkdirSync(getMlxCacheRoot(), { recursive: true });
-    downloadState.progress = {
+    setDownloadProgress(downloadState, {
       downloadedBytes: 0,
-      label: 'Installing MLX local AI runtime',
-      percent: 20,
+      label: 'Preparing local AI',
+      percent: progressRange.start,
       phase: 'runtime',
       totalBytes: null
-    };
+    });
     emitStatus(status());
     await runCommand('uv', [
       'venv',
       '--clear',
       getMlxToolRoot()
     ], 'Failed to prepare MLX local AI runtime.', { env: getMlxEnv() });
+    setDownloadProgress(downloadState, {
+      downloadedBytes: 0,
+      label: 'Installing local AI runtime',
+      percent: Math.round(progressRange.start + ((progressRange.end - progressRange.start) * 0.45)),
+      phase: 'runtime',
+      totalBytes: null
+    });
+    emitStatus(status());
     await runCommand('uv', [
       'pip',
       'install',
@@ -317,27 +343,35 @@ function createLocalLlmService({
       getMlxPythonPath(),
       'mlx-lm'
     ], 'Failed to install MLX local AI runtime.', { env: getMlxEnv() });
-    downloadState.progress = {
+    setDownloadProgress(downloadState, {
       downloadedBytes: 0,
-      label: 'Installed MLX local AI runtime',
-      percent: 100,
+      label: 'Installed local AI runtime',
+      percent: progressRange.end,
       phase: 'runtime',
       totalBytes: null
-    };
+    });
     emitStatus(status());
   }
 
-  async function downloadMlxModel(model, downloadState) {
+  async function downloadMlxModel(model, progressRange = { end: 100, start: 0 }, downloadState) {
     fs.mkdirSync(getMlxCacheRoot(), { recursive: true });
-    downloadState.progress = {
+    setDownloadProgress(downloadState, {
       downloadedBytes: 0,
-      label: `Downloading ${model.name}`,
-      percent: 0,
+      label: 'Downloading local AI model',
+      percent: progressRange.start,
       phase: 'model',
       totalBytes: Math.round((model.downloadSizeGb ?? 0) * 1024 * 1024 * 1024) || null
-    };
+    });
     emitStatus(status());
     const port = await ensureMlxServer(model);
+    setDownloadProgress(downloadState, {
+      downloadedBytes: 0,
+      label: 'Preparing local AI model',
+      percent: Math.round(progressRange.start + ((progressRange.end - progressRange.start) * 0.85)),
+      phase: 'model',
+      totalBytes: downloadState.progress.totalBytes
+    });
+    emitStatus(status());
     await requestChatCompletion(port, 'Reply with exactly: OK', {
       modelId: model.providerModelId,
       onDelta: () => undefined
@@ -346,13 +380,13 @@ function createLocalLlmService({
     if (!hasMlxSnapshot(getModelPath(model))) {
       throw new Error('MLX local AI model did not download into the Caul model cache.');
     }
-    downloadState.progress = {
+    setDownloadProgress(downloadState, {
       downloadedBytes: downloadState.progress.totalBytes ?? 0,
-      label: `Downloaded ${model.name}`,
-      percent: 100,
+      label: 'Downloaded local AI model',
+      percent: progressRange.end,
       phase: 'model',
       totalBytes: downloadState.progress.totalBytes
-    };
+    });
     emitStatus(status());
   }
 
@@ -364,18 +398,28 @@ function createLocalLlmService({
     };
   }
 
-  async function downloadRuntime(runtimeAsset, downloadState) {
+  async function downloadRuntime(runtimeAsset, downloadState, progressRange = { end: 100, start: 0 }) {
     fs.mkdirSync(getRuntimeRoot(), { recursive: true });
     const archivePath = pathModule.join(getRuntimeRoot(), runtimeAsset.archiveName);
     const temporaryPath = `${archivePath}.download`;
 
     await downloadFile(runtimeAsset.url, temporaryPath, downloadState, {
       label: 'Downloading local AI runtime',
+      overallEnd: Math.max(progressRange.start, progressRange.end - 4),
+      overallStart: progressRange.start,
       phase: 'runtime',
       totalBytes: runtimeAsset.sizeBytes ?? null
     });
 
     fs.renameSync(temporaryPath, archivePath);
+    setDownloadProgress(downloadState, {
+      downloadedBytes: runtimeAsset.sizeBytes ?? 0,
+      label: 'Installing local AI runtime',
+      percent: Math.max(progressRange.start, progressRange.end - 2),
+      phase: 'runtime',
+      totalBytes: runtimeAsset.sizeBytes ?? null
+    });
+    emitStatus(status());
     await extractArchive(archivePath, getRuntimeRoot());
     fs.rmSync(archivePath, { force: true });
     const serverPath = getServerPath();
@@ -387,15 +431,25 @@ function createLocalLlmService({
     if (process.platform !== 'win32') {
       fs.chmodSync(serverPath, 0o755);
     }
+    setDownloadProgress(downloadState, {
+      downloadedBytes: runtimeAsset.sizeBytes ?? 0,
+      label: 'Installed local AI runtime',
+      percent: progressRange.end,
+      phase: 'runtime',
+      totalBytes: runtimeAsset.sizeBytes ?? null
+    });
+    emitStatus(status());
   }
 
-  async function downloadModel(model, downloadState) {
+  async function downloadModel(model, downloadState, progressRange = { end: 100, start: 0 }) {
     fs.mkdirSync(getModelRoot(), { recursive: true });
     const modelPath = getModelPath(model);
     const temporaryPath = `${modelPath}.download`;
 
     await downloadFile(model.downloadUrl, temporaryPath, downloadState, {
-      label: `Downloading ${model.name}`,
+      label: 'Downloading local AI model',
+      overallEnd: progressRange.end,
+      overallStart: progressRange.start,
       phase: 'model',
       totalBytes: Math.round((model.downloadSizeGb ?? 0) * 1024 * 1024 * 1024) || null
     });
@@ -432,15 +486,16 @@ function createLocalLlmService({
 
         response.on('data', (chunk) => {
           downloadedBytes += chunk.length;
-          const percent = totalBytes ? Math.min(100, Math.round((downloadedBytes / totalBytes) * 100)) : 0;
+          const transferPercent = totalBytes ? Math.min(100, Math.round((downloadedBytes / totalBytes) * 100)) : 0;
+          const percent = mapDownloadPercent(transferPercent, progressBase);
           const now = Date.now();
-          downloadState.progress = {
+          setDownloadProgress(downloadState, {
             downloadedBytes,
             label: progressBase.label,
             percent,
             phase: progressBase.phase,
             totalBytes
-          };
+          });
           if (percent !== lastEmittedPercent || now - lastEmittedAt > 500) {
             lastEmittedPercent = percent;
             lastEmittedAt = now;
@@ -462,6 +517,31 @@ function createLocalLlmService({
         reject(error);
       });
     });
+  }
+
+  function setDownloadProgress(downloadState, progress) {
+    downloadState.progress = {
+      downloadedBytes: progress.downloadedBytes,
+      label: progress.label,
+      percent: clampPercent(progress.percent),
+      phase: progress.phase,
+      totalBytes: progress.totalBytes
+    };
+  }
+
+  function mapDownloadPercent(percent, progressBase) {
+    if (Number.isFinite(progressBase.overallStart) && Number.isFinite(progressBase.overallEnd)) {
+      const start = clampPercent(progressBase.overallStart);
+      const end = clampPercent(progressBase.overallEnd);
+
+      return Math.round(start + ((end - start) * (clampPercent(percent) / 100)));
+    }
+
+    return clampPercent(percent);
+  }
+
+  function clampPercent(percent) {
+    return Math.max(0, Math.min(100, Math.round(Number.isFinite(percent) ? percent : 0)));
   }
 
   function extractArchive(archivePath, destinationPath) {
