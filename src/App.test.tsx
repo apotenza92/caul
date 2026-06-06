@@ -858,6 +858,44 @@ describe('App', () => {
     expect(bridge.onboardingCompletes).toBe(1);
   });
 
+  it('shows progress and ignores repeat clicks while onboarding completes', async () => {
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const user = userEvent.setup();
+    const readyLocalAi = testReadyLocalLlmStatus();
+    let resolveComplete!: (status: OnboardingStatus) => void;
+    const bridge = installTestBridge({
+      completeOnboarding: () => new Promise((resolve) => {
+        resolveComplete = resolve;
+      }),
+      onboardingStatus: testOnboardingStatus({
+        ai: testAiRecommendation({
+          localRuntime: readyLocalAi,
+          resources: {
+            ...testAiRecommendation().resources,
+            localRuntimes: {
+              caulLlamaCpp: readyLocalAi
+            }
+          }
+        })
+      })
+    });
+
+    render(<App />);
+
+    const startButton = await screen.findByRole('button', { name: 'Start using Caul' });
+    await waitFor(() => expect(startButton).toBeEnabled());
+
+    await user.click(startButton);
+    expect(await screen.findByRole('button', { name: 'Starting Caul' })).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: 'Starting Caul' }));
+    expect(bridge.onboardingCompletes).toBe(1);
+
+    act(() => {
+      resolveComplete(testOnboardingStatus({ complete: true, required: false }));
+    });
+  });
+
   it('uses a ready Parakeet model automatically during onboarding', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
     const readyLocalAi = testReadyLocalLlmStatus();
@@ -4057,6 +4095,7 @@ function installTestBridge(overrides: {
   updateStatus?: UpdateStatus;
   historyStatus?: HistoryStatus;
   downloadLocalAi?: () => Promise<LocalLlmStatus>;
+  completeOnboarding?: () => Promise<OnboardingStatus>;
   openChatGptLogin?: () => Promise<{ ok: boolean; message?: string }>;
   requestLlm?: (options: {
     attachments?: PromptTemplateAttachment[];
@@ -4458,6 +4497,9 @@ function installTestBridge(overrides: {
       onboarding: {
         complete: async () => {
           onboardingCompletes += 1;
+          if (overrides.completeOnboarding) {
+            return overrides.completeOnboarding();
+          }
           return getCurrentOnboardingStatus();
         },
         open: async () => getCurrentOnboardingStatus(),

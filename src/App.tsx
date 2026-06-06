@@ -998,6 +998,7 @@ function OnboardingSurface() {
   const [localLlmStatus, setLocalLlmStatus] = useState<LocalLlmStatus | null>(null);
   const [selectedAiProvider, setSelectedAiProviderState] = useState<AiProvider>('local');
   const [isChatGptSigningIn, setIsChatGptSigningIn] = useState(false);
+  const [isCompleting, setIsCompleting] = useState(false);
   const permissionsRef = useRef<HTMLElement | null>(null);
   const parakeetRef = useRef<HTMLElement | null>(null);
   const aiRef = useRef<HTMLElement | null>(null);
@@ -1146,7 +1147,29 @@ function OnboardingSurface() {
   }
 
   async function finish() {
-    await getSettingsBridge()?.onboarding?.complete();
+    if (isCompleting) {
+      return;
+    }
+
+    setIsCompleting(true);
+
+    try {
+      const nextStatus = await getSettingsBridge()?.onboarding?.complete();
+
+      if (nextStatus) {
+        setStatus(nextStatus);
+        setSelectedAiProviderState(nextStatus.ai?.provider ?? 'local');
+        setLocalLlmStatus(getCaulLocalLlmStatus(nextStatus));
+      }
+
+      if (nextStatus && !nextStatus.complete) {
+        setIsCompleting(false);
+      }
+    } catch (error) {
+      console.error('Failed to complete onboarding:', error);
+      setIsCompleting(false);
+      await refresh();
+    }
   }
 
   const missingItems = getMissingOnboardingItems(status);
@@ -1280,6 +1303,7 @@ function OnboardingSurface() {
         </OnboardingPanel>
 
         <OnboardingStartButton
+          isCompleting={isCompleting}
           missingItems={missingItems}
           onClick={() => void finish()}
         />
@@ -1290,13 +1314,15 @@ function OnboardingSurface() {
 }
 
 function OnboardingStartButton({
+  isCompleting,
   missingItems,
   onClick
 }: {
+  isCompleting: boolean;
   missingItems: string[];
   onClick: () => void;
 }) {
-  const disabled = missingItems.length > 0;
+  const disabled = isCompleting || missingItems.length > 0;
 
   return (
     <div className="flex w-full justify-center py-6">
@@ -1309,9 +1335,9 @@ function OnboardingStartButton({
           onClick={onClick}
           type="button"
         >
-          Start using Caul
+          {isCompleting ? 'Starting Caul' : 'Start using Caul'}
         </Button>
-        {disabled ? (
+        {disabled && !isCompleting ? (
           <div
             className="pointer-events-none absolute bottom-full left-1/2 z-[2147483647] mb-2 hidden w-max max-w-64 -translate-x-1/2 rounded-md bg-primary px-2 py-1.5 text-left text-xs leading-4 text-primary-foreground shadow-md group-hover:block group-focus-within:block"
             role="tooltip"
