@@ -48,6 +48,7 @@
     "smoke:renderer-real-llm": "npm run build && npm run electron:sign-dev && cross-env CAUL_RENDERER_REAL_LLM_SMOKE=1 electron .",
     "smoke:resources": "npm run desktop-backend:build && npm run build && npm run electron:sign-dev && cross-env CAUL_RESOURCE_SMOKE_MS=3000 CAUL_RESOURCE_SMOKE_MAX_WORKING_SET_MB=450 electron .",
     "smoke:onboarding": "npm run build && npm run electron:sign-dev && node scripts/smoke-onboarding.mjs",
+    "smoke:onboarding-local-ai-lag": "npm run build && npm run electron:sign-dev && node scripts/smoke-onboarding-local-ai-lag.mjs",
     "smoke:system-audio": "npm run desktop-backend:build && npm run macos-audio:build && npm run electron:sign-dev && concurrently -k --success first \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && rm -f /tmp/caul-system-audio.out /tmp/caul-system-audio.err && open -n -W -o /tmp/caul-system-audio.out --stderr /tmp/caul-system-audio.err --env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 --env CAUL_SYSTEM_AUDIO_SMOKE_MS=8000 node_modules/electron/dist/Electron.app --args \\\"$PWD\\\"; code=$?; cat /tmp/caul-system-audio.out 2>/dev/null; cat /tmp/caul-system-audio.err 2>/dev/null; exit $code\"",
     "smoke:browser-system-audio": "npm run macos-audio:build && node scripts/smoke-browser-system-audio.mjs",
     "smoke:local-parakeet-helper-system-audio": "npm run macos-audio:build && node scripts/smoke-local-parakeet-helper-system-audio.mjs",

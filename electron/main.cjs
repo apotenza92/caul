@@ -37,6 +37,7 @@ const rendererTranscriptionSmokeBridgeStart = process.env.CAUL_RENDERER_TRANSCRI
 const rendererLlmSmoke = process.env.CAUL_RENDERER_LLM_SMOKE === '1';
 const rendererRealLlmSmoke = process.env.CAUL_RENDERER_REAL_LLM_SMOKE === '1';
 const onboardingSmokeDir = process.env.CAUL_ONBOARDING_SMOKE_DIR;
+const onboardingLocalAiLagSmoke = process.env.CAUL_ONBOARDING_LOCAL_AI_LAG_SMOKE === '1';
 const resourceSmokeMs = Number(process.env.CAUL_RESOURCE_SMOKE_MS ?? 0);
 const resourceSmokeMaxWorkingSetMb = Number(process.env.CAUL_RESOURCE_SMOKE_MAX_WORKING_SET_MB ?? 450);
 const packagedLaunchSmokeMs = Number(process.env.CAUL_PACKAGED_LAUNCH_SMOKE_MS ?? 0);
@@ -5930,6 +5931,170 @@ async function runOnboardingSmokeIfRequested(window) {
 
   fsSync.mkdirSync(onboardingSmokeDir, { recursive: true });
 
+  if (onboardingLocalAiLagSmoke) {
+    setTimeout(async () => {
+      try {
+        const clickTarget = await window.webContents.executeJavaScript(`
+          (async () => {
+            const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+            const textOf = (element) => (element?.textContent || '').replace(/\\s+/g, ' ').trim();
+            const findButton = (name) => Array.from(document.querySelectorAll('button'))
+              .find((button) => textOf(button) === name);
+            const waitFor = async (predicate, timeoutMs = 2000) => {
+              const startedAt = performance.now();
+
+              while (performance.now() - startedAt < timeoutMs) {
+                const value = predicate();
+
+                if (value) {
+                  return value;
+                }
+
+                await delay(16);
+              }
+
+              return null;
+            };
+
+            window.dispatchEvent(new CustomEvent('caul:onboarding-smoke-step', { detail: 'ai' }));
+            await waitFor(() => findButton('Download local AI') || findButton('Local'), 2000);
+
+            if (!findButton('Download local AI')) {
+              findButton('Local')?.click();
+            }
+
+            const button = await waitFor(() => findButton('Download local AI'), 2000);
+
+            if (!button) {
+              return {
+                ok: false,
+                error: 'Download local AI button was not visible',
+                body: document.body.textContent?.slice(0, 500)
+              };
+            }
+
+            let rafActive = true;
+            let maxFrameGapMs = 0;
+            let lastFrameAt = performance.now();
+            const trackFrame = () => {
+              const now = performance.now();
+              maxFrameGapMs = Math.max(maxFrameGapMs, now - lastFrameAt);
+              lastFrameAt = now;
+
+              if (rafActive) {
+                requestAnimationFrame(trackFrame);
+              }
+            };
+            requestAnimationFrame(trackFrame);
+
+            await delay(50);
+            window.__caulLocalAiLagSmoke = {
+              clickedAt: performance.now(),
+              maxFrameGapMs,
+              progressText: null,
+              trackFrameStop: () => {
+                rafActive = false;
+                window.__caulLocalAiLagSmoke.maxFrameGapMs = maxFrameGapMs;
+              }
+            };
+
+            const rect = button.getBoundingClientRect();
+            return {
+              ok: true,
+              x: Math.round(rect.left + rect.width / 2),
+              y: Math.round(rect.top + rect.height / 2)
+            };
+          })()
+        `);
+
+        if (!clickTarget?.ok) {
+          const image = await window.webContents.capturePage();
+          fsSync.writeFileSync(path.join(onboardingSmokeDir, 'local-ai-lag.png'), image.toPNG());
+          console.log(`caul-onboarding-local-ai-lag-smoke ${JSON.stringify(clickTarget)}`);
+          app.exitCode = 1;
+          app.quit();
+          return;
+        }
+
+        window.webContents.sendInputEvent({
+          button: 'left',
+          clickCount: 1,
+          type: 'mouseDown',
+          x: clickTarget.x,
+          y: clickTarget.y
+        });
+        window.webContents.sendInputEvent({
+          button: 'left',
+          clickCount: 1,
+          type: 'mouseUp',
+          x: clickTarget.x,
+          y: clickTarget.y
+        });
+
+        const result = await window.webContents.executeJavaScript(`
+          (async () => {
+            const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+            const waitFor = async (predicate, timeoutMs = 1500) => {
+              const startedAt = performance.now();
+
+              while (performance.now() - startedAt < timeoutMs) {
+                const value = predicate();
+
+                if (value) {
+                  return value;
+                }
+
+                await delay(16);
+              }
+
+              return null;
+            };
+            const smoke = window.__caulLocalAiLagSmoke;
+            const progressText = await waitFor(() => {
+              const body = document.body.textContent || '';
+              return body.includes('Preparing local AI') ? 'Preparing local AI' : null;
+            }, 1500);
+            const visibleFeedbackMs = performance.now() - smoke.clickedAt;
+            smoke.trackFrameStop();
+            await delay(16);
+
+            const ok = Boolean(progressText)
+              && visibleFeedbackMs <= 500
+              && smoke.maxFrameGapMs <= 250;
+
+            return {
+              ok,
+              visibleFeedbackMs,
+              maxFrameGapMs: smoke.maxFrameGapMs,
+              progressText,
+              body: ok ? undefined : document.body.textContent?.slice(0, 500)
+            };
+          })()
+        `);
+
+        if (window.isDestroyed()) {
+          return;
+        }
+
+        const image = await window.webContents.capturePage();
+        fsSync.writeFileSync(path.join(onboardingSmokeDir, 'local-ai-lag.png'), image.toPNG());
+
+        console.log(`caul-onboarding-local-ai-lag-smoke ${JSON.stringify(result)}`);
+
+        if (!result?.ok) {
+          app.exitCode = 1;
+        }
+
+        app.quit();
+      } catch (error) {
+        console.error(`caul-onboarding-local-ai-lag-smoke ${JSON.stringify({ ok: false, error: error.message })}`);
+        app.exitCode = 1;
+        app.quit();
+      }
+    }, 800);
+    return;
+  }
+
   const steps = [
     ['permissions', 'permissions.png'],
     ['parakeet', 'parakeet.png'],
@@ -7922,7 +8087,13 @@ ipcMain.handle('caul:ai-provider', (_event, request) => setSelectedAiProvider(re
 
 ipcMain.handle('caul:local-llm-status', () => getLocalLlmService().status());
 
-ipcMain.handle('caul:local-llm-download', () => getLocalLlmService().download());
+ipcMain.handle('caul:local-llm-download', () => {
+  if (onboardingLocalAiLagSmoke) {
+    return new Promise(() => {});
+  }
+
+  return getLocalLlmService().download();
+});
 
 ipcMain.handle('caul:local-llm-cancel-download', () => getLocalLlmService().cancelDownload());
 
