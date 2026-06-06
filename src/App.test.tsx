@@ -586,7 +586,7 @@ describe('App', () => {
     render(<App />);
 
     await user.click(await screen.findByRole('tab', { name: 'Cloud' }));
-    await user.click(await screen.findByRole('button', { name: 'Sign in' }));
+    await user.click(await screen.findByRole('button', { name: 'Sign in with ChatGPT' }));
 
     expect(bridge.chatGptLoginOpens).toBe(1);
   });
@@ -613,10 +613,30 @@ describe('App', () => {
 
     expect(await screen.findByRole('tab', { name: 'Local', selected: true })).toBeInTheDocument();
     expect(screen.getByText('Recommended')).toBeInTheDocument();
-    expect(screen.getByText('Runs on this computer. Nothing is sent to the internet. Usually slower than Cloud.')).toBeInTheDocument();
+    expect(screen.getByText('Local and private. Slower and less intelligent than Cloud.')).toBeInTheDocument();
     expect(screen.queryByText('Qwen 2.5 3B Instruct Q4')).not.toBeInTheDocument();
     expect(screen.queryByText(/Artificial Analysis LLM Leaderboard/)).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Sign in' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sign in with ChatGPT' })).not.toBeInTheDocument();
+  });
+
+  it('defaults onboarding AI setup to cloud when cloud is recommended', async () => {
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
+    installTestBridge({
+      onboardingStatus: testOnboardingStatus({
+        ai: testAiRecommendation({
+          recommended: 'cloud',
+          recommendedModel: null,
+          summary: 'Cloud AI is recommended for this machine',
+          viable: true
+        })
+      })
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole('tab', { name: 'Cloud', selected: true })).toBeInTheDocument();
+    expect(screen.getByText('Sends to ChatGPT. Faster and smarter than Local.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sign in with ChatGPT' })).toBeEnabled();
   });
 
   it('keeps model auto-update details out of onboarding', async () => {
@@ -686,8 +706,8 @@ describe('App', () => {
     await user.click(await screen.findByRole('tab', { name: 'Cloud' }));
 
     expect(bridge.selectedAiProviders).toEqual(['cloud']);
-    expect(screen.getByText('Sends transcripts to ChatGPT. Usually faster and smarter than Local.')).toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: 'Sign in' })).toBeEnabled();
+    expect(screen.getByText('Sends to ChatGPT. Faster and smarter than Local.')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Sign in with ChatGPT' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Start using Caul' })).toBeDisabled();
   });
 
@@ -720,13 +740,13 @@ describe('App', () => {
     render(<App />);
 
     await user.click(await screen.findByRole('tab', { name: 'Cloud' }));
-    await user.click(await screen.findByRole('button', { name: 'Sign in' }));
+    await user.click(await screen.findByRole('button', { name: 'Sign in with ChatGPT' }));
 
     expect(screen.getByRole('button', { name: 'Opening' })).toBeDisabled();
 
     resolveLogin({ ok: true });
 
-    expect(await screen.findByRole('button', { name: 'Sign in' })).toBeEnabled();
+    expect(await screen.findByRole('button', { name: 'Sign in with ChatGPT' })).toBeEnabled();
   });
 
   it('keeps onboarding start disabled and explains missing setup', async () => {
@@ -847,9 +867,10 @@ describe('App', () => {
     render(<App />);
 
     await user.click(await screen.findByRole('tab', { name: 'Cloud' }));
-    await screen.findByText('ChatGPT');
+    await screen.findByText('Sends to ChatGPT. Faster and smarter than Local.');
 
     expect(screen.queryByText('Sign in required')).not.toBeInTheDocument();
+    expect(screen.queryByText('Opening browser')).not.toBeInTheDocument();
   });
 
   it('uses platform-specific modal close controls', async () => {
@@ -4947,6 +4968,7 @@ function testReadyLocalLlmStatus(): LocalLlmStatus {
 
 function testAiRecommendation(overrides: Partial<OnboardingStatus['ai']> = {}): OnboardingStatus['ai'] {
   const localStatus = testLocalLlmStatus();
+  const recommended = overrides.recommended ?? 'local';
   return {
     benchmark: overrides.benchmark ?? {
       catalogueLastReviewed: '2026-06-06',
@@ -4954,8 +4976,8 @@ function testAiRecommendation(overrides: Partial<OnboardingStatus['ai']> = {}): 
       staleEntries: []
     },
     localRuntime: overrides.localRuntime ?? localStatus,
-    provider: overrides.provider ?? 'local',
-    recommended: overrides.recommended ?? 'local',
+    provider: overrides.provider ?? (recommended === 'cloud' ? 'cloud' : 'local'),
+    recommended,
     recommendedModel: overrides.recommendedModel ?? {
       id: 'qwen2.5-3b-instruct-q4_k_m',
       name: 'Qwen 2.5 3B Instruct Q4',

@@ -2876,6 +2876,7 @@ function getAiRecommendation() {
   const profile = getLocalSystemProfile();
   const catalogue = getModelCatalogue();
   const benchmarkRecommendation = recommendFromCatalogue(catalogue, profile);
+  const recommendedProvider = benchmarkRecommendation.ai.recommendation === 'cloud' ? 'cloud' : 'local';
 
   return {
     benchmark: {
@@ -2884,7 +2885,7 @@ function getAiRecommendation() {
       staleEntries: benchmarkRecommendation.staleCatalogueEntries
     },
     localRuntime: benchmarkRecommendation.ai.localRuntime,
-    provider: getSelectedAiProvider(),
+    provider: getSelectedAiProvider(recommendedProvider),
     recommended: benchmarkRecommendation.ai.recommendation,
     recommendedModel: benchmarkRecommendation.ai.model
       ? {
@@ -3061,10 +3062,10 @@ function getLocalSystemProfile() {
   return profile;
 }
 
-function getSelectedAiProvider() {
+function getSelectedAiProvider(fallbackProvider = defaultAiProvider) {
   const provider = readProfileSettings().selectedAiProvider;
 
-  return provider === 'cloud' || provider === 'local' ? provider : defaultAiProvider;
+  return provider === 'cloud' || provider === 'local' ? provider : fallbackProvider;
 }
 
 function setSelectedAiProvider(provider) {
@@ -3740,7 +3741,7 @@ async function getOnboardingStatus({ refreshCatalogue = true } = {}) {
   const transcription = getTranscriptionRecommendation();
   const profileSettings = readProfileSettings();
   const selectedLocalTranscriptionModel = getSelectedLocalTranscriptionModelId();
-  const selectedAiProvider = getSelectedAiProvider();
+  const selectedAiProvider = ai.provider;
   const localAiReady = ai.localRuntime?.status === 'ready'
     && Boolean(ai.localRuntime?.runtime?.installed)
     && Boolean(ai.localRuntime?.model?.installed);

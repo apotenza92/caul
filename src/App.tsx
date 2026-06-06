@@ -1432,14 +1432,6 @@ function OnboardingAiModelSetup({
     && localRecommendedModel
     && caulLocalStatus.model.id === localRecommendedModel.id
   );
-  const localStatusValue = localModelInstalled
-    ? 'Ready'
-    : isLocalDownloading
-      ? 'Downloading'
-      : ai?.recommended === 'cloud'
-        ? 'This computer may be better with Cloud'
-        : 'Not set up';
-
   return (
     <div className="grid gap-2">
       <div className="inline-flex w-full rounded-md border border-border bg-muted/30 p-0.5" role="tablist" aria-label="AI provider">
@@ -1460,36 +1452,28 @@ function OnboardingAiModelSetup({
       </div>
 
       {selectedProvider === 'local' ? (
-        <div role="tabpanel" className="grid gap-1.5">
+        <div role="tabpanel" className="grid min-h-20 justify-items-center gap-1.5 text-center">
           <p className="text-xs leading-5 text-muted-foreground">
-            Runs on this computer. Nothing is sent to the internet. Usually slower than Cloud.
+            Local and private. Slower and less intelligent than Cloud.
           </p>
-          {localModelInstalled ? (
-            <StatusRow
-              action={<StatusPill ready>Ready</StatusPill>}
-              label="Local AI"
-              ready
-            />
-          ) : null}
-          {isLocalDownloading && caulLocalStatus?.progress ? (
-            <div aria-live="polite" className="text-xs tabular-nums text-muted-foreground">
-              {caulLocalStatus.progress.label}: {caulLocalStatus.progress.percent}%
-            </div>
-          ) : null}
-          {!localModelInstalled ? (
-            <div className="flex flex-wrap items-center gap-2">
-              {isLocalDownloading ? (
+          <div className="flex min-h-9 flex-wrap items-center justify-center gap-2">
+            {localModelInstalled ? (
+              <StatusPill ready>Ready</StatusPill>
+            ) : isLocalDownloading ? (
+              <>
                 <Button onClick={onCancelLocalDownload} size="sm" type="button" variant="outline">Cancel</Button>
-              ) : (
-                <Button disabled={!caulLocalStatus?.runtime.supported && Boolean(caulLocalStatus)} onClick={onDownloadLocalAi} size="sm" type="button">
-                  Download local AI
-                </Button>
-              )}
-            </div>
-          ) : null}
-          {!localModelInstalled && !isLocalDownloading && ai?.recommended === 'cloud' ? (
-            <p className="text-xs leading-5 text-muted-foreground">{localStatusValue}</p>
-          ) : null}
+                {caulLocalStatus?.progress ? (
+                  <span aria-live="polite" className="text-xs tabular-nums text-muted-foreground">
+                    {caulLocalStatus.progress.percent}%
+                  </span>
+                ) : null}
+              </>
+            ) : (
+              <Button disabled={!caulLocalStatus?.runtime.supported && Boolean(caulLocalStatus)} onClick={onDownloadLocalAi} size="sm" type="button">
+                Download local AI
+              </Button>
+            )}
+          </div>
           {caulLocalStatus?.runtime.supported === false ? (
             <p className="text-xs leading-5 text-muted-foreground">
               Local AI is not available on this computer yet.
@@ -1497,24 +1481,20 @@ function OnboardingAiModelSetup({
           ) : null}
         </div>
       ) : (
-        <div role="tabpanel" className="grid gap-1.5">
+        <div role="tabpanel" className="grid min-h-20 justify-items-center gap-1.5 text-center">
           <p className="text-xs leading-5 text-muted-foreground">
-            Sends transcripts to ChatGPT. Usually faster and smarter than Local.
+            Sends to ChatGPT. Faster and smarter than Local.
           </p>
-          {!piReady ? (
-            <div className="flex items-center gap-1.5">
+          <div className="flex min-h-9 items-center justify-center gap-1.5">
+            {!piReady ? (
               <Button disabled={isChatGptSigningIn} onClick={onSignInWithChatGpt} size="sm" type="button">
                 {isChatGptSigningIn ? <LoaderCircleIcon className="mr-1.5 size-3.5 animate-spin" /> : null}
-                {isChatGptSigningIn ? 'Opening' : 'Sign in'}
+                {isChatGptSigningIn ? 'Opening' : 'Sign in with ChatGPT'}
               </Button>
-            </div>
-          ) : (
-            <StatusRow
-              action={<StatusPill ready>Ready</StatusPill>}
-              label="ChatGPT"
-              ready
-            />
-          )}
+            ) : (
+              <StatusPill ready>Ready</StatusPill>
+            )}
+          </div>
         </div>
       )}
     </div>
