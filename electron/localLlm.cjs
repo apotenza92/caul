@@ -240,25 +240,10 @@ function createLocalLlmService({
     );
   }
 
-  function getUvPath() {
-    const result = spawnSync('uv', ['--version'], { encoding: 'utf8', timeout: 1500 });
-    return result.status === 0 ? 'uv' : null;
-  }
-
   function getMlxVersion() {
     const serverPath = getMlxServerPath();
 
-    if (!serverPath) {
-      return null;
-    }
-
-    const result = spawnSync(serverPath, ['--help'], {
-      encoding: 'utf8',
-      env: getMlxEnv(),
-      timeout: 1500
-    });
-
-    return result.status === 0 ? 'installed' : null;
+    return serverPath ? 'installed' : null;
   }
 
   async function downloadMlx(model) {
@@ -270,7 +255,9 @@ function createLocalLlmService({
       throw new Error('Caul-managed MLX local AI is available only on Apple Silicon Macs.');
     }
 
-    if (!getUvPath()) {
+    try {
+      await runCommand('uv', ['--version'], 'Caul-managed MLX local AI requires uv. Install uv or use the llama.cpp local model for now.', { timeoutMs: 1500 });
+    } catch {
       throw new Error('Caul-managed MLX local AI requires uv. Install uv or use the llama.cpp local model for now.');
     }
 

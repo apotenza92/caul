@@ -736,13 +736,24 @@ describe('App', () => {
   it('starts the Caul-managed local AI download from onboarding', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
     const user = userEvent.setup();
-    const bridge = installTestBridge();
+    let resolveDownload!: (status: LocalLlmStatus) => void;
+    const bridge = installTestBridge({
+      downloadLocalAi: () => new Promise((resolve) => {
+        resolveDownload = resolve;
+      })
+    });
 
     render(<App />);
 
     await user.click(await screen.findByRole('button', { name: 'Download local AI' }));
 
     expect(bridge.localLlmDownloads).toBe(1);
+    expect(await screen.findByText('Preparing local AI · 0%')).toBeInTheDocument();
+
+    act(() => {
+      resolveDownload(testReadyLocalLlmStatus());
+    });
+
     await waitFor(() => expect(screen.getAllByText('Ready').length).toBeGreaterThan(0));
     expect(screen.getByRole('button', { name: 'Start using Caul' })).toBeEnabled();
   });
@@ -4045,6 +4056,7 @@ function installTestBridge(overrides: {
   portablePreferences?: PortablePreferences;
   updateStatus?: UpdateStatus;
   historyStatus?: HistoryStatus;
+  downloadLocalAi?: () => Promise<LocalLlmStatus>;
   openChatGptLogin?: () => Promise<{ ok: boolean; message?: string }>;
   requestLlm?: (options: {
     attachments?: PromptTemplateAttachment[];
@@ -4368,6 +4380,11 @@ function installTestBridge(overrides: {
         },
         downloadLocal: async () => {
           localLlmDownloads += 1;
+          if (overrides.downloadLocalAi) {
+            localLlmStatus = await overrides.downloadLocalAi();
+            emitLocalLlmStatus?.(localLlmStatus);
+            return localLlmStatus;
+          }
           localLlmStatus = testLocalLlmStatus({
             model: {
               id: 'qwen2.5-3b-instruct-q4_k_m',

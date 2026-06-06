@@ -1122,6 +1122,7 @@ function OnboardingSurface() {
 
   async function downloadLocalAi() {
     try {
+      setLocalLlmStatus((current) => getPreparingLocalAiStatus(current ?? getCaulLocalLlmStatus(status)));
       const nextStatus = await getSettingsBridge()?.ai?.downloadLocal?.();
       if (nextStatus) {
         setLocalLlmStatus(nextStatus);
@@ -1580,6 +1581,24 @@ function getCaulLocalLlmStatus(status: OnboardingStatus | null): LocalLlmStatus 
   const runtime = status?.ai.resources.localRuntimes?.caulLlamaCpp;
 
   return runtime?.provider === 'caul-llama.cpp' || runtime?.provider === 'caul-mlx' ? runtime : null;
+}
+
+function getPreparingLocalAiStatus(status: LocalLlmStatus | null): LocalLlmStatus | null {
+  if (!status) {
+    return null;
+  }
+
+  return {
+    ...status,
+    progress: {
+      downloadedBytes: 0,
+      label: 'Preparing local AI',
+      percent: 0,
+      phase: 'runtime',
+      totalBytes: null
+    },
+    status: 'downloading'
+  };
 }
 
 function OnboardingTranscriptionStatus({ status }: { status: OnboardingStatus | null }) {
@@ -5705,6 +5724,7 @@ function SettingsPage({
 
   async function downloadLocalAi() {
     try {
+      setLocalLlmStatus((current) => getPreparingLocalAiStatus(current ?? getCaulLocalLlmStatus(onboardingStatus)));
       const nextStatus = await getSettingsBridge()?.ai?.downloadLocal?.();
       if (nextStatus) {
         setLocalLlmStatus(nextStatus);

@@ -435,4 +435,31 @@ describe('local LLM service', () => {
       rmSync(root, { force: true, recursive: true });
     }
   });
+
+  it('does not run synchronous process checks while reporting installed MLX status', () => {
+    const root = mkdtempSync(join(tmpdir(), 'caul-local-mlx-test-'));
+
+    try {
+      const serverPath = join(root, 'local-llm', 'runtimes', 'mlx-lm', 'venv', process.platform === 'win32' ? 'Scripts' : 'bin', process.platform === 'win32' ? 'mlx_lm.server.exe' : 'mlx_lm.server');
+      const modelPath = join(root, 'local-llm', 'runtimes', 'mlx-lm', 'cache', 'huggingface', 'hub', 'models--test--mlx-model', 'snapshots', 'abc123');
+      mkdirSync(dirname(serverPath), { recursive: true });
+      mkdirSync(modelPath, { recursive: true });
+      writeFileSync(serverPath, 'fake mlx server');
+      writeFileSync(join(modelPath, 'config.json'), '{}');
+
+      const service = createLocalLlmService({
+        app: { getPath: () => root },
+        catalogue: createMlxOnlyCatalogue(),
+        spawnSync: () => {
+          throw new Error('spawnSync should not run during status checks');
+        }
+      });
+      const status = service.status();
+
+      expect(status.provider).toBe('caul-mlx');
+      expect(status.runtime.version).toBe('installed');
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
 });
