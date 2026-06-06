@@ -433,6 +433,7 @@ export function App() {
   const [autoCollapse, setAutoCollapseState] = useState(() => readBooleanPreference(autoCollapsePreferenceKey, defaultAutoCollapse));
   const [llmModel, setLlmModel] = useState<LlmModel>(defaultLlmModel);
   const [llmReasoning, setLlmReasoning] = useState<LlmReasoning>(defaultLlmReasoning);
+  const [selectedAiProvider, setSelectedAiProvider] = useState<AiProvider>('local');
   const [isLlmReady, setIsLlmReady] = useState(false);
   const [permissionsStatus, setPermissionsStatus] = useState<PermissionsStatus | null>(null);
   const [parakeetStatus, setParakeetStatus] = useState<ParakeetStatus | null>(null);
@@ -632,6 +633,10 @@ export function App() {
     if (preferences.llmReasoning && llmReasoningValues.has(preferences.llmReasoning)) {
       setLlmReasoning(preferences.llmReasoning);
     }
+
+    if (preferences.selectedAiProvider === 'cloud' || preferences.selectedAiProvider === 'local') {
+      setSelectedAiProvider(preferences.selectedAiProvider);
+    }
   }
 
   function applyPromptTemplateState(state: PromptTemplateState) {
@@ -769,6 +774,7 @@ export function App() {
       generalInstructionsText: generalInstructions,
       llmModel,
       llmReasoning,
+      aiProvider: selectedAiProvider,
       promptTemplateAttachments: selectedPromptTemplateAttachments,
       promptTemplateText: selectedPromptTemplatePrompt
     });
@@ -779,6 +785,7 @@ export function App() {
       generalInstructionsText: generalInstructions,
       llmModel,
       llmReasoning,
+      aiProvider: selectedAiProvider,
       promptTemplateAttachments: selectedPromptTemplateAttachments,
       promptTemplateText: selectedPromptTemplatePrompt,
       transcript
@@ -790,6 +797,7 @@ export function App() {
       generalInstructionsText: generalInstructions,
       llmModel,
       llmReasoning,
+      aiProvider: selectedAiProvider,
       promptTemplateAttachments: selectedPromptTemplateAttachments,
       promptTemplateText: selectedPromptTemplatePrompt,
       transcript: prompt
@@ -802,6 +810,7 @@ export function App() {
         generalInstructionsText: generalInstructions,
         llmModel,
         llmReasoning,
+        aiProvider: selectedAiProvider,
         promptTemplateAttachments: selectedPromptTemplateAttachments,
         promptTemplateText: selectedPromptTemplatePrompt,
         sendToLlm: sendToAiWhenListeningStops
@@ -927,6 +936,7 @@ export function App() {
                 initialSection={settingsSection}
                 llmModel={llmModel}
                 llmReasoning={llmReasoning}
+                onSelectedAiProviderChange={setSelectedAiProvider}
                 isMac={isMac}
                 onClose={() => setIsSettingsOpen(false)}
                 onQuit={() => void getSettingsBridge()?.quit?.()}
@@ -1553,7 +1563,7 @@ function formatReviewedDate(value: string) {
 
 function formatCatalogueRefreshStatus(result: ModelCatalogueRefreshResult | null) {
   if (!result) {
-    return 'Model recommendations refresh on your app update schedule when auto update is on. You can also check now.';
+    return 'Check for newer model options.';
   }
 
   const failedSources = result.sourceReports.filter((report) => !report.ok).length;
@@ -5523,6 +5533,7 @@ function SettingsPage({
   onClose,
   onQuit,
   onRequestPermission,
+  onSelectedAiProviderChange,
   onSetPrivateOverlayHandleSize,
   permissionsStatus,
   privateOverlayStatus,
@@ -5541,6 +5552,7 @@ function SettingsPage({
   onClose: () => void;
   onQuit: () => void;
   onRequestPermission: (permission: PermissionItem['id']) => void;
+  onSelectedAiProviderChange: (provider: AiProvider) => void;
   onSetPrivateOverlayHandleSize: (size: PrivateOverlayHandleSize) => void;
   permissionsStatus: PermissionsStatus | null;
   privateOverlayStatus: PrivateOverlayState | null;
@@ -5562,6 +5574,7 @@ function SettingsPage({
   const hasInitialisedTranscriptionModelRef = useRef(false);
   const autoSelectingReadyModelRef = useRef<LocalTranscriptionModelId | null>(null);
   const hasDownloadedUpdate = isUpdateDownloaded(updateStatus);
+  const isCloudAiReady = Boolean(onboardingStatus?.pi.connected);
   const settingsSections: Array<{ id: SettingsSection; label: string }> = [
     { id: 'general', label: 'General' },
     { id: 'ai', label: 'Models' },
@@ -5678,6 +5691,7 @@ function SettingsPage({
 
   async function selectAiProvider(provider: AiProvider) {
     setSelectedAiProviderState(provider);
+    onSelectedAiProviderChange(provider);
 
     try {
       const nextStatus = await getSettingsBridge()?.ai?.setProvider?.(provider);
@@ -5744,6 +5758,15 @@ function SettingsPage({
       await refreshOnboardingStatus();
     } catch (error) {
       console.error('Failed to cancel local AI download:', error);
+    }
+  }
+
+  async function signInWithChatGptFromSettings() {
+    try {
+      await getSettingsBridge()?.ai?.openChatGptLogin?.();
+      await refreshOnboardingStatus();
+    } catch (error) {
+      console.error('Failed to open ChatGPT sign in:', error);
     }
   }
 
@@ -6067,7 +6090,7 @@ function SettingsPage({
                     />
                     <ModelAutoUpdateCheckbox
                       checked={onboardingStatus?.autoUpdate?.transcription ?? true}
-                      description="When enabled, Caul checks for better supported transcription models on your app update schedule or when you refresh the model list. It never changes models during a call."
+                      description="Caul can suggest better supported models on your update schedule."
                       id="settings-auto-update-transcription-model"
                       onCheckedChange={(enabled) => void setAutoUpdateModel('transcription', enabled)}
                     />
@@ -6094,94 +6117,97 @@ function SettingsPage({
                     </div>
 
                     {selectedAiProvider === 'local' ? (
-                      <div className="grid max-w-2xl gap-1 text-sm">
-                        <div className="font-medium">
-                          {onboardingStatus?.ai.recommended === 'local' ? onboardingStatus.ai.recommendedModel?.name : 'No local AI response model is ready'}
-                        </div>
-                        <p className={layout.settingsDescription}>
-                          {onboardingStatus?.ai.recommended === 'local' ? onboardingStatus.ai.recommendedModel?.reason : 'Local AI keeps prompts on this machine when a supported runtime and model are available.'}
-                        </p>
-                        <p className={layout.settingsDescription}>
-                          Local runtime: {localLlmStatus?.runtime.installed ? 'installed' : 'not installed'}. Model: {localLlmStatus?.model?.installed ? 'installed' : 'not installed'}.
-                        </p>
+                      <div className="grid max-w-2xl gap-2 text-sm">
+                        <p className={layout.settingsDescription}>Runs on this computer. Nothing is sent to ChatGPT.</p>
                         {localLlmStatus?.status === 'downloading' && localLlmStatus.progress ? (
                           <p className={layout.settingsDescription} aria-live="polite">
-                            {localLlmStatus.progress.label}: {localLlmStatus.progress.percent}%
+                            {localLlmStatus.progress.label} · {localLlmStatus.progress.percent}%
                           </p>
                         ) : null}
-                        <div className="flex flex-wrap gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           {localLlmStatus?.status === 'downloading' ? (
                             <Button onClick={() => void cancelLocalAiDownload()} size="sm" type="button" variant="outline">Cancel</Button>
+                          ) : localLlmStatus?.runtime.supported === false ? (
+                            <StatusPill ready={false}>Unavailable</StatusPill>
                           ) : localLlmStatus?.status !== 'ready' ? (
-                            <Button disabled={localLlmStatus?.runtime.supported === false} onClick={() => void downloadLocalAi()} size="sm" type="button">
+                            <Button onClick={() => void downloadLocalAi()} size="sm" type="button">
                               Download local AI
                             </Button>
                           ) : (
                             <StatusPill ready>Ready</StatusPill>
                           )}
                         </div>
-                        <p className={layout.settingsDescription}>
-                          Source: {onboardingStatus?.ai.benchmark.recommendationSource ?? 'bundled benchmark catalogue'}.
-                        </p>
                         <ModelAutoUpdateCheckbox
                           checked={onboardingStatus?.autoUpdate?.ai ?? true}
-                          description="When enabled, Caul checks for better supported AI models on your app update schedule or when you refresh the model list. It never changes models during a call."
+                          description="Caul can suggest better supported models on your update schedule."
                           id="settings-auto-update-ai-model"
                           onCheckedChange={(enabled) => void setAutoUpdateModel('ai', enabled)}
                         />
                       </div>
                     ) : (
-                      <FieldGroup className={layout.settingsInlineGroup}>
-                        <Field className="w-auto">
-                          <FieldLabel htmlFor="llm-model">Model</FieldLabel>
-                          <Select
-                            disabled={isListening || isBusy}
-                            name="llm-model"
-                            value={llmModel}
-                            onValueChange={(value) => setLlmModel(value as LlmModel)}
-                          >
-                            <div>
-                              <SelectTrigger id="llm-model" className="w-[9.5rem]">
-                                <SelectValue />
-                              </SelectTrigger>
-                            </div>
-                            <SelectContent>
-                              <SelectGroup>
-                                {llmModels.map((model) => (
-                                  <SelectItem key={model.value} value={model.value}>
-                                    {model.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectGroup>
-                            </SelectContent>
-                          </Select>
-                        </Field>
+                      <div className="grid max-w-2xl gap-2 text-sm">
+                        <p className={layout.settingsDescription}>Sends to ChatGPT. Faster and smarter than Local.</p>
+                        {!isCloudAiReady ? (
+                          <Button disabled={isListening || isBusy} onClick={() => void signInWithChatGptFromSettings()} size="sm" type="button">
+                            Sign in with ChatGPT
+                          </Button>
+                        ) : (
+                          <>
+                            <StatusPill ready>Ready</StatusPill>
+                            <FieldGroup className={layout.settingsInlineGroup}>
+                              <Field className="w-auto">
+                                <FieldLabel htmlFor="llm-model">Model</FieldLabel>
+                                <Select
+                                  disabled={isListening || isBusy}
+                                  name="llm-model"
+                                  value={llmModel}
+                                  onValueChange={(value) => setLlmModel(value as LlmModel)}
+                                >
+                                  <div>
+                                    <SelectTrigger id="llm-model" className="w-[9.5rem]">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                  </div>
+                                  <SelectContent>
+                                    <SelectGroup>
+                                      {llmModels.map((model) => (
+                                        <SelectItem key={model.value} value={model.value}>
+                                          {model.label}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectGroup>
+                                  </SelectContent>
+                                </Select>
+                              </Field>
 
-                        <Field className="w-auto">
-                          <FieldLabel htmlFor="llm-reasoning">Reasoning</FieldLabel>
-                          <Select
-                            disabled={isListening || isBusy}
-                            name="llm-reasoning"
-                            value={llmReasoning}
-                            onValueChange={(value) => setLlmReasoning(value as LlmReasoning)}
-                          >
-                            <div>
-                              <SelectTrigger id="llm-reasoning">
-                                <SelectValue />
-                              </SelectTrigger>
-                            </div>
-                            <SelectContent>
-                              <SelectGroup>
-                                {llmReasoningLevels.map((reasoning) => (
-                                  <SelectItem key={reasoning.value} value={reasoning.value}>
-                                    {reasoning.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectGroup>
-                            </SelectContent>
-                          </Select>
-                        </Field>
-                      </FieldGroup>
+                              <Field className="w-auto">
+                                <FieldLabel htmlFor="llm-reasoning">Reasoning</FieldLabel>
+                                <Select
+                                  disabled={isListening || isBusy}
+                                  name="llm-reasoning"
+                                  value={llmReasoning}
+                                  onValueChange={(value) => setLlmReasoning(value as LlmReasoning)}
+                                >
+                                  <div>
+                                    <SelectTrigger id="llm-reasoning">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                  </div>
+                                  <SelectContent>
+                                    <SelectGroup>
+                                      {llmReasoningLevels.map((reasoning) => (
+                                        <SelectItem key={reasoning.value} value={reasoning.value}>
+                                          {reasoning.label}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectGroup>
+                                  </SelectContent>
+                                </Select>
+                              </Field>
+                            </FieldGroup>
+                          </>
+                        )}
+                      </div>
                     )}
                   </FieldGroup>
                 </FieldSet>

@@ -174,7 +174,7 @@ function createFakeLlamaSpawn() {
   return spawn;
 }
 
-function fakeMlxSpawn(root) {
+function fakeMlxSpawn(root, options = {}) {
   return (command, args) => {
     const child = new EventEmitter();
     child.stderr = new EventEmitter();
@@ -209,7 +209,11 @@ function fakeMlxSpawn(root) {
           }
 
           if (request.url === '/v1/chat/completions' && request.method === 'POST') {
-            request.resume();
+            const chunks = [];
+            request.on('data', (chunk) => chunks.push(chunk));
+            request.on('end', () => {
+              options.requests?.push(JSON.parse(Buffer.concat(chunks).toString()));
+            });
             response.writeHead(200, { 'Content-Type': 'text/event-stream' });
             response.end('data: {"choices":[{"delta":{"content":"OK"}}]}\n\ndata: [DONE]\n\n');
             return;
@@ -401,6 +405,32 @@ describe('local LLM service', () => {
       expect(status.provider).toBe('caul-mlx');
       expect(status.runtime.installed).toBe(process.platform === 'darwin' && process.arch === 'arm64');
       expect(status.model.id).toBe('qwen3-1.7b-mlx-4bit');
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it('disables Qwen3 thinking for MLX local AI requests', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'caul-local-mlx-test-'));
+    const requests = [];
+
+    try {
+      const service = createLocalLlmService({
+        app: { getPath: () => root },
+        catalogue: createMlxOnlyCatalogue(),
+        spawn: fakeMlxSpawn(root, { requests }),
+        spawnSync: fakeMlxSpawnSync()
+      });
+      if (process.platform !== 'darwin' || process.arch !== 'arm64') {
+        expect(service.status().runtime.supported).toBe(false);
+        return;
+      }
+
+      await service.download();
+      const response = await service.request('Reply with exactly: OK.', { onDelta: () => undefined });
+
+      expect(response).toBe('OK');
+      expect(requests.at(-1).messages.at(-1).content).toContain('/no_think');
     } finally {
       rmSync(root, { force: true, recursive: true });
     }

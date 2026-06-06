@@ -658,8 +658,17 @@ function createLocalLlmService({
     }
 
     const port = await ensureMlxServer(model);
+    const requestPrompt = shouldDisableThinkingForModel(model) && !prompt.includes('/no_think')
+      ? `${prompt}\n\n/no_think`
+      : prompt;
 
-    return requestChatCompletion(port, prompt, { modelId: model.providerModelId, onDelta, signal });
+    return requestChatCompletion(port, requestPrompt, { modelId: model.providerModelId, onDelta, signal });
+  }
+
+  function shouldDisableThinkingForModel(model) {
+    const modelId = `${model?.id ?? ''} ${model?.providerModelId ?? ''}`.toLowerCase();
+
+    return modelId.includes('qwen3');
   }
 
   async function ensureMlxServer(model) {

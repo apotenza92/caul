@@ -688,12 +688,34 @@ describe('App', () => {
     await openSettings(user);
     await openSettingsSection(user, 'Models');
 
-    expect(screen.getByText(/Model recommendations refresh on your app update schedule/)).toBeInTheDocument();
+    expect(screen.getByText('Check for newer model options.')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Refresh Model List' }));
 
     await waitFor(() => expect(bridge.modelCatalogueRefreshes).toBe(1));
     expect(await screen.findByText(/Model list refreshed/)).toHaveTextContent('2 sources checked');
+  });
+
+  it('keeps cloud model controls hidden until ChatGPT is signed in', async () => {
+    const user = userEvent.setup();
+    installTestBridge({
+      piStatus: testPiStatus({
+        connected: false,
+        selectedModel: null,
+        status: 'disconnected'
+      })
+    });
+
+    render(<App />);
+
+    await openSettings(user);
+    await openSettingsSection(user, 'Models');
+    await user.click(screen.getByRole('tab', { name: 'Cloud' }));
+
+    expect(screen.getByText('Sends to ChatGPT. Faster and smarter than Local.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sign in with ChatGPT' })).toBeEnabled();
+    expect(screen.queryByLabelText('Model')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Reasoning')).not.toBeInTheDocument();
   });
 
   it('requires ChatGPT sign in when Cloud is selected', async () => {
@@ -2718,7 +2740,13 @@ describe('App', () => {
 
   it('sends the selected model and reasoning to the LLM', async () => {
     const user = userEvent.setup();
-    const bridge = installTestBridge();
+    const bridge = installTestBridge({
+      piStatus: testPiStatus({
+        connected: true,
+        selectedModel: 'openai-codex/gpt-5.4-mini',
+        status: 'ready'
+      })
+    });
 
     render(<App />);
 
@@ -2788,6 +2816,11 @@ describe('App', () => {
   it('resets settings to their defaults', async () => {
     const user = userEvent.setup();
     const bridge = installTestBridge({
+      piStatus: testPiStatus({
+        connected: true,
+        selectedModel: 'openai-codex/gpt-5.4-mini',
+        status: 'ready'
+      }),
       promptTemplateState: testPromptTemplateState({
         selectedTemplateIds: ['custom-template'],
         templates: [
@@ -3054,6 +3087,42 @@ describe('App', () => {
 
     act(() => {
       resolveRequest?.({ ok: true, text: 'Refunds take 30 days.' });
+    });
+  });
+
+  it('shows a local AI preparing message before the first local delta arrives', async () => {
+    const user = userEvent.setup();
+    let resolveRequest: ((value: { ok: boolean; text: string }) => void) | null = null;
+    const bridge = installTestBridge({
+      requestLlm: async () => new Promise((resolve) => {
+        resolveRequest = resolve;
+      })
+    });
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
+
+    act(() => {
+      bridge.emit({
+        type: 'completed',
+        utteranceId: 1,
+        text: 'Summarise this call.'
+      });
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
+
+    await screen.findByText('Preparing local AI...');
+
+    act(() => {
+      bridge.emit({ type: 'llm-response-delta', text: 'Summary ready.' });
+    });
+
+    expect(screen.getByLabelText('AI response')).toHaveTextContent('Summary ready.');
+
+    act(() => {
+      resolveRequest?.({ ok: true, text: 'Summary ready.' });
     });
   });
 
@@ -3372,9 +3441,12 @@ describe('App', () => {
     expect(container.querySelector('#llm-output .transcript-section-header')).toHaveClass('border-y');
   });
 
-  it('shows a spinner instead of loading text while waiting for the first LLM token', async () => {
+  it('does not show noisy loading text while waiting for the first cloud LLM token', async () => {
     const user = userEvent.setup();
     const bridge = installTestBridge({
+      portablePreferences: {
+        selectedAiProvider: 'cloud'
+      },
       requestLlm: async () => new Promise(() => undefined)
     });
 
@@ -3393,7 +3465,6 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
 
     expect(screen.getByLabelText('AI response')).toHaveTextContent(currentLongDatePattern());
-    expect(screen.getByLabelText('Waiting for response')).toBeInTheDocument();
     expect(screen.queryByText('Waiting for response...')).not.toBeInTheDocument();
     expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
   });

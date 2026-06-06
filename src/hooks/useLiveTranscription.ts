@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   getSettingsBridge,
   getTranscriptionBridge,
+  type AiProvider,
   type LlmModel,
   type LlmReasoning,
   type PromptTemplateAttachment,
@@ -11,6 +12,7 @@ import type { CaptureSource } from '../foundation/capture';
 import { getRuntimeContext } from '../foundation/runtime';
 
 const awaitingResponseText = '';
+const preparingLocalAiText = 'Preparing local AI...';
 const idleLlmText = 'Auto Send is on.\nStop listening to send transcript to AI';
 const idleTranscriptText = 'Your live transcript will appear here once you start listening.';
 let rendererTranscriptDebugEnabled = import.meta.env.VITE_CAUL_TRANSCRIPT_DEBUG_LOG === '1';
@@ -23,6 +25,7 @@ export type LiveTranscriptionOptions = {
 export type StopTranscriptionOptions = {
   llmModel: LlmModel;
   llmReasoning: LlmReasoning;
+  aiProvider?: AiProvider;
   generalInstructionsText?: string;
   promptTemplateAttachments?: PromptTemplateAttachment[];
   promptTemplateText?: string;
@@ -170,6 +173,7 @@ export function useLiveTranscription() {
     llmModel = 'openai-codex/gpt-5.4-mini',
     llmReasoning = 'off',
     generalInstructionsText,
+    aiProvider = 'cloud',
     promptTemplateAttachments = [],
     promptTemplateText,
     sendToLlm = false
@@ -202,10 +206,11 @@ export function useLiveTranscription() {
       const requestTranscript = formatPromptTemplateRequest(transcript, promptTemplateText, generalInstructionsText);
       const requestedAt = new Date().toISOString();
       const responseId = `ai-response-${Date.now()}`;
+      const initialResponseText = getAwaitingResponseText(aiProvider);
       setIsAsking(true);
       setLlmQuery(requestTranscript);
       setLlmRequestedAt(requestedAt);
-      setLlmOutput(awaitingResponseText);
+      setLlmOutput(initialResponseText);
       activeLlmResponseIdRef.current = responseId;
       const historySessionId = activeSessionIdRef.current ?? undefined;
       setAiResponseSessions((current) => [...current, {
@@ -214,7 +219,7 @@ export function useLiveTranscription() {
         isWaiting: true,
         request: requestTranscript,
         requestedAt,
-        response: ''
+        response: initialResponseText
       }]);
       saveHistorySessionById(historySessionId);
 
@@ -261,11 +266,12 @@ export function useLiveTranscription() {
   async function ask({
     llmModel = 'openai-codex/gpt-5.4-mini',
     llmReasoning = 'off',
+    aiProvider = 'cloud',
     promptTemplateAttachments = [],
     promptTemplateText,
     generalInstructionsText,
     transcript
-  }: Partial<Pick<StopTranscriptionOptions, 'llmModel' | 'llmReasoning'>> & {
+  }: Partial<Pick<StopTranscriptionOptions, 'aiProvider' | 'llmModel' | 'llmReasoning'>> & {
     promptTemplateAttachments?: PromptTemplateAttachment[];
     promptTemplateText?: string;
     generalInstructionsText?: string;
@@ -282,8 +288,9 @@ export function useLiveTranscription() {
     setLlmQuery(requestTranscript);
     const requestedAt = new Date().toISOString();
     const responseId = `ai-response-${Date.now()}`;
+    const initialResponseText = getAwaitingResponseText(aiProvider);
     setLlmRequestedAt(requestedAt);
-    setLlmOutput(awaitingResponseText);
+    setLlmOutput(initialResponseText);
     activeLlmResponseIdRef.current = responseId;
     const historySessionId = findHistorySessionIdForTranscript(transcript ?? output);
     setAiResponseSessions((current) => [...current, {
@@ -292,7 +299,7 @@ export function useLiveTranscription() {
       isWaiting: true,
       request: requestTranscript,
       requestedAt,
-      response: ''
+      response: initialResponseText
     }]);
     saveHistorySessionById(historySessionId);
 
@@ -507,7 +514,7 @@ export function useLiveTranscription() {
       }
 
       setLlmOutput((current) => {
-        const next = current === awaitingResponseText ? event.text : `${current}${event.text}`;
+        const next = isAwaitingResponseText(current) ? event.text : `${current}${event.text}`;
 
         if (activeLlmResponseIdRef.current) {
           updateLlmResponse(activeLlmResponseIdRef.current, { response: next });
@@ -526,7 +533,7 @@ export function useLiveTranscription() {
 
       setLlmQuery(event.text.trim() || 'No query sent yet.');
       setLlmRequestedAt(new Date().toISOString());
-      setLlmOutput(awaitingResponseText);
+      setLlmOutput((current) => (current === preparingLocalAiText ? current : awaitingResponseText));
       setIsAsking(true);
       return;
     }
@@ -724,6 +731,14 @@ export function useLiveTranscription() {
       clearTimeout(speculativeTimerRef.current);
       speculativeTimerRef.current = null;
     }
+  }
+
+  function getAwaitingResponseText(aiProvider: AiProvider) {
+    return aiProvider === 'local' ? preparingLocalAiText : awaitingResponseText;
+  }
+
+  function isAwaitingResponseText(text: string) {
+    return text === awaitingResponseText || text === preparingLocalAiText;
   }
 
   function invalidateSpeculativeRequest(transcript: string) {
