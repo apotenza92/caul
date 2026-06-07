@@ -4737,7 +4737,6 @@ function PromptTemplateDialog({
   const [draft, setDraft] = useState<PromptTemplate>(() => activeTemplate ?? createPromptTemplate({ name: '', prompt: '' }));
   const [deleteConfirmationId, setDeleteConfirmationId] = useState<string | null>(null);
   const draftAttachments = draft.attachments ?? [];
-  const supportedAttachments = draftAttachments.filter((attachment) => attachment.support === 'supported');
   const modelAttachmentSupport = getLlmModelAttachmentSupport(currentModel);
 
   useEffect(() => {
@@ -4962,9 +4961,9 @@ function PromptTemplateDialog({
                     ))
                   )}
                 </div>
-                {supportedAttachments.length > 0 && (
+                {draftAttachments.length > 0 && (
                   <p className={layout.settingsDescription}>
-                    Supported attachments are sent with this prompt template when you ask AI.
+                    Local reads supported document text. Cloud sends the file to ChatGPT.
                   </p>
                 )}
               </div>
@@ -5105,16 +5104,15 @@ function mergePromptTemplateAttachments(
 
 function getLlmModelAttachmentSupport(_model: LlmModel) {
   return {
-    description: 'Current model accepts local file attachments.',
+    description: 'Text, DOCX and RTF work locally. Cloud can use PDFs and images through ChatGPT.',
     supportedKinds: ['file', 'image', 'text']
   };
 }
 
 function formatAttachmentMetadata(attachment: PromptTemplateAttachment) {
-  const support = attachment.support === 'supported' ? 'Supported' : 'Unsupported';
   const type = attachment.kind[0].toLocaleUpperCase() + attachment.kind.slice(1);
 
-  return `${support} ${type} · ${formatBytes(attachment.sizeBytes)}`;
+  return `${type} · ${formatBytes(attachment.sizeBytes)}`;
 }
 
 function formatBytes(bytes: number) {

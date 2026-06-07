@@ -71,6 +71,14 @@ async function readAttachmentText(attachment, {
       : { name, reason: 'DOCX text could not be extracted', text: '' };
   }
 
+  if (extension === '.pdf') {
+    const text = await readPdfText(filePath, { fs });
+
+    return text
+      ? { name, text: truncateAttachmentText(text) }
+      : { name, reason: 'PDF text could not be extracted', text: '' };
+  }
+
   if (platform === 'darwin' && ['.doc', '.rtf', '.rtfd'].includes(extension)) {
     const text = await runTextutil(filePath, { spawnProcess });
 
@@ -106,6 +114,46 @@ async function readDocxText(filePath, { spawnProcess }) {
     .replace(/&apos;/g, "'")
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+}
+
+async function readPdfText(filePath, { fs }) {
+  try {
+    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    const data = new Uint8Array(fs.readFileSync(filePath));
+    const task = pdfjs.getDocument({
+      data,
+      disableFontFace: true,
+      isEvalSupported: false,
+      useSystemFonts: false
+    });
+    const pdf = await task.promise;
+    const pages = [];
+
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      const text = content.items
+        .map((item) => (typeof item?.str === 'string' ? item.str : ''))
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (text) {
+        pages.push(text);
+      }
+    }
+
+    try {
+      pdf.cleanup?.();
+      await task.destroy?.();
+    } catch {
+      // Cleanup is best effort; extracted text above is still usable.
+    }
+
+    return pages.join('\n\n').trim();
+  } catch {
+    return '';
+  }
 }
 
 async function runTextutil(filePath, { spawnProcess }) {
@@ -160,5 +208,6 @@ function truncateAttachmentText(text) {
 
 module.exports = {
   buildLocalLlmPromptWithAttachments,
+  readPdfText,
   readAttachmentText
 };

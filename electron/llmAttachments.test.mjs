@@ -1,11 +1,12 @@
 import { createRequire } from 'node:module';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 
 const require = createRequire(import.meta.url);
-const { buildLocalLlmPromptWithAttachments } = require('./llmAttachments.cjs');
+const { buildLocalLlmPromptWithAttachments, readPdfText } = require('./llmAttachments.cjs');
 
 describe('LLM attachments', () => {
   it('adds readable text attachment content to local prompts', async () => {
@@ -44,5 +45,30 @@ describe('LLM attachments', () => {
 
     expect(prompt).toContain('Caul could not read this file locally: file is missing');
     expect(prompt).toContain('do not pretend to have reviewed it');
+  });
+
+  it('extracts readable PDF text for local prompts when a PDF generator is available', async () => {
+    const pandoc = '/opt/homebrew/bin/pandoc';
+
+    if (!existsSync(pandoc)) {
+      return;
+    }
+
+    const root = mkdtempSync(join(tmpdir(), 'caul-llm-pdf-attachments-'));
+
+    try {
+      const sourcePath = join(root, 'cv.md');
+      const pdfPath = join(root, 'cv.pdf');
+      writeFileSync(sourcePath, '# Alex CV\n\nBuilt Caul attachment support.\n');
+
+      const result = spawnSync(pandoc, [sourcePath, '-o', pdfPath], { encoding: 'utf8' });
+      expect(result.status).toBe(0);
+
+      const text = await readPdfText(pdfPath, { fs: require('node:fs') });
+      expect(text).toContain('Alex CV');
+      expect(text).toContain('Built Caul attachment support.');
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
   });
 });
