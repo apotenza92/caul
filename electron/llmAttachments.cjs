@@ -115,6 +115,24 @@ function clearLocalAttachmentTextCache() {
   localAttachmentTextCache.clear();
 }
 
+function forgetLocalLlmAttachments(attachments) {
+  if (!Array.isArray(attachments) || attachments.length === 0) {
+    return;
+  }
+
+  const paths = new Set(attachments
+    .map((attachment) => (typeof attachment?.path === 'string' ? attachment.path : ''))
+    .filter(Boolean));
+
+  for (const cacheKey of localAttachmentTextCache.keys()) {
+    const filePath = cacheKey.split('\0')[0];
+
+    if (paths.has(filePath)) {
+      localAttachmentTextCache.delete(cacheKey);
+    }
+  }
+}
+
 async function readAttachmentText(attachment, {
   fs = fsSync,
   platform = process.platform,
@@ -286,6 +304,7 @@ function truncateAttachmentText(text) {
 module.exports = {
   buildLocalLlmPromptWithAttachments,
   clearLocalAttachmentTextCache,
+  forgetLocalLlmAttachments,
   preloadLocalLlmAttachments,
   readPdfText,
   readAttachmentText

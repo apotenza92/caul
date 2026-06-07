@@ -18,7 +18,7 @@ const { createStopFlushController } = require('./transcriptionStopFlush.cjs');
 const { createUpdaterService } = require('./updater.cjs');
 const { createHistoryService } = require('./history.cjs');
 const { createLocalLlmService } = require('./localLlm.cjs');
-const { buildLocalLlmPromptWithAttachments, preloadLocalLlmAttachments } = require('./llmAttachments.cjs');
+const { buildLocalLlmPromptWithAttachments, forgetLocalLlmAttachments, preloadLocalLlmAttachments } = require('./llmAttachments.cjs');
 const { createProfileService } = require('./profile.cjs');
 const {
   buildSystemProfile,
@@ -1029,6 +1029,11 @@ function savePromptTemplate(template) {
   const templateToSave = starterTemplate && isStarterPromptTemplateCustomised(normalised, starterTemplate)
     ? asCustomStarterPromptTemplate(normalised, existing.templates)
     : normalised;
+  const previousTemplate = existing.templates.find((item) => item.id === templateToSave.id);
+  forgetLocalLlmAttachments(getRemovedPromptTemplateAttachments(
+    previousTemplate?.attachments ?? [],
+    templateToSave.attachments ?? []
+  ));
   const templates = existing.templates.some((item) => item.id === templateToSave.id)
     ? existing.templates.map((item) => (item.id === templateToSave.id ? templateToSave : item))
     : [...existing.templates, templateToSave];
@@ -1041,7 +1046,9 @@ function savePromptTemplate(template) {
 
 function deletePromptTemplate(id) {
   const existing = readPromptTemplateState();
+  const deletedTemplate = existing.templates.find((template) => template.id === id);
   const templates = existing.templates.filter((template) => template.id !== id);
+  forgetLocalLlmAttachments(deletedTemplate?.attachments ?? []);
 
   return writePromptTemplateState({
     selectedTemplateIds: existing.selectedTemplateIds.filter((selectedId) => selectedId !== id),
@@ -1051,11 +1058,28 @@ function deletePromptTemplate(id) {
 
 function resetPromptTemplates() {
   const existing = readPromptTemplateState();
+  const nextTemplates = preserveCustomisedStarterPromptTemplates(existing.templates);
+  forgetLocalLlmAttachments(getRemovedPromptTemplateAttachments(
+    existing.templates.flatMap((template) => template.attachments ?? []),
+    nextTemplates.flatMap((template) => template.attachments ?? [])
+  ));
 
   return writePromptTemplateState({
     selectedTemplateIds: defaultSelectedPromptTemplateIds,
-    templates: preserveCustomisedStarterPromptTemplates(existing.templates)
+    templates: nextTemplates
   });
+}
+
+function getRemovedPromptTemplateAttachments(previousAttachments, nextAttachments) {
+  const nextPaths = new Set(nextAttachments
+    .map((attachment) => attachment?.path)
+    .filter((filePath) => typeof filePath === 'string' && filePath));
+
+  return previousAttachments.filter((attachment) => (
+    typeof attachment?.path === 'string'
+    && attachment.path
+    && !nextPaths.has(attachment.path)
+  ));
 }
 
 async function choosePromptTemplateAttachments(window) {

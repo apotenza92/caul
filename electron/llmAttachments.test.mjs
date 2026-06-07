@@ -9,6 +9,7 @@ const require = createRequire(import.meta.url);
 const {
   buildLocalLlmPromptWithAttachments,
   clearLocalAttachmentTextCache,
+  forgetLocalLlmAttachments,
   preloadLocalLlmAttachments,
   readPdfText
 } = require('./llmAttachments.cjs');
@@ -78,6 +79,36 @@ describe('LLM attachments', () => {
 
     expect(reads).toBe(1);
     expect(prompt).toContain('Preloaded attachment text.');
+    clearLocalAttachmentTextCache();
+  });
+
+  it('removes pre-processed attachment text when an attachment is deleted', async () => {
+    clearLocalAttachmentTextCache();
+    let reads = 0;
+    const attachment = {
+      kind: 'text',
+      name: 'Alex CV.txt',
+      path: '/tmp/caul-deleted-cv.txt'
+    };
+    const fs = {
+      existsSync: () => true,
+      statSync: () => ({
+        isFile: () => true,
+        mtimeMs: 123,
+        size: 42
+      }),
+      readFileSync: () => {
+        reads += 1;
+        return `Attachment read ${reads}.`;
+      }
+    };
+
+    await preloadLocalLlmAttachments([attachment], { fs });
+    forgetLocalLlmAttachments([attachment]);
+    const prompt = await buildLocalLlmPromptWithAttachments('Transcript:\nreview my cv', [attachment], { fs });
+
+    expect(reads).toBe(2);
+    expect(prompt).toContain('Attachment read 2.');
     clearLocalAttachmentTextCache();
   });
 
