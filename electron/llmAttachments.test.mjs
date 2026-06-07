@@ -6,7 +6,12 @@ import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 
 const require = createRequire(import.meta.url);
-const { buildLocalLlmPromptWithAttachments, readPdfText } = require('./llmAttachments.cjs');
+const {
+  buildLocalLlmPromptWithAttachments,
+  clearLocalAttachmentTextCache,
+  preloadLocalLlmAttachments,
+  readPdfText
+} = require('./llmAttachments.cjs');
 
 describe('LLM attachments', () => {
   it('adds readable text attachment content to local prompts', async () => {
@@ -45,6 +50,35 @@ describe('LLM attachments', () => {
 
     expect(prompt).toContain('Caul could not read this file locally: file is missing');
     expect(prompt).toContain('do not pretend to have reviewed it');
+  });
+
+  it('reuses attachment text that was pre-processed when the file was attached', async () => {
+    clearLocalAttachmentTextCache();
+    let reads = 0;
+    const attachment = {
+      kind: 'text',
+      name: 'Alex CV.txt',
+      path: '/tmp/caul-preloaded-cv.txt'
+    };
+    const fs = {
+      existsSync: () => true,
+      statSync: () => ({
+        isFile: () => true,
+        mtimeMs: 123,
+        size: 42
+      }),
+      readFileSync: () => {
+        reads += 1;
+        return 'Preloaded attachment text.';
+      }
+    };
+
+    await preloadLocalLlmAttachments([attachment], { fs });
+    const prompt = await buildLocalLlmPromptWithAttachments('Transcript:\nreview my cv', [attachment], { fs });
+
+    expect(reads).toBe(1);
+    expect(prompt).toContain('Preloaded attachment text.');
+    clearLocalAttachmentTextCache();
   });
 
   it('extracts readable PDF text for local prompts when a PDF generator is available', async () => {

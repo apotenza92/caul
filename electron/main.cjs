@@ -18,7 +18,7 @@ const { createStopFlushController } = require('./transcriptionStopFlush.cjs');
 const { createUpdaterService } = require('./updater.cjs');
 const { createHistoryService } = require('./history.cjs');
 const { createLocalLlmService } = require('./localLlm.cjs');
-const { buildLocalLlmPromptWithAttachments } = require('./llmAttachments.cjs');
+const { buildLocalLlmPromptWithAttachments, preloadLocalLlmAttachments } = require('./llmAttachments.cjs');
 const { createProfileService } = require('./profile.cjs');
 const {
   buildSystemProfile,
@@ -1068,11 +1068,16 @@ async function choosePromptTemplateAttachments(window) {
     return { ok: true, attachments: [] };
   }
 
+  const attachments = result.filePaths
+    .map((filePath) => normalisePromptTemplateAttachment({ path: filePath }))
+    .filter(Boolean);
+  void preloadLocalLlmAttachments(attachments).catch((error) => {
+    console.warn('Failed to pre-process local AI attachments', error);
+  });
+
   return {
     ok: true,
-    attachments: result.filePaths
-      .map((filePath) => normalisePromptTemplateAttachment({ path: filePath }))
-      .filter(Boolean)
+    attachments
   };
 }
 

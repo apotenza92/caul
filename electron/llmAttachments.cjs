@@ -3,6 +3,8 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 
 const localAttachmentTextLimit = 60_000;
+const localAttachmentTextCacheLimit = 128;
+const localAttachmentTextCache = new Map();
 
 async function buildLocalLlmPromptWithAttachments(transcript, attachments, {
   fs = fsSync,
@@ -14,7 +16,7 @@ async function buildLocalLlmPromptWithAttachments(transcript, attachments, {
   }
 
   const results = await Promise.all(attachments.map((attachment) => (
-    readAttachmentText(attachment, { fs, platform, spawnProcess })
+    readAttachmentTextCached(attachment, { fs, platform, spawnProcess })
   )));
   const sections = results.map((result) => {
     if (result.text) {
@@ -36,6 +38,81 @@ async function buildLocalLlmPromptWithAttachments(transcript, attachments, {
     'User request:',
     transcript
   ].join('\n');
+}
+
+function preloadLocalLlmAttachments(attachments, {
+  fs = fsSync,
+  platform = process.platform,
+  spawnProcess = spawn
+} = {}) {
+  if (!Array.isArray(attachments) || attachments.length === 0) {
+    return Promise.resolve([]);
+  }
+
+  return Promise.all(attachments.map((attachment) => (
+    readAttachmentTextCached(attachment, { fs, platform, spawnProcess })
+  )));
+}
+
+async function readAttachmentTextCached(attachment, {
+  fs = fsSync,
+  platform = process.platform,
+  spawnProcess = spawn
+} = {}) {
+  const cacheKey = getAttachmentCacheKey(attachment, { fs });
+
+  if (!cacheKey) {
+    return readAttachmentText(attachment, { fs, platform, spawnProcess });
+  }
+
+  const cached = localAttachmentTextCache.get(cacheKey);
+
+  if (cached) {
+    return cached;
+  }
+
+  const pending = readAttachmentText(attachment, { fs, platform, spawnProcess });
+  rememberAttachmentText(cacheKey, pending);
+
+  return pending;
+}
+
+function getAttachmentCacheKey(attachment, { fs = fsSync } = {}) {
+  const filePath = typeof attachment?.path === 'string' ? attachment.path : '';
+
+  if (!filePath || !fs.existsSync(filePath)) {
+    return '';
+  }
+
+  try {
+    const stats = fs.statSync(filePath);
+
+    if (typeof stats?.isFile === 'function' && !stats.isFile()) {
+      return '';
+    }
+
+    return [filePath, stats.size ?? 0, stats.mtimeMs ?? 0].join('\0');
+  } catch {
+    return '';
+  }
+}
+
+function rememberAttachmentText(cacheKey, pending) {
+  localAttachmentTextCache.set(cacheKey, pending);
+
+  if (localAttachmentTextCache.size <= localAttachmentTextCacheLimit) {
+    return;
+  }
+
+  const oldestKey = localAttachmentTextCache.keys().next().value;
+
+  if (oldestKey) {
+    localAttachmentTextCache.delete(oldestKey);
+  }
+}
+
+function clearLocalAttachmentTextCache() {
+  localAttachmentTextCache.clear();
 }
 
 async function readAttachmentText(attachment, {
@@ -208,6 +285,8 @@ function truncateAttachmentText(text) {
 
 module.exports = {
   buildLocalLlmPromptWithAttachments,
+  clearLocalAttachmentTextCache,
+  preloadLocalLlmAttachments,
   readPdfText,
   readAttachmentText
 };
