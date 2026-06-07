@@ -18,6 +18,7 @@ const { createStopFlushController } = require('./transcriptionStopFlush.cjs');
 const { createUpdaterService } = require('./updater.cjs');
 const { createHistoryService } = require('./history.cjs');
 const { createLocalLlmService } = require('./localLlm.cjs');
+const { buildLocalLlmPromptWithAttachments } = require('./llmAttachments.cjs');
 const { createProfileService } = require('./profile.cjs');
 const {
   buildSystemProfile,
@@ -163,7 +164,7 @@ const starterPromptTemplates = [
   {
     id: 'starter-use-my-cv',
     name: 'CV',
-    prompt: 'Use my CV as background context.\n\nPrefer relevant experience, projects, achievements and skills from the CV. Do not invent details.'
+    prompt: 'Use my CV as background context.\n\nPrefer specific experience, projects, achievements and skills from the CV. If no CV content or readable CV attachment is provided, say you cannot review the CV until it is attached. Do not invent details, use placeholders or give a generic CV review.'
   },
   {
     id: 'starter-job-description',
@@ -4574,7 +4575,10 @@ async function requestLlmResponse(transcript, options = {}) {
   };
   const selectedAiProvider = getSelectedAiProvider();
   const text = selectedAiProvider === 'local'
-    ? await getLocalLlmService().request(trimmedTranscript, { onDelta })
+    ? await getLocalLlmService().request(
+      await buildLocalLlmPromptWithAttachments(trimmedTranscript, attachments),
+      { onDelta }
+    )
     : await requestCloudLlmResponse(trimmedTranscript, { ...options, attachments }, onDelta);
   emitTranscriptionEvent({ type: 'llm-response', requestId, text });
 
