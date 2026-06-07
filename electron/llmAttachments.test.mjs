@@ -112,6 +112,33 @@ describe('LLM attachments', () => {
     clearLocalAttachmentTextCache();
   });
 
+  it('builds a file-upload fallback prompt from pre-processed attachment text', async () => {
+    clearLocalAttachmentTextCache();
+    const attachment = {
+      kind: 'text',
+      name: 'Cloud fallback CV.txt',
+      path: '/tmp/caul-cloud-fallback-cv.txt'
+    };
+    const fs = {
+      existsSync: () => true,
+      statSync: () => ({
+        isFile: () => true,
+        mtimeMs: 123,
+        size: 42
+      }),
+      readFileSync: () => 'Cloud fallback attachment text.'
+    };
+
+    await preloadLocalLlmAttachments([attachment], { fs });
+    const prompt = await buildLocalLlmPromptWithAttachments('Transcript:\nreview my cv', [attachment], { fs });
+
+    expect(prompt).toContain('Attached file context:');
+    expect(prompt).toContain('Attachment: Cloud fallback CV.txt');
+    expect(prompt).toContain('Cloud fallback attachment text.');
+    expect(prompt).toContain('User request:');
+    clearLocalAttachmentTextCache();
+  });
+
   it('extracts readable PDF text for local prompts when a PDF generator is available', async () => {
     const pandoc = '/opt/homebrew/bin/pandoc';
 

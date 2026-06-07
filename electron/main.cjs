@@ -4670,7 +4670,12 @@ function runPiTextRequest(transcript, options = {}, onDelta = () => {}) {
   const attachments = Array.isArray(options.attachments) ? options.attachments : [];
 
   if (attachments.length > 0) {
-    return runOneShotPiTextRequest(transcript, { attachments, model, thinking }, onDelta, runStartedAt);
+    return runPiAttachmentRequestWithTextFallback(
+      transcript,
+      { attachments, model, thinking },
+      onDelta,
+      runStartedAt
+    );
   }
 
   if (requestStrategy === 'one-shot') {
@@ -4749,6 +4754,29 @@ function runRacedPiTextRequest(transcript, { model, thinking }, onDelta = () => 
         });
     });
   });
+}
+
+function runPiAttachmentRequestWithTextFallback(transcript, { attachments = [], model, thinking }, onDelta = () => {}, runStartedAt = Date.now()) {
+  let emittedDelta = false;
+  const trackedDelta = (delta) => {
+    emittedDelta = true;
+    onDelta(delta);
+  };
+
+  return runOneShotPiTextRequest(transcript, { attachments, model, thinking }, trackedDelta, runStartedAt)
+    .catch(async (error) => {
+      if (emittedDelta) {
+        throw error;
+      }
+
+      const fallbackPrompt = await buildLocalLlmPromptWithAttachments(transcript, attachments);
+
+      if (rendererRealLlmSmoke) {
+        console.error(`caul-pi-attachment-fallback ${error.message}`);
+      }
+
+      return runOneShotPiTextRequest(fallbackPrompt, { attachments: [], model, thinking }, onDelta, runStartedAt);
+    });
 }
 
 function runPersistentPiRpcRequest(transcript, { model, thinking }, onDelta = () => {}) {
