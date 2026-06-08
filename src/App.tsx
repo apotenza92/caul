@@ -153,7 +153,7 @@ const layout = {
   transcriptPrimaryActionsVertical: 'flex min-h-0 min-w-0 flex-1 flex-col items-center justify-between gap-2',
   listeningSourceIndicators: 'flex shrink-0 items-center justify-center gap-2',
   listeningSourceIndicatorsVertical: 'flex shrink-0 flex-col items-center gap-1',
-  listeningSourceIndicatorActive: 'border-[#34424A]/50 bg-[#34424A]/10 text-[#34424A] hover:bg-[#34424A]/15 dark:border-[#8EA6AD]/50 dark:bg-[#8EA6AD]/10 dark:text-[#8EA6AD] dark:hover:bg-[#8EA6AD]/15',
+  listeningSourceIndicatorActive: '!bg-primary !text-primary-foreground hover:!bg-primary/90 hover:!text-primary-foreground focus-visible:border-primary focus-visible:ring-primary/30 dark:!bg-primary dark:!text-primary-foreground dark:hover:!bg-primary/90 dark:hover:!text-primary-foreground',
   aiToolbarActions: 'flex w-full min-w-0 flex-1 items-center justify-start',
   aiResponseActions: 'ml-auto flex items-center gap-2',
   aiResponseActionsVertical: 'flex flex-col items-center gap-2',
@@ -171,8 +171,8 @@ const layout = {
   compactToolbarButton: 'compact-toolbar-button',
   compactToolbarButtonLabel: 'compact-toolbar-button-label',
   permissionButton: 'h-auto min-h-9 max-w-full whitespace-normal break-words px-2.5 py-1.5 text-center text-xs leading-snug border-destructive/50 bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/60 focus-visible:ring-destructive/20 dark:border-destructive/40 dark:bg-destructive/20 dark:hover:bg-destructive/30',
-  grantPermissionsButton: 'w-[160px] border-destructive/50 bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/60 focus-visible:ring-destructive/20 dark:border-destructive/40 dark:bg-destructive/20 dark:hover:bg-destructive/30',
-  startButton: 'bg-[#34424A] text-white hover:bg-[#263238] focus-visible:border-[#34424A] focus-visible:ring-[#34424A]/30 dark:bg-[#34424A] dark:hover:bg-[#8EA6AD]',
+  grantPermissionsButton: 'w-[140px] border-destructive/50 bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/60 focus-visible:ring-destructive/20 dark:border-destructive/40 dark:bg-destructive/20 dark:hover:bg-destructive/30',
+  startButton: '!bg-primary !text-primary-foreground hover:!bg-primary/90 focus-visible:border-primary focus-visible:ring-primary/30 dark:!bg-primary dark:!text-primary-foreground dark:hover:!bg-primary/90',
   output: 'box-border h-full min-h-0 overflow-y-auto px-6 py-6 whitespace-pre-wrap text-sm leading-6',
   transcriptSessionOutput: 'transcript-session-output box-border h-full min-h-0 overflow-y-auto',
   historyVirtualSpacer: 'pointer-events-none h-[var(--caul-history-virtual-height,100%)]',
@@ -225,10 +225,10 @@ const layout = {
   handleButton: 'caul-handle-button',
   handleButtonOpen: '',
   placeholder: 'box-border flex h-full min-h-0 items-center justify-center overflow-y-auto whitespace-pre-wrap px-6 py-6 text-center text-sm text-muted-foreground',
-  startHereHint: 'caul-start-here-nudge pointer-events-none absolute left-2 top-4 z-20 flex w-[74%] max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-md border border-[#34424A]/35 bg-background/95 px-3 py-2 text-left shadow-lg shadow-[#34424A]/15 ring-1 ring-[#34424A]/10 backdrop-blur',
+  startHereHint: 'caul-start-here-nudge caul-primary-glow-nudge pointer-events-none absolute left-2 top-4 z-20 flex w-[74%] max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-md border border-primary/35 bg-background/95 px-3 py-2 text-left shadow-lg ring-1 ring-primary/10 backdrop-blur',
   startHereArrow: 'size-5 shrink-0 text-[#34424A] dark:text-[#8EA6AD]',
   startHereDescription: 'min-w-0 max-w-full text-sm leading-5 text-foreground',
-  aiPromptTemplateHint: 'caul-prompt-template-nudge pointer-events-none absolute left-2 top-4 z-20 flex w-[74%] max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-md border border-[#34424A]/35 bg-background/95 px-3 py-2 text-left shadow-lg shadow-[#34424A]/15 ring-1 ring-[#34424A]/10 backdrop-blur',
+  aiPromptTemplateHint: 'caul-prompt-template-nudge caul-primary-glow-nudge pointer-events-none absolute left-2 top-4 z-20 flex w-[74%] max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-md border border-primary/35 bg-background/95 px-3 py-2 text-left shadow-lg ring-1 ring-primary/10 backdrop-blur',
   aiPromptTemplateHintIcon: 'size-5 shrink-0 text-[#34424A] dark:text-[#8EA6AD]',
   aiPromptTemplateHintDescription: 'min-w-0 max-w-full text-sm leading-5 text-foreground'
 };
@@ -248,6 +248,8 @@ const autoCollapsePreferenceKey = 'caul.auto-collapse';
 const generalInstructionsPreferenceKey = 'caul.general-instructions';
 const defaultGeneralInstructions = '';
 const generalInstructionsPlaceholder = 'e.g. Always answer in British English.';
+const recommendedPillClassName = 'pointer-events-none shrink-0 rounded-full border border-primary/35 bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary shadow-sm dark:border-primary/45 dark:bg-primary/15 dark:text-primary';
+const selectedRecommendedPillClassName = 'pointer-events-none shrink-0 rounded-full border border-primary-foreground/40 bg-primary-foreground/15 px-2 py-0.5 text-xs font-medium text-primary-foreground shadow-sm';
 const handleDragThresholdPx = 6;
 const handleSnapVisualDurationMs = 280;
 const overlayOpenTooltipSuppressionMs = 700;
@@ -435,6 +437,7 @@ export function App() {
   const [llmReasoning, setLlmReasoning] = useState<LlmReasoning>(defaultLlmReasoning);
   const [selectedAiProvider, setSelectedAiProvider] = useState<AiProvider>('local');
   const [isLlmReady, setIsLlmReady] = useState(false);
+  const [localLlmStatus, setLocalLlmStatus] = useState<LocalLlmStatus | null>(null);
   const [permissionsStatus, setPermissionsStatus] = useState<PermissionsStatus | null>(null);
   const [parakeetStatus, setParakeetStatus] = useState<ParakeetStatus | null>(null);
   const [promptTemplates, setPromptTemplates] = useState<PromptTemplate[]>(starterPromptTemplates);
@@ -457,7 +460,8 @@ export function App() {
     listenToSystemAudio,
     permissionsStatus
   });
-  const canStartListening = hasAudioSource && isLlmReady && (parakeetStatus?.installed ?? true) && missingSelectedPermissions.length === 0;
+  const isSelectedAiProviderReadyForListening = selectedAiProvider === 'local' || isLlmReady;
+  const canStartListening = hasAudioSource && isSelectedAiProviderReadyForListening && (parakeetStatus?.installed ?? true) && missingSelectedPermissions.length === 0;
   const isTranscriptPlaceholder = transcription.output === transcriptPlaceholder;
   const isAiResponsePlaceholder = transcription.llmOutput === aiResponsePlaceholder
     || transcription.llmOutput === legacyAiResponsePlaceholder
@@ -488,6 +492,17 @@ export function App() {
   }, [hasAudioSource, isListening, listenToMicrophone, listenToSystemAudio]);
 
   useEffect(() => {
+    if (!isListening) {
+      return;
+    }
+
+    void transcription.updateSources({
+      listenToMicrophone,
+      listenToSystemAudio
+    });
+  }, [isListening, listenToMicrophone, listenToSystemAudio]);
+
+  useEffect(() => {
     const bridge = getLlmBridge();
 
     if (!bridge) {
@@ -511,6 +526,33 @@ export function App() {
 
     const unsubscribe = bridge.onStatus((status) => {
       setIsLlmReady(isLlmReadyOrSettled(status));
+    });
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    const bridge = getSettingsBridge()?.ai;
+
+    if (!bridge) {
+      return;
+    }
+
+    let isMounted = true;
+
+    void bridge.localStatus()
+      .then((status) => {
+        if (isMounted) {
+          setLocalLlmStatus(status);
+        }
+      })
+      .catch(() => undefined);
+
+    const unsubscribe = bridge.onLocalStatus((status) => {
+      setLocalLlmStatus(status);
     });
 
     return () => {
@@ -900,10 +942,11 @@ export function App() {
               isAiResponsePlaceholder={isAiResponsePlaceholder}
               isBusy={isBusy}
               isListening={isListening}
-              isLlmReady={isLlmReady}
+              isLlmReady={isSelectedAiProviderReadyForListening}
               isTranscriptPlaceholder={isTranscriptPlaceholder}
               listenToMicrophone={listenToMicrophone}
               listenToSystemAudio={listenToSystemAudio}
+              localLlmStatus={localLlmStatus}
               llmOutputRef={llmOutputRef}
               missingSelectedPermissions={missingSelectedPermissions}
               onAskAiFromTranscript={askAiFromTranscript}
@@ -924,6 +967,7 @@ export function App() {
               outputRef={outputRef}
               promptTemplates={promptTemplates}
               sendToAiWhenListeningStops={sendToAiWhenListeningStops}
+              selectedAiProvider={selectedAiProvider}
               selectedPromptTemplateIds={selectedPromptTemplateIds}
               setSendToAiWhenListeningStops={setSendToAiWhenListeningStops}
               toggleListening={toggleListening}
@@ -996,6 +1040,7 @@ type OnboardingStep = 'permissions' | 'parakeet' | 'ai';
 function OnboardingSurface() {
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [localLlmStatus, setLocalLlmStatus] = useState<LocalLlmStatus | null>(null);
+  const [localAiSetupPhase, setLocalAiSetupPhase] = useState<'downloading' | 'idle'>('idle');
   const [selectedAiProvider, setSelectedAiProviderState] = useState<AiProvider>('local');
   const [isChatGptSigningIn, setIsChatGptSigningIn] = useState(false);
   const [isCompleting, setIsCompleting] = useState(false);
@@ -1021,6 +1066,12 @@ function OnboardingSurface() {
     });
     const unsubscribeLocalLlm = getSettingsBridge()?.ai?.onLocalStatus?.((nextStatus) => {
       setLocalLlmStatus(nextStatus);
+      setLocalAiSetupPhase((current) => {
+        if (nextStatus.status === 'downloading') {
+          return 'downloading';
+        }
+        return current === 'downloading' && (nextStatus.status === 'ready' || nextStatus.status === 'warm') ? 'idle' : current;
+      });
     });
 
     const smokeStep = (event: Event) => {
@@ -1121,16 +1172,19 @@ function OnboardingSurface() {
     }
   }
 
-  async function downloadLocalAi() {
+  async function downloadLocalAi(modelId?: string) {
     try {
+      setLocalAiSetupPhase('downloading');
       setLocalLlmStatus((current) => getPreparingLocalAiStatus(current ?? getCaulLocalLlmStatus(status)));
-      const nextStatus = await getSettingsBridge()?.ai?.downloadLocal?.();
+      const nextStatus = await getSettingsBridge()?.ai?.downloadLocal?.(modelId);
       if (nextStatus) {
         setLocalLlmStatus(nextStatus);
       }
       await refresh();
     } catch (error) {
       console.error('Failed to download local AI:', error);
+    } finally {
+      setLocalAiSetupPhase('idle');
     }
   }
 
@@ -1297,21 +1351,22 @@ function OnboardingSurface() {
           </OnboardingPanel>
         ) : null}
 
+        <OnboardingPanel sectionRef={parakeetRef} title="Transcription">
+          <OnboardingTranscriptionStatus status={status} />
+        </OnboardingPanel>
+
         <OnboardingPanel sectionRef={aiRef} title="AI Model">
           <OnboardingAiModelSetup
             isChatGptSigningIn={isChatGptSigningIn}
             localLlmStatus={localLlmStatus}
+            localAiSetupPhase={localAiSetupPhase}
             onCancelLocalDownload={() => void cancelLocalAiDownload()}
-            onDownloadLocalAi={() => void downloadLocalAi()}
+            onDownloadLocalAi={(modelId) => void downloadLocalAi(modelId)}
             onSelectProvider={(provider) => void selectAiProvider(provider)}
             onSignInWithChatGpt={() => void signInWithChatGpt()}
             selectedProvider={selectedAiProvider}
             status={status}
           />
-        </OnboardingPanel>
-
-        <OnboardingPanel sectionRef={parakeetRef} title="Transcription">
-          <OnboardingTranscriptionStatus status={status} />
         </OnboardingPanel>
 
         <OnboardingStartButton
@@ -1453,6 +1508,7 @@ function StatusRow({
 
 function OnboardingAiModelSetup({
   isChatGptSigningIn,
+  localAiSetupPhase,
   localLlmStatus,
   onCancelLocalDownload,
   onDownloadLocalAi,
@@ -1462,9 +1518,10 @@ function OnboardingAiModelSetup({
   status
 }: {
   isChatGptSigningIn: boolean;
+  localAiSetupPhase: 'downloading' | 'idle';
   localLlmStatus: LocalLlmStatus | null;
   onCancelLocalDownload: () => void;
-  onDownloadLocalAi: () => void;
+  onDownloadLocalAi: (modelId?: string) => void;
   onSelectProvider: (provider: AiProvider) => void;
   onSignInWithChatGpt: () => void;
   selectedProvider: AiProvider;
@@ -1474,7 +1531,7 @@ function OnboardingAiModelSetup({
   const piReady = Boolean(status?.pi.connected);
   const localRecommendedModel = ai?.recommended === 'local' ? ai.recommendedModel : null;
   const caulLocalStatus = localLlmStatus ?? getCaulLocalLlmStatus(status);
-  const isLocalDownloading = caulLocalStatus?.status === 'downloading';
+  const isLocalDownloading = caulLocalStatus?.status === 'downloading' || localAiSetupPhase === 'downloading';
   const localModelInstalled = Boolean(
     caulLocalStatus?.runtime.installed
     && caulLocalStatus.model?.installed
@@ -1489,21 +1546,21 @@ function OnboardingAiModelSetup({
             key={provider}
             aria-label={provider === 'local' ? 'Local' : 'Cloud'}
             aria-selected={selectedProvider === provider}
-            className={`inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-[6px] px-2 text-sm font-medium transition-colors ${selectedProvider === provider ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+            className={`inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-[6px] px-2 text-sm font-medium transition-colors ${selectedProvider === provider ? '!bg-primary !text-primary-foreground shadow-sm hover:!bg-primary/90 dark:!bg-primary dark:!text-primary-foreground dark:hover:!bg-primary/90' : 'text-muted-foreground hover:text-foreground'}`}
             onClick={() => onSelectProvider(provider)}
             role="tab"
             type="button"
           >
             <span>{provider === 'local' ? 'Local' : 'Cloud'}</span>
-            {ai?.recommended === provider ? <RecommendedPill /> : null}
+            {ai?.recommended === provider ? <RecommendedPill selected={selectedProvider === provider} /> : null}
           </button>
         ))}
       </div>
 
       {selectedProvider === 'local' ? (
         <div role="tabpanel" className="grid h-20 grid-rows-[1fr_2.25rem] justify-items-center gap-1.5 text-center">
-          <p className="flex items-center text-xs leading-5 text-muted-foreground">
-            Local and private. Slower and less intelligent than Cloud.
+          <p className="flex min-w-0 items-center text-xs leading-5 text-muted-foreground">
+            Local and private. Slower and less intelligent than ChatGPT.
           </p>
           <div className="flex min-h-9 flex-wrap items-center justify-center gap-2">
             {localModelInstalled ? (
@@ -1517,10 +1574,14 @@ function OnboardingAiModelSetup({
                   <span aria-live="polite" className="max-w-52 truncate text-xs tabular-nums text-muted-foreground" title={`${caulLocalStatus.progress.label} ${caulLocalStatus.progress.percent}%`}>
                     {caulLocalStatus.progress.label} · {caulLocalStatus.progress.percent}%
                   </span>
-                ) : null}
+                ) : (
+                  <span aria-live="polite" className="max-w-52 truncate text-xs tabular-nums text-muted-foreground">
+                    Downloading local AI...
+                  </span>
+                )}
               </>
             ) : (
-              <Button disabled={!caulLocalStatus?.runtime.supported && Boolean(caulLocalStatus)} onClick={onDownloadLocalAi} size="sm" type="button">
+              <Button disabled={!caulLocalStatus?.runtime.supported && Boolean(caulLocalStatus)} onClick={() => onDownloadLocalAi(localRecommendedModel?.id)} size="sm" type="button">
                 Download local AI
               </Button>
             )}
@@ -1575,11 +1636,11 @@ function ModelAutoUpdateCheckbox({
   );
 }
 
-function RecommendedPill() {
+function RecommendedPill({ selected = false }: { selected?: boolean }) {
   return (
     <span
       aria-hidden="true"
-      className="pointer-events-none shrink-0 rounded-full border border-amber-500/35 bg-amber-50 px-1.5 py-0 text-[10px] font-semibold leading-4 text-amber-800 shadow-sm dark:border-amber-400/35 dark:bg-amber-400/10 dark:text-amber-300"
+      className={selected ? selectedRecommendedPillClassName : recommendedPillClassName}
     >
       Recommended
     </span>
@@ -1637,6 +1698,30 @@ function getPreparingLocalAiStatus(status: LocalLlmStatus | null): LocalLlmStatu
     },
     status: 'downloading'
   };
+}
+
+function getLocalAiPlaceholderStatusText(status: LocalLlmStatus | null) {
+  if (!status) {
+    return null;
+  }
+
+  if (status.status === 'warming') {
+    return 'Preparing local AI...';
+  }
+
+  if (status.status === 'warm' || status.status === 'ready') {
+    return 'Local AI ready';
+  }
+
+  if (status.status === 'error') {
+    return 'Local AI warm-up failed';
+  }
+
+  if (status.status === 'missing') {
+    return 'Local AI needs setup';
+  }
+
+  return null;
 }
 
 function OnboardingTranscriptionStatus({ status }: { status: OnboardingStatus | null }) {
@@ -1738,7 +1823,7 @@ function TranscriptionModelRow({
   const selectedModelTitle = getLocalTranscriptionModelTitle(selectedModelId);
   const downloadProgress = getLocalModelDownloadProgressLabel(status?.parakeet.progress);
   const renderRecommendedBadge = () => (
-    <span className="pointer-events-none shrink-0 rounded-full border border-amber-500/35 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 shadow-sm dark:border-amber-400/35 dark:bg-amber-400/10 dark:text-amber-300" title={recommendedTooltip}>
+    <span className={recommendedPillClassName} title={recommendedTooltip}>
       Recommended
     </span>
   );
@@ -2075,7 +2160,7 @@ function usePrivateOverlayStatus() {
 }
 
 function useSuppressTooltipsAfterOverlayOpen(isOverlayOpen: boolean) {
-  const wasOverlayOpenRef = useRef(isOverlayOpen);
+  const wasOverlayOpenRef = useRef(false);
 
   useEffect(() => {
     if (!isOverlayOpen || wasOverlayOpenRef.current) {
@@ -2674,6 +2759,7 @@ function HomePage({
   isTranscriptPlaceholder,
   listenToMicrophone,
   listenToSystemAudio,
+  localLlmStatus,
   llmOutputRef,
   missingSelectedPermissions,
   onAskAiFromTranscript,
@@ -2694,6 +2780,7 @@ function HomePage({
   outputRef,
   promptTemplates,
   sendToAiWhenListeningStops,
+  selectedAiProvider,
   selectedPromptTemplateIds,
   setSendToAiWhenListeningStops,
   toggleListening,
@@ -2709,6 +2796,7 @@ function HomePage({
   isTranscriptPlaceholder: boolean;
   listenToMicrophone: boolean;
   listenToSystemAudio: boolean;
+  localLlmStatus: LocalLlmStatus | null;
   llmOutputRef: RefObject<HTMLDivElement | null>;
   missingSelectedPermissions: PermissionItem[];
   onAskAiFromTranscript: () => void;
@@ -2729,6 +2817,7 @@ function HomePage({
   outputRef: RefObject<HTMLDivElement | null>;
   promptTemplates: PromptTemplate[];
   sendToAiWhenListeningStops: boolean;
+  selectedAiProvider: AiProvider;
   selectedPromptTemplateIds: string[];
   setSendToAiWhenListeningStops: (sendToAi: boolean) => void;
   toggleListening: () => void;
@@ -2758,6 +2847,9 @@ function HomePage({
     });
   const isTranscriptPanelPlaceholder = !showScrollFixture && !showStreamFixture && isTranscriptPlaceholder;
   const isAiResponsePanelPlaceholder = !showScrollFixture && !showStreamFixture && isAiResponsePlaceholder;
+  const localAiPlaceholderStatusText = selectedAiProvider === 'local'
+    ? getLocalAiPlaceholderStatusText(localLlmStatus)
+    : null;
   const isBlockedByPermissions = missingSelectedPermissions.length > 0;
   const hasTranscript = isTranscriptTextCopyable(transcription.output);
   const hasAiResponse = visibleAiResponses.some((response) => isAiResponseTextCopyable(response.response));
@@ -3045,10 +3137,15 @@ function HomePage({
             onScroll={handleAiResponsePanelScroll}
           >
             {isAiResponsePanelPlaceholder ? (
-              <>
-                {sendToAiWhenListeningStops ? aiResponsePlaceholder : aiResponseDisabledPlaceholder}
+              <div className="grid justify-items-center gap-2">
+                {localAiPlaceholderStatusText ? (
+                  <span aria-live="polite" className="text-xs font-medium text-foreground">
+                    {localAiPlaceholderStatusText}
+                  </span>
+                ) : null}
+                <span>{sendToAiWhenListeningStops ? aiResponsePlaceholder : aiResponseDisabledPlaceholder}</span>
                 <AiPromptTemplateHint />
-              </>
+              </div>
             ) : visibleAiResponses.length > 0 ? (
               <AiResponseSectionList
                 activeResponseId={activeAiResponseId}
@@ -5505,13 +5602,60 @@ function isStarterPromptTemplateCustomised(template: PromptTemplate, starterTemp
 function asCustomStarterPromptTemplate(template: PromptTemplate, existingTemplates: PromptTemplate[] = []) {
   const customId = getCustomStarterPromptTemplateId(template.id);
   const existingCustom = existingTemplates.find((item) => item.id === customId);
+  const collisionTemplates = existingTemplates.filter((item) => item.id !== customId && item.id !== template.id);
 
   return {
     ...template,
     createdAt: existingCustom?.createdAt ?? template.createdAt,
     id: customId,
+    name: getAvailablePromptTemplateName(template.name, collisionTemplates),
     updatedAt: template.updatedAt
   };
+}
+
+function getAvailablePromptTemplateName(name: string, templates: PromptTemplate[]) {
+  const baseName = name.trim() || 'Untitled';
+  const usedNames = new Set(templates
+    .map((template) => template.name.trim().toLocaleLowerCase())
+    .filter(Boolean));
+
+  if (!usedNames.has(baseName.toLocaleLowerCase())) {
+    return baseName;
+  }
+
+  const customName = `${baseName} custom`;
+
+  if (!usedNames.has(customName.toLocaleLowerCase())) {
+    return customName;
+  }
+
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${customName} ${index}`;
+
+    if (!usedNames.has(candidate.toLocaleLowerCase())) {
+      return candidate;
+    }
+  }
+
+  return `${customName} ${Date.now()}`;
+}
+
+function resolvePromptTemplateNameCollisions(templates: PromptTemplate[]) {
+  const starterTemplateIds = new Set(starterPromptTemplates.map((template) => template.id));
+
+  return templates.reduce<PromptTemplate[]>((items, template) => {
+    if (starterTemplateIds.has(template.id)) {
+      return [...items, template];
+    }
+
+    return [
+      ...items,
+      {
+        ...template,
+        name: getAvailablePromptTemplateName(template.name, items)
+      }
+    ];
+  }, []);
 }
 
 function preserveCustomisedStarterPromptTemplates(templates: PromptTemplate[]) {
@@ -5525,10 +5669,10 @@ function preserveCustomisedStarterPromptTemplates(templates: PromptTemplate[]) {
   const existingCustomTemplates = templates.filter((template) => !starterTemplatesById.has(template.id));
   const customTemplatesById = new Map([...existingCustomTemplates, ...preservedCustomStarters].map((template) => [template.id, template]));
 
-  return [
+  return resolvePromptTemplateNameCollisions([
     ...starterPromptTemplates,
     ...customTemplatesById.values()
-  ];
+  ]);
 }
 
 function getCanonicalPromptTemplateState(state: PromptTemplateState): PromptTemplateState {
@@ -5620,6 +5764,7 @@ function SettingsPage({
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection);
   const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatus | null>(null);
   const [localLlmStatus, setLocalLlmStatus] = useState<LocalLlmStatus | null>(null);
+  const [localAiSetupPhase, setLocalAiSetupPhase] = useState<'downloading' | 'idle'>('idle');
   const [catalogueRefreshResult, setCatalogueRefreshResult] = useState<ModelCatalogueRefreshResult | null>(null);
   const [isRefreshingCatalogue, setIsRefreshingCatalogue] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
@@ -5630,6 +5775,12 @@ function SettingsPage({
   const autoSelectingReadyModelRef = useRef<LocalTranscriptionModelId | null>(null);
   const hasDownloadedUpdate = isUpdateDownloaded(updateStatus);
   const isCloudAiReady = Boolean(onboardingStatus?.pi.connected);
+  const recommendedLocalAiModel = onboardingStatus?.ai.recommended === 'local' ? onboardingStatus.ai.recommendedModel : null;
+  const recommendedLocalAiModelReady = Boolean(
+    localLlmStatus?.runtime.installed
+    && localLlmStatus.model?.installed
+    && (!recommendedLocalAiModel || localLlmStatus.model.id === recommendedLocalAiModel.id)
+  );
   const settingsSections: Array<{ id: SettingsSection; label: string }> = [
     { id: 'general', label: 'General' },
     { id: 'ai', label: 'Models' },
@@ -5660,6 +5811,12 @@ function SettingsPage({
     });
     const unsubscribeLocalLlm = getSettingsBridge()?.ai?.onLocalStatus?.((nextStatus) => {
       setLocalLlmStatus(nextStatus);
+      setLocalAiSetupPhase((current) => {
+        if (nextStatus.status === 'downloading') {
+          return 'downloading';
+        }
+        return current === 'downloading' && (nextStatus.status === 'ready' || nextStatus.status === 'warm') ? 'idle' : current;
+      });
     });
 
     return () => {
@@ -5758,16 +5915,19 @@ function SettingsPage({
     }
   }
 
-  async function downloadLocalAi() {
+  async function downloadLocalAi(modelId?: string) {
     try {
+      setLocalAiSetupPhase('downloading');
       setLocalLlmStatus((current) => getPreparingLocalAiStatus(current ?? getCaulLocalLlmStatus(onboardingStatus)));
-      const nextStatus = await getSettingsBridge()?.ai?.downloadLocal?.();
+      const nextStatus = await getSettingsBridge()?.ai?.downloadLocal?.(modelId);
       if (nextStatus) {
         setLocalLlmStatus(nextStatus);
       }
       await refreshOnboardingStatus();
     } catch (error) {
       console.error('Failed to download local AI:', error);
+    } finally {
+      setLocalAiSetupPhase('idle');
     }
   }
 
@@ -6161,7 +6321,7 @@ function SettingsPage({
                         <button
                           key={provider}
                           aria-selected={selectedAiProvider === provider}
-                          className={`h-8 flex-1 rounded-[6px] px-3 text-sm font-medium transition-colors ${selectedAiProvider === provider ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                          className={`h-8 flex-1 rounded-[6px] px-3 text-sm font-medium transition-colors ${selectedAiProvider === provider ? '!bg-primary !text-primary-foreground shadow-sm hover:!bg-primary/90 dark:!bg-primary dark:!text-primary-foreground dark:hover:!bg-primary/90' : 'text-muted-foreground hover:text-foreground'}`}
                           disabled={isListening || isBusy}
                           onClick={() => void selectAiProvider(provider)}
                           role="tab"
@@ -6174,19 +6334,19 @@ function SettingsPage({
 
                     {selectedAiProvider === 'local' ? (
                       <div className="grid max-w-2xl gap-2 text-sm">
-                        <p className={layout.settingsDescription}>Runs on this computer. Nothing is sent to ChatGPT.</p>
-                        {localLlmStatus?.status === 'downloading' && localLlmStatus.progress ? (
+                        <p className={layout.settingsDescription}>Runs on this computer. Nothing is sent to ChatGPT. Slower and less intelligent than ChatGPT.</p>
+                        {(localLlmStatus?.status === 'downloading' || localAiSetupPhase === 'downloading') && localLlmStatus?.progress ? (
                           <p className={layout.settingsDescription} aria-live="polite">
                             {localLlmStatus.progress.label} · {localLlmStatus.progress.percent}%
                           </p>
                         ) : null}
                         <div className="flex flex-wrap items-center gap-2">
-                          {localLlmStatus?.status === 'downloading' ? (
+                          {localLlmStatus?.status === 'downloading' || localAiSetupPhase === 'downloading' ? (
                             <Button onClick={() => void cancelLocalAiDownload()} size="sm" type="button" variant="outline">Cancel</Button>
                           ) : localLlmStatus?.runtime.supported === false ? (
                             <StatusPill ready={false}>Unavailable</StatusPill>
-                          ) : localLlmStatus?.status !== 'ready' ? (
-                            <Button onClick={() => void downloadLocalAi()} size="sm" type="button">
+                          ) : !recommendedLocalAiModelReady ? (
+                            <Button onClick={() => void downloadLocalAi(recommendedLocalAiModel?.id)} size="sm" type="button">
                               Download local AI
                             </Button>
                           ) : (

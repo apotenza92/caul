@@ -58,6 +58,7 @@ type SpeculativeRequest = {
 };
 
 type TranscriptLine = {
+  displayAt: Date;
   key: string;
   order: number;
   source?: CaptureSource;
@@ -82,6 +83,7 @@ export function useLiveTranscription() {
   const finalTranscriptLinesRef = useRef<TranscriptLine[]>([]);
   const partialTranscriptLinesRef = useRef<Map<string, TranscriptLine>>(new Map());
   const activeSourcesRef = useRef<CaptureSource[]>([]);
+  const sourceLabelsStartOrderRef = useRef<number | null>(null);
   const sessionStartedAtRef = useRef<Date | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
   const activeLlmRequestIdRef = useRef<string | null>(null);
@@ -130,20 +132,22 @@ export function useLiveTranscription() {
     finalTranscriptLinesRef.current = [];
     partialTranscriptLinesRef.current = new Map();
     activeSourcesRef.current = sources;
+    sourceLabelsStartOrderRef.current = sources.length > 1 ? 0 : null;
     activeLlmRequestIdRef.current = null;
     speculativeRequestRef.current = null;
     clearSpeculativeTimer();
     const sessionHeader = getTranscriptHeader(sessionStartedAt);
+    const waitingTranscript = appendTranscript(sessionHeader, waitingText);
     const session = {
       id: sessionId,
-      output: sessionHeader,
+      output: waitingTranscript,
       startedAt: sessionStartedAt.toISOString()
     };
     setTranscriptSessions((current) => [...current, session]);
-    saveHistorySession(session);
+    saveHistorySession({ ...session, output: sessionHeader });
     setOutput((currentOutput) => {
       const previousOutput = isTranscriptText(currentOutput) ? currentOutput : '';
-      return appendTranscript(previousOutput, sessionHeader);
+      return appendTranscript(previousOutput, waitingTranscript);
     });
 
     logTranscriptDebug('renderer.start_state_reset', {
@@ -156,7 +160,9 @@ export function useLiveTranscription() {
         sources
       });
       setOutput((currentOutput) => (
-        isSetupMessage(currentOutput) ? waitingText : currentOutput
+        shouldShowListeningWaitingText(currentOutput, sessionHeader)
+          ? currentOutput.replace(sessionHeader, appendTranscript(sessionHeader, waitingText))
+          : currentOutput
       ));
     } catch (error) {
       unsubscribeRef.current?.();
@@ -263,6 +269,42 @@ export function useLiveTranscription() {
     unsubscribeRef.current = null;
   }
 
+  async function updateSources(options: LiveTranscriptionOptions) {
+    const bridge = getTranscriptionBridge();
+    const sources = getSelectedSources(options);
+
+    logTranscriptDebug('renderer.sources_update_requested', {
+      selectedSources: sources,
+      snapshot: getTranscriptDebugSnapshot()
+    });
+
+    if (!bridge || !isListening) {
+      return;
+    }
+
+    if (areCaptureSourcesEqual(activeSourcesRef.current, sources)) {
+      return;
+    }
+
+    if (sources.length === 0) {
+      setIsListening(false);
+      setIsStarting(false);
+      activeSourcesRef.current = [];
+      await bridge.stop().catch(() => undefined);
+      setOutput('Select at least one audio source.');
+      return;
+    }
+
+    markSourceLabelsStarted(sources);
+    activeSourcesRef.current = sources;
+
+    try {
+      await bridge.start({ sources });
+    } catch (error) {
+      setOutput(getErrorMessage(error));
+    }
+  }
+
   async function ask({
     llmModel = 'openai-codex/gpt-5.4-mini',
     llmReasoning = 'off',
@@ -334,11 +376,20 @@ export function useLiveTranscription() {
       snapshot: getTranscriptDebugSnapshot()
     });
 
+    if (!isTranscriptionEventSourceActive(event, activeSourcesRef.current)) {
+      logTranscriptDebug('renderer.event_ignored_inactive_source', {
+        event,
+        sequence,
+        snapshot: getTranscriptDebugSnapshot()
+      });
+      return;
+    }
+
     if (event.type === 'completed') {
       const transcript = event.text.trim();
 
       if (transcript) {
-        const line = createTranscriptLine({
+        let line = createTranscriptLine({
           event,
           order: sequence,
           text: transcript
@@ -349,6 +400,14 @@ export function useLiveTranscription() {
         const beforeSnapshot = getTranscriptDebugSnapshot();
         const beforeFinalLines = finalTranscriptLinesRef.current;
         const partialKey = getPartialTranscriptSlotKey(line);
+        const matchingPartial = partialTranscriptLinesRef.current.get(partialKey);
+        const mergedText = chooseCompletedTranscriptText(transcript, matchingPartial?.text);
+        if (mergedText !== transcript) {
+          line = {
+            ...line,
+            text: mergedText
+          };
+        }
         const shouldClearPartial = eventUtteranceKey === undefined
           || partialTranscriptLinesRef.current.get(partialKey)?.key === eventUtteranceKey;
 
@@ -381,9 +440,9 @@ export function useLiveTranscription() {
           before,
           rawText: transcript,
           labelledText: labelTranscriptBySource(transcript, event.source, activeSourcesRef.current),
-          timestampedText: renderTranscriptLine(line, activeSourcesRef.current),
+          timestampedText: renderTranscriptLine(line, sourceLabelsStartOrderRef.current),
           finalTranscript: finalTranscriptRef.current,
-          partialTranscript: renderPartialTranscriptDebugText(partialTranscriptLinesRef.current, activeSourcesRef.current),
+          partialTranscript: renderPartialTranscriptDebugText(partialTranscriptLinesRef.current, sourceLabelsStartOrderRef.current),
           sequence,
           shouldClearPartial,
           after
@@ -431,9 +490,9 @@ export function useLiveTranscription() {
           event,
           rawText: transcript,
           labelledText: labelTranscriptBySource(transcript, eventSource, activeSourcesRef.current),
-          timestampedText: renderTranscriptLine(line, activeSourcesRef.current),
+          timestampedText: renderTranscriptLine(line, sourceLabelsStartOrderRef.current),
           finalTranscript: finalTranscriptRef.current,
-          partialTranscript: renderPartialTranscriptDebugText(partialTranscriptLinesRef.current, activeSourcesRef.current),
+          partialTranscript: renderPartialTranscriptDebugText(partialTranscriptLinesRef.current, sourceLabelsStartOrderRef.current),
           sequence,
           after
         });
@@ -452,7 +511,7 @@ export function useLiveTranscription() {
     }
 
     if (event.type === 'speech-started' && !renderTranscript()) {
-      setOutput('Speech detected...');
+      publishTranscript(appendTranscript(getTranscriptHeader(sessionStartedAtRef.current), 'Speech detected...'));
       logTranscriptDebug('renderer.speech_started_displayed', {
         event,
         sequence,
@@ -588,7 +647,7 @@ export function useLiveTranscription() {
     return {
       finalTranscript: finalTranscriptRef.current,
       finalTranscriptLength: finalTranscriptRef.current.length,
-      partialTranscript: renderPartialTranscriptDebugText(partialTranscriptLinesRef.current, activeSourcesRef.current),
+      partialTranscript: renderPartialTranscriptDebugText(partialTranscriptLinesRef.current, sourceLabelsStartOrderRef.current),
       partialTranscriptLength: [...partialTranscriptLinesRef.current.values()]
         .reduce((length, line) => length + line.text.length, 0),
       partialUtteranceKeys: [...partialTranscriptLinesRef.current.values()].map((line) => line.key),
@@ -603,13 +662,13 @@ export function useLiveTranscription() {
 
     const body = lines
       .sort(compareTranscriptLines)
-      .map((line) => renderTranscriptLine(line, activeSourcesRef.current))
+      .map((line) => renderTranscriptLine(line, sourceLabelsStartOrderRef.current))
       .join('\n')
       .trim();
 
     finalTranscriptRef.current = finalTranscriptLinesRef.current
       .sort(compareTranscriptLines)
-      .map((line) => renderTranscriptLine(line, activeSourcesRef.current))
+      .map((line) => renderTranscriptLine(line, sourceLabelsStartOrderRef.current))
       .join('\n')
       .trim();
 
@@ -733,8 +792,8 @@ export function useLiveTranscription() {
     }
   }
 
-  function getAwaitingResponseText(aiProvider: AiProvider) {
-    return aiProvider === 'local' ? preparingLocalAiText : awaitingResponseText;
+  function getAwaitingResponseText(_aiProvider: AiProvider) {
+    return awaitingResponseText;
   }
 
   function isAwaitingResponseText(text: string) {
@@ -761,6 +820,7 @@ export function useLiveTranscription() {
     clearAiResponses,
     clearTranscript,
     start,
+    updateSources,
     stop
   };
 
@@ -785,6 +845,7 @@ export function useLiveTranscription() {
     finalTranscriptRef.current = '';
     finalTranscriptLinesRef.current = [];
     partialTranscriptLinesRef.current = new Map();
+    sourceLabelsStartOrderRef.current = null;
     activeSessionIdRef.current = null;
     sessionStartedAtRef.current = null;
   }
@@ -843,6 +904,12 @@ export function useLiveTranscription() {
     return sessionsRef.current.find((session) => session.output.trim() === trimmedTranscript)?.id
       ?? sessionsRef.current.at(-1)?.id;
   }
+
+  function markSourceLabelsStarted(sources: CaptureSource[]) {
+    if (sources.length > 1 && sourceLabelsStartOrderRef.current === null) {
+      sourceLabelsStartOrderRef.current = debugSequenceRef.current + 1;
+    }
+  }
 }
 
 function getSelectedSources(options: LiveTranscriptionOptions): CaptureSource[] {
@@ -850,6 +917,22 @@ function getSelectedSources(options: LiveTranscriptionOptions): CaptureSource[] 
     options.listenToSystemAudio ? 'system' : null,
     options.listenToMicrophone ? 'microphone' : null
   ].filter((source): source is CaptureSource => source !== null);
+}
+
+function areCaptureSourcesEqual(left: CaptureSource[], right: CaptureSource[]) {
+  return left.length === right.length
+    && left.every((source, index) => source === right[index]);
+}
+
+function isTranscriptionEventSourceActive(
+  event: TranscriptionBridgeEvent,
+  activeSources: CaptureSource[]
+) {
+  if (event.type !== 'completed' && event.type !== 'partial') {
+    return true;
+  }
+
+  return !event.source || activeSources.includes(event.source);
 }
 
 function getErrorMessage(error: unknown) {
@@ -894,6 +977,13 @@ function isTranscriptText(output: string) {
     && !isSetupMessage(output);
 }
 
+function shouldShowListeningWaitingText(output: string, sessionHeader: string) {
+  return output.includes(sessionHeader)
+    && !output.includes('Listening. Waiting for speech...')
+    && !output.includes('Speech detected...')
+    && !output.includes('Transcribing local audio...');
+}
+
 function formatPromptTemplateRequest(
   transcript: string,
   promptTemplateText: string | undefined,
@@ -935,10 +1025,12 @@ function createTranscriptLine({
 }, sessionStartedAt: Date | null): TranscriptLine {
   const source = event.source;
   const startMs = event.type === 'delta' ? undefined : event.startMs;
+  const displayAt = new Date();
   const startAt = getEventStartedAt(startMs, sessionStartedAt);
   const utteranceKey = event.type === 'delta' ? undefined : getUtteranceKey(source, event.utteranceId);
 
   return {
+    displayAt,
     key: utteranceKey ?? getTranscriptEventItemId(event) ?? `${source ?? 'unknown'}:${startMs ?? startAt.getTime()}:${text}`,
     order,
     source,
@@ -952,20 +1044,55 @@ function getTranscriptEventItemId(event: TranscriptionBridgeEvent) {
   return 'itemId' in event ? event.itemId : undefined;
 }
 
-function renderTranscriptLine(line: TranscriptLine, activeSources: CaptureSource[]) {
-  return formatTranscriptLine(line.text, line.source, activeSources, line.startAt);
+function renderTranscriptLine(line: TranscriptLine, sourceLabelsStartOrder: number | null) {
+  return formatTranscriptLine(
+    line.text,
+    line.source,
+    shouldShowTranscriptSourceLabel(line, sourceLabelsStartOrder),
+    line.displayAt
+  );
 }
 
 function formatTranscriptLine(
   transcript: string,
   source: CaptureSource | undefined,
-  activeSources: CaptureSource[],
+  showSourceLabel: boolean,
   recordedAt: Date
 ) {
-  const label = getTranscriptSourceLabel(source, activeSources);
+  const label = getTranscriptSourceLabel(source, showSourceLabel);
   const sourcePrefix = label ? ` [${label}]` : '';
 
   return `[${formatUserTime(recordedAt)}]${sourcePrefix}: ${transcript}`;
+}
+
+function shouldShowTranscriptSourceLabel(line: TranscriptLine, sourceLabelsStartOrder: number | null) {
+  return sourceLabelsStartOrder !== null && line.order >= sourceLabelsStartOrder;
+}
+
+function chooseCompletedTranscriptText(completed: string, partial: string | undefined) {
+  const completedText = completed.trim();
+  const partialText = partial?.trim();
+
+  if (!partialText || partialText.length <= completedText.length) {
+    return completedText;
+  }
+
+  const completedWords = words(completedText.toLocaleLowerCase());
+  const partialWords = words(partialText.toLocaleLowerCase());
+
+  if (completedWords.length === 0 || partialWords.length <= completedWords.length) {
+    return completedText;
+  }
+
+  const completedAsSuffix = partialWords
+    .slice(partialWords.length - completedWords.length)
+    .every((word, index) => word === completedWords[index]);
+
+  return completedAsSuffix ? partialText : completedText;
+}
+
+function words(text: string) {
+  return text.split(/\s+/).filter(Boolean);
 }
 
 function compareTranscriptLines(left: TranscriptLine, right: TranscriptLine) {
@@ -993,11 +1120,11 @@ function getPartialTranscriptSlotKey(line: TranscriptLine) {
 
 function renderPartialTranscriptDebugText(
   partials: Map<string, TranscriptLine>,
-  activeSources: CaptureSource[]
+  sourceLabelsStartOrder: number | null
 ) {
   return [...partials.values()]
     .sort(compareTranscriptLines)
-    .map((line) => renderTranscriptLine(line, activeSources))
+    .map((line) => renderTranscriptLine(line, sourceLabelsStartOrder))
     .join('\n');
 }
 
@@ -1029,16 +1156,16 @@ function labelTranscriptBySource(
   source: CaptureSource | undefined,
   activeSources: CaptureSource[]
 ) {
-  const label = getTranscriptSourceLabel(source, activeSources);
+  const label = getTranscriptSourceLabel(source, activeSources.length > 1);
 
   return label ? `[${label}] ${transcript}` : transcript;
 }
 
 function getTranscriptSourceLabel(
   source: CaptureSource | undefined,
-  activeSources: CaptureSource[]
+  showSourceLabel: boolean
 ) {
-  if (activeSources.length < 2 || !source) {
+  if (!showSourceLabel || !source) {
     return null;
   }
 

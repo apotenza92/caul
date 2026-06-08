@@ -3,6 +3,8 @@ import { Tooltip as TooltipPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
+const tooltipSuppressionStaleMs = 1000
+
 function TooltipProvider({
   delayDuration = 300,
   disableHoverableContent = true,
@@ -43,8 +45,14 @@ function TooltipContent({
     typeof document !== "undefined"
     && document.documentElement.dataset.caulSuppressTooltips === "true"
   ) {
+    const suppressedAt = Number(document.documentElement.dataset.caulSuppressTooltipsAt ?? 0)
+
     delete document.documentElement.dataset.caulSuppressTooltips
     delete document.documentElement.dataset.caulSuppressTooltipsAt
+
+    if (Number.isFinite(suppressedAt) && Date.now() - suppressedAt < tooltipSuppressionStaleMs) {
+      return null
+    }
   }
 
   return (

@@ -44,6 +44,24 @@ describe('Tooltip', () => {
     expect(tooltipContent).toHaveClass('pointer-events-none');
   });
 
+  it('suppresses the first tooltip when a fresh global suppression is active', () => {
+    document.documentElement.dataset.caulSuppressTooltips = 'true';
+    document.documentElement.dataset.caulSuppressTooltipsAt = String(Date.now());
+
+    render(
+      <TooltipProvider delayDuration={0}>
+        <Tooltip open>
+          <TooltipTrigger>Trigger</TooltipTrigger>
+          <TooltipContent>Tooltip body</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+
+    expect(document.querySelector('[data-slot="tooltip-content"]')).not.toBeInTheDocument();
+    expect(document.documentElement.dataset.caulSuppressTooltips).toBeUndefined();
+    expect(document.documentElement.dataset.caulSuppressTooltipsAt).toBeUndefined();
+  });
+
   it('clears stale global suppression instead of hiding tooltips forever', () => {
     document.documentElement.dataset.caulSuppressTooltips = 'true';
     document.documentElement.dataset.caulSuppressTooltipsAt = String(Date.now() - 2000);

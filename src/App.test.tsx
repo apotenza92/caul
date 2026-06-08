@@ -16,6 +16,8 @@ function currentLongDatePattern() {
 
 describe('App', () => {
   afterEach(() => {
+    delete document.documentElement.dataset.caulSuppressTooltips;
+    delete document.documentElement.dataset.caulSuppressTooltipsAt;
     window.localStorage.clear();
     window.history.pushState({}, '', '/');
     vi.restoreAllMocks();
@@ -39,9 +41,11 @@ describe('App', () => {
     expect(screen.getByLabelText('Start Listening hint')).toHaveTextContent(
       'Click Start Listening while playing something through your speakers or headphones.'
     );
+    expect(screen.getByLabelText('Start Listening hint')).toHaveClass('caul-primary-glow-nudge');
     expect(screen.getByLabelText('Prompt template hint')).toHaveTextContent(
       'Pick a prompt template or customise one to change how AI responds.'
     );
+    expect(screen.getByLabelText('Prompt template hint')).toHaveClass('caul-primary-glow-nudge');
     expect(screen.queryByLabelText('LLM query')).not.toBeInTheDocument();
     expect(screen.getByLabelText('AI response')).toHaveTextContent(
       'Auto Send is on.\nStop listening to send transcript to AI',
@@ -166,8 +170,8 @@ describe('App', () => {
     expect(screen.getByText('Microphone & System Audio')).toBeInTheDocument();
     expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual([
       'Permissions',
-      'AI Model',
-      'Transcription'
+      'Transcription',
+      'AI Model'
     ]);
     expect(screen.queryByText('Permission setup')).not.toBeInTheDocument();
   });
@@ -600,7 +604,7 @@ describe('App', () => {
           recommendedModel: {
             id: 'qwen2.5-3b-instruct-q4_k_m',
             name: 'Qwen 2.5 3B Instruct Q4',
-            reason: 'Qwen 2.5 3B Instruct Q4 is the best local AI response fit for this machine from the bundled benchmark catalogue.',
+            reason: 'Qwen 2.5 3B Instruct Q4 is the best local AI response fit for this machine from the offline benchmark catalogue.',
             runtime: 'llama.cpp'
           },
           summary: 'Recommended: Qwen 2.5 3B Instruct Q4 local AI responses',
@@ -613,10 +617,22 @@ describe('App', () => {
 
     expect(await screen.findByRole('tab', { name: 'Local', selected: true })).toBeInTheDocument();
     expect(screen.getByText('Recommended')).toBeInTheDocument();
-    expect(screen.getByText('Local and private. Slower and less intelligent than Cloud.')).toBeInTheDocument();
+    expect(screen.getByText('Local and private. Slower and less intelligent than ChatGPT.')).toBeInTheDocument();
     expect(screen.queryByText('Qwen 2.5 3B Instruct Q4')).not.toBeInTheDocument();
     expect(screen.queryByText(/Artificial Analysis LLM Leaderboard/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Sign in with ChatGPT' })).not.toBeInTheDocument();
+  });
+
+  it('shows transcription setup before AI model setup in onboarding', async () => {
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
+    installTestBridge();
+
+    render(<App />);
+
+    const transcriptionHeading = await screen.findByRole('heading', { name: 'Transcription' });
+    const aiHeading = await screen.findByRole('heading', { name: 'AI Model' });
+
+    expect(transcriptionHeading.compareDocumentPosition(aiHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('defaults onboarding AI setup to cloud when cloud is recommended', async () => {
@@ -748,6 +764,7 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: 'Download local AI' }));
 
     expect(bridge.localLlmDownloads).toBe(1);
+    expect(bridge.selectedLocalAiDownloads).toEqual(['qwen2.5-3b-instruct-q4_k_m']);
     expect(await screen.findByText('Preparing local AI · 0%')).toBeInTheDocument();
 
     act(() => {
@@ -1317,6 +1334,18 @@ describe('App', () => {
     expect(transcriptQueries.getByRole('button', { name: 'Start Listening' })).toHaveClass('w-[140px]');
   });
 
+  it('arms tooltip suppression when the private overlay opens from the floating handle', async () => {
+    installTestBridge({
+      privateOverlayState: testPrivateOverlayStateForEdge('right')
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(document.documentElement.dataset.caulSuppressTooltips).toBe('true');
+    });
+  });
+
   it('updates adaptive overlay layout from live private overlay state', async () => {
     const bridge = installTestBridge({
       privateOverlayState: testPrivateOverlayStateForEdge('right')
@@ -1768,6 +1797,143 @@ describe('App', () => {
     expect(bridge.starts.at(-1)).toEqual({ sources: ['system'] });
   });
 
+  it('shows a waiting status immediately after listening starts', async () => {
+    const user = userEvent.setup();
+    installTestBridge();
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
+
+    expect(screen.getByLabelText('Transcription output')).toHaveTextContent('Listening. Waiting for speech...');
+  });
+
+  it('shows speech detection before the first transcript text arrives', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge();
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
+
+    act(() => {
+      bridge.emit({ type: 'speech-started' });
+    });
+
+    expect(screen.getByLabelText('Transcription output')).toHaveTextContent('Speech detected...');
+  });
+
+  it('updates native transcription sources while listening', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge();
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Microphone off' }));
+    await user.click(screen.getByRole('button', { name: 'Start Listening' }));
+
+    expect(bridge.starts.at(-1)).toEqual({ sources: ['system', 'microphone'] });
+
+    await user.click(screen.getByRole('button', { name: 'Microphone on' }));
+
+    await waitFor(() => {
+      expect(bridge.starts.at(-1)).toEqual({ sources: ['system'] });
+    });
+  });
+
+  it('ignores microphone transcript events after input is turned off while listening', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge();
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Microphone off' }));
+    await user.click(screen.getByRole('button', { name: 'Start Listening' }));
+    await user.click(screen.getByRole('button', { name: 'Microphone on' }));
+
+    await waitFor(() => {
+      expect(bridge.starts.at(-1)).toEqual({ sources: ['system'] });
+    });
+
+    bridge.emit({
+      source: 'microphone',
+      text: 'late microphone words',
+      type: 'completed',
+      utteranceId: 1
+    });
+    bridge.emit({
+      source: 'system',
+      text: 'speaker words',
+      type: 'completed',
+      utteranceId: 2
+    });
+
+    const output = screen.getByLabelText('Transcription output');
+    await waitFor(() => {
+      expect(output).toHaveTextContent('speaker words');
+    });
+    expect(output).not.toHaveTextContent('late microphone words');
+  });
+
+  it('keeps source labels on once input and output have both been active in a session', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge();
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
+
+    act(() => {
+      bridge.emit({
+        source: 'system',
+        text: 'Output only before input.',
+        type: 'completed',
+        utteranceId: 1
+      });
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Microphone off' }));
+    await waitFor(() => {
+      expect(bridge.starts.at(-1)).toEqual({ sources: ['system', 'microphone'] });
+    });
+
+    act(() => {
+      bridge.emit({
+        source: 'system',
+        text: 'Speaker after input activated.',
+        type: 'completed',
+        utteranceId: 2
+      });
+      bridge.emit({
+        source: 'microphone',
+        text: 'Microphone after input activated.',
+        type: 'completed',
+        utteranceId: 3
+      });
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Microphone on' }));
+    await waitFor(() => {
+      expect(bridge.starts.at(-1)).toEqual({ sources: ['system'] });
+    });
+
+    act(() => {
+      bridge.emit({
+        source: 'system',
+        text: 'Speaker after input off.',
+        type: 'completed',
+        utteranceId: 4
+      });
+    });
+
+    const output = screen.getByLabelText('Transcription output').textContent ?? '';
+    expect(output).toContain(': Output only before input.');
+    expect(output).not.toContain('[Speaker]: Output only before input.');
+    expect(output).toContain('[Speaker]: Speaker after input activated.');
+    expect(output).toContain('[Microphone]: Microphone after input activated.');
+    expect(output).toContain('[Speaker]: Speaker after input off.');
+  });
+
   it('prepares the default transcription source while idle', async () => {
     const bridge = installTestBridge();
 
@@ -1784,15 +1950,19 @@ describe('App', () => {
 
     const speaker = await screen.findByRole('button', { name: 'Speaker on' });
     expect(speaker).toHaveAttribute('aria-pressed', 'true');
-    expect(speaker).toHaveClass('text-[#34424A]');
+    expect(speaker).toHaveClass('!bg-primary');
+    expect(speaker).toHaveTextContent('Output');
     const microphoneOff = screen.getByRole('button', { name: 'Microphone off' });
     expect(microphoneOff).toHaveAttribute('aria-pressed', 'false');
+    expect(microphoneOff).toHaveClass('text-muted-foreground');
+    expect(microphoneOff).toHaveTextContent('Input');
     expect(microphoneOff.querySelector('.lucide-mic-off')).toBeInTheDocument();
 
     await user.click(microphoneOff);
     const microphoneOn = screen.getByRole('button', { name: 'Microphone on' });
     expect(microphoneOn).toHaveAttribute('aria-pressed', 'true');
-    expect(microphoneOn).toHaveClass('text-[#34424A]');
+    expect(microphoneOn).toHaveClass('!bg-primary');
+    expect(microphoneOn).toHaveTextContent('Input');
     expect(microphoneOn.querySelector('.lucide-mic')).toBeInTheDocument();
     expect(screen.getByLabelText('Start Listening hint')).toHaveTextContent(
       'Click Start Listening while playing something through your speakers, headphones, or speaking into your microphone.'
@@ -1804,6 +1974,8 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Speaker on' }));
     const speakerOff = screen.getByRole('button', { name: 'Speaker off' });
     expect(speakerOff).toHaveAttribute('aria-pressed', 'false');
+    expect(speakerOff).toHaveClass('text-muted-foreground');
+    expect(speakerOff).toHaveTextContent('Output');
     expect(speakerOff.querySelector('.lucide-volume-x')).toBeInTheDocument();
     expect(screen.getByLabelText('Start Listening hint')).toHaveTextContent(
       'Click Start Listening while speaking into your microphone.'
@@ -1845,12 +2017,12 @@ describe('App', () => {
 
     const autoSend = screen.getByRole('button', { name: 'Auto Send' });
     expect(autoSend).toHaveAttribute('aria-pressed', 'true');
-    expect(autoSend).toHaveClass('text-[#34424A]');
+    expect(autoSend).toHaveClass('!bg-primary');
     expect(autoSend.querySelector('.caul-auto-send-off-slash')).not.toBeInTheDocument();
 
     await user.click(autoSend);
     expect(autoSend).toHaveAttribute('aria-pressed', 'false');
-    expect(autoSend).not.toHaveClass('text-[#34424A]');
+    expect(autoSend).toHaveClass('text-muted-foreground');
     expect(autoSend.querySelector('.caul-auto-send-off-slash')).toBeInTheDocument();
     expect((await screen.findAllByText('Sends the transcript to AI when listening stops.'))
       .find((element) => element.getAttribute('data-slot') === 'tooltip-content'))
@@ -1878,15 +2050,14 @@ describe('App', () => {
     expect(output).toMatch(/\[\d{2}:\d{2}:\d{2}(?:\s?[AP]M)?\]: Hello, hello, hello\./);
   });
 
-  it('timestamps transcript chunks from their start time', async () => {
+  it('timestamps transcript chunks from their display time', async () => {
     const user = userEvent.setup();
     const bridge = installTestBridge();
 
     render(<App />);
 
-    const startedAt = new Date();
     await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
-    const clickedAt = new Date();
+    const emittedAt = new Date();
 
     act(() => {
       bridge.emit({
@@ -1901,17 +2072,9 @@ describe('App', () => {
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit'
-    }).format(new Date(startedAt.getTime() + 2_000));
-    const alternateExpectedTime = new Intl.DateTimeFormat(undefined, {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    }).format(new Date(clickedAt.getTime() + 2_000));
+    }).format(emittedAt);
     const output = screen.getByLabelText('Transcription output').textContent ?? '';
-    expect([
-      `[${expectedTime}]: Started two seconds in.`,
-      `[${alternateExpectedTime}]: Started two seconds in.`
-    ].some((line) => output.includes(line))).toBe(true);
+    expect(output).toContain(`[${expectedTime}]: Started two seconds in.`);
   });
 
   it('orders completed transcript chunks by recorded start time', async () => {
@@ -2004,6 +2167,44 @@ describe('App', () => {
 
     expect(output).toHaveTextContent('Speaker final');
     expect(output).not.toHaveTextContent('Speaker partial');
+  });
+
+  it('does not replace a richer live partial with a shorter final for the same utterance', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge();
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
+
+    act(() => {
+      bridge.emit({
+        source: 'system',
+        startMs: 0,
+        text: 'Um buy hero play. Um I think that is a pretty comfortable pick',
+        type: 'partial',
+        utteranceId: 1
+      });
+    });
+
+    const output = screen.getByLabelText('Transcription output');
+    expect(output).toHaveTextContent(
+      'Um buy hero play. Um I think that is a pretty comfortable pick'
+    );
+
+    act(() => {
+      bridge.emit({
+        source: 'system',
+        startMs: 0,
+        text: 'I think that is a pretty comfortable pick',
+        type: 'completed',
+        utteranceId: 1
+      });
+    });
+
+    expect(output).toHaveTextContent(
+      'Um buy hero play. Um I think that is a pretty comfortable pick'
+    );
   });
 
   it('keeps earlier partial utterances visible when a later partial arrives before finalisation', async () => {
@@ -2975,6 +3176,39 @@ describe('App', () => {
     ]));
   });
 
+  it('renames customised starter prompt templates when reset would recreate the same name', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge({
+      promptTemplateState: testPromptTemplateState({
+        templates: [
+          testPromptTemplate({
+            id: 'starter-use-my-cv',
+            name: 'CV',
+            prompt: 'Use my edited CV instructions.'
+          })
+        ]
+      })
+    });
+
+    render(<App />);
+
+    await openSettings(user);
+    await user.click(screen.getByRole('button', { name: 'Reset Settings' }));
+    await user.click(screen.getByRole('button', { name: 'Reset Settings' }));
+
+    expect(bridge.promptTemplateState.templates).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'starter-use-my-cv',
+        name: 'CV'
+      }),
+      expect.objectContaining({
+        id: 'custom-starter-use-my-cv',
+        name: 'CV custom',
+        prompt: 'Use my edited CV instructions.'
+      })
+    ]));
+  });
+
   it('shows update settings with weekly default and manual check action', async () => {
     const user = userEvent.setup();
     const bridge = installTestBridge();
@@ -3139,7 +3373,7 @@ describe('App', () => {
     });
   });
 
-  it('shows a local AI preparing message before the first local delta arrives', async () => {
+  it('shows normal loading state before the first local AI delta arrives', async () => {
     const user = userEvent.setup();
     let resolveRequest: ((value: { ok: boolean; text: string }) => void) | null = null;
     const bridge = installTestBridge({
@@ -3162,7 +3396,10 @@ describe('App', () => {
 
     await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
 
-    await screen.findByText('Preparing local AI...');
+    await waitFor(() => {
+      expect(screen.getByLabelText('AI response')).not.toHaveTextContent('Preparing local AI...');
+    });
+    expect(screen.getByLabelText('Waiting for response')).toBeInTheDocument();
 
     act(() => {
       bridge.emit({ type: 'llm-response-delta', text: 'Summary ready.' });
@@ -3906,6 +4143,9 @@ describe('App', () => {
 
     installTestBridge({
       llmReady: false,
+      portablePreferences: {
+        selectedAiProvider: 'cloud'
+      },
       onLlmStatus: (callback) => {
         emitLlmStatus = callback;
 
@@ -3926,6 +4166,48 @@ describe('App', () => {
         status: 'ready'
       });
     });
+
+    expect(await screen.findByRole('button', { name: 'Start Listening' })).not.toBeDisabled();
+  });
+
+  it('shows local AI warm-up status above the AI placeholder', async () => {
+    const bridge = installTestBridge();
+
+    render(<App />);
+
+    await screen.findByText('Local AI needs setup');
+
+    act(() => {
+      bridge.emitLocalLlmStatus(testReadyLocalLlmStatus({ status: 'warming' }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('AI response')).toHaveTextContent('Preparing local AI...');
+    });
+    expect(screen.getByLabelText('AI response')).toHaveTextContent(
+      'Auto Send is on.\nStop listening to send transcript to AI',
+      { normalizeWhitespace: false }
+    );
+  });
+
+  it('updates the local AI placeholder status when warm-up completes', async () => {
+    const bridge = installTestBridge();
+
+    render(<App />);
+
+    act(() => {
+      bridge.emitLocalLlmStatus(testReadyLocalLlmStatus({ status: 'warm' }));
+    });
+
+    expect(await screen.findByText('Local AI ready')).toBeInTheDocument();
+  });
+
+  it('keeps Start Listening enabled while local AI is warming', async () => {
+    installTestBridge({
+      llmReady: false
+    });
+
+    render(<App />);
 
     expect(await screen.findByRole('button', { name: 'Start Listening' })).not.toBeDisabled();
   });
@@ -4094,7 +4376,7 @@ function installTestBridge(overrides: {
   portablePreferences?: PortablePreferences;
   updateStatus?: UpdateStatus;
   historyStatus?: HistoryStatus;
-  downloadLocalAi?: () => Promise<LocalLlmStatus>;
+  downloadLocalAi?: (modelId?: string) => Promise<LocalLlmStatus>;
   completeOnboarding?: () => Promise<OnboardingStatus>;
   openChatGptLogin?: () => Promise<{ ok: boolean; message?: string }>;
   requestLlm?: (options: {
@@ -4133,6 +4415,7 @@ function installTestBridge(overrides: {
   const savedPiModels: string[] = [];
   const selectedAiProviders: AiProvider[] = [];
   const selectedLocalTranscriptionModels: string[] = [];
+  const selectedLocalAiDownloads: string[] = [];
   let localLlmDownloads = 0;
   let modelCatalogueRefreshes = 0;
   let chatGptLoginOpens = 0;
@@ -4408,6 +4691,15 @@ function installTestBridge(overrides: {
     },
     settings: {
       ai: {
+        benchmarkLocal: async (modelId) => ({
+          failureReason: null,
+          firstTokenMs: 400,
+          modelId: modelId ?? localLlmStatus.model?.id ?? 'qwen2.5-3b-instruct-q4_k_m',
+          ok: true,
+          status: 'passed',
+          tokensPerSecond: 20,
+          totalMs: 900
+        }),
         cancelLocalDownload: async () => {
           localLlmStatus = testLocalLlmStatus({ status: 'missing' });
           emitLocalLlmStatus?.(localLlmStatus);
@@ -4417,10 +4709,13 @@ function installTestBridge(overrides: {
           piStatus = testPiStatus({ connected: false, selectedModel: null, status: 'disconnected' });
           return piStatus;
         },
-        downloadLocal: async () => {
+        downloadLocal: async (modelId) => {
           localLlmDownloads += 1;
+          if (modelId) {
+            selectedLocalAiDownloads.push(modelId);
+          }
           if (overrides.downloadLocalAi) {
-            localLlmStatus = await overrides.downloadLocalAi();
+            localLlmStatus = await overrides.downloadLocalAi(modelId);
             emitLocalLlmStatus?.(localLlmStatus);
             return localLlmStatus;
           }
@@ -4450,6 +4745,20 @@ function installTestBridge(overrides: {
           return () => {
             emitLocalLlmStatus = null;
           };
+        },
+        setLocalModel: async (modelId) => {
+          localLlmStatus = testLocalLlmStatus({
+            model: {
+              id: modelId,
+              installed: localLlmStatus.model?.installed ?? false,
+              name: localLlmStatus.model?.name ?? 'Qwen 2.5 3B Instruct Q4',
+              path: localLlmStatus.model?.path ?? '/tmp/caul/local-llm/models/qwen2.5-3b-instruct-q4_k_m.gguf',
+              sizeGb: localLlmStatus.model?.sizeGb ?? 2.2
+            },
+            status: localLlmStatus.status
+          });
+          emitLocalLlmStatus?.(localLlmStatus);
+          return localLlmStatus;
         },
         openChatGptLogin: async () => {
           chatGptLoginOpens += 1;
@@ -4744,6 +5053,7 @@ function installTestBridge(overrides: {
     requestedPermissions,
     savedPiModels,
     selectedAiProviders,
+    selectedLocalAiDownloads,
     selectedLocalTranscriptionModels,
     get localLlmDownloads() {
       return localLlmDownloads;
@@ -4843,6 +5153,10 @@ function installTestBridge(overrides: {
     get historySessionSaves() {
       return historySessionSaves;
     },
+    emitLocalLlmStatus: (status: LocalLlmStatus) => {
+      localLlmStatus = status;
+      emitLocalLlmStatus?.(status);
+    },
     emit: (event: TranscriptionBridgeEvent) => {
       emitTranscriptionEvent?.(event);
     }
@@ -4926,13 +5240,60 @@ function isStarterTestPromptTemplateCustomised(template: PromptTemplate, starter
 function asCustomStarterTestPromptTemplate(template: PromptTemplate, existingTemplates: PromptTemplate[] = []) {
   const customId = getCustomStarterTestPromptTemplateId(template.id);
   const existingCustom = existingTemplates.find((item) => item.id === customId);
+  const collisionTemplates = existingTemplates.filter((item) => item.id !== customId && item.id !== template.id);
 
   return {
     ...template,
     createdAt: existingCustom?.createdAt ?? template.createdAt,
     id: customId,
+    name: getAvailableTestPromptTemplateName(template.name, collisionTemplates),
     updatedAt: template.updatedAt
   };
+}
+
+function getAvailableTestPromptTemplateName(name: string, templates: PromptTemplate[]) {
+  const baseName = name.trim() || 'Untitled';
+  const usedNames = new Set(templates
+    .map((template) => template.name.trim().toLocaleLowerCase())
+    .filter(Boolean));
+
+  if (!usedNames.has(baseName.toLocaleLowerCase())) {
+    return baseName;
+  }
+
+  const customName = `${baseName} custom`;
+
+  if (!usedNames.has(customName.toLocaleLowerCase())) {
+    return customName;
+  }
+
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${customName} ${index}`;
+
+    if (!usedNames.has(candidate.toLocaleLowerCase())) {
+      return candidate;
+    }
+  }
+
+  return `${customName} ${Date.now()}`;
+}
+
+function resolveTestPromptTemplateNameCollisions(templates: PromptTemplate[]) {
+  const starterTemplateIds = new Set(starterTestPromptTemplates().map((template) => template.id));
+
+  return templates.reduce<PromptTemplate[]>((items, template) => {
+    if (starterTemplateIds.has(template.id)) {
+      return [...items, template];
+    }
+
+    return [
+      ...items,
+      {
+        ...template,
+        name: getAvailableTestPromptTemplateName(template.name, items)
+      }
+    ];
+  }, []);
 }
 
 function preserveCustomisedStarterTestPromptTemplates(templates: PromptTemplate[]) {
@@ -4947,10 +5308,10 @@ function preserveCustomisedStarterTestPromptTemplates(templates: PromptTemplate[
   const existingCustomTemplates = templates.filter((template) => !starterTemplatesById.has(template.id));
   const customTemplatesById = new Map([...existingCustomTemplates, ...preservedCustomStarters].map((template) => [template.id, template]));
 
-  return [
+  return resolveTestPromptTemplateNameCollisions([
     ...starterTemplates,
     ...customTemplatesById.values()
-  ];
+  ]);
 }
 
 function getPromptTemplateForTestSave(template: PromptTemplate, existingTemplates: PromptTemplate[]) {
@@ -5076,7 +5437,7 @@ function testLocalLlmStatus(overrides: Partial<LocalLlmStatus> = {}): LocalLlmSt
   };
 }
 
-function testReadyLocalLlmStatus(): LocalLlmStatus {
+function testReadyLocalLlmStatus(overrides: Partial<LocalLlmStatus> = {}): LocalLlmStatus {
   return testLocalLlmStatus({
     model: {
       id: 'qwen2.5-3b-instruct-q4_k_m',
@@ -5092,7 +5453,7 @@ function testReadyLocalLlmStatus(): LocalLlmStatus {
       supported: true,
       version: 'test'
     },
-    status: 'ready'
+    status: overrides.status ?? 'ready'
   });
 }
 
@@ -5111,7 +5472,7 @@ function testAiRecommendation(overrides: Partial<OnboardingStatus['ai']> = {}): 
     recommendedModel: overrides.recommendedModel ?? {
       id: 'qwen2.5-3b-instruct-q4_k_m',
       name: 'Qwen 2.5 3B Instruct Q4',
-      reason: 'Qwen 2.5 3B Instruct Q4 is the best local AI response fit for this machine from the bundled benchmark catalogue.',
+      reason: 'Qwen 2.5 3B Instruct Q4 is the best local AI response fit for this machine from the offline benchmark catalogue.',
       runtime: 'llama.cpp'
     },
     resources: overrides.resources ?? {
