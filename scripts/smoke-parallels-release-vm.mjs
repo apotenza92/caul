@@ -4,6 +4,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import sharp from 'sharp';
+import {
+  evaluateAudioIsolationGate,
+  parseSmokeSummaryByType
+} from './audio-isolation-gate.mjs';
 
 const execFileAsync = promisify(execFile);
 const transcriptionExpectedPhrase = 'Caul release transcription smoke. Local transcription emits confirmed text.';
@@ -99,6 +103,7 @@ async function failVmE2e(message, {
     error: message,
     gates: {
       ai: false,
+      audioIsolation: false,
       install: false,
       microphone: false,
       onboarding: false,
@@ -282,6 +287,15 @@ async function runWindowsPackageSmoke() {
     });
   }
 
+  const audioIsolationSummary = await runWindowsAudioIsolationSmoke(backendPath, summary);
+
+  if (!audioIsolationSummary.ok) {
+    await failVmE2e('Windows packaged audio isolation smoke detected output leaking into microphone capture.', {
+      details: audioIsolationSummary.details,
+      gates: { install: true, microphone: true, systemAudio: true }
+    });
+  }
+
   const transcriptionSummary = await runWindowsTranscriptionSmoke(repoPath, backendPath);
   const rendererSummary = await runWindowsRendererTranscriptionSmoke(appExe);
   const aiSummary = await runWindowsRendererAiSmoke(appExe);
@@ -315,7 +329,7 @@ async function runWindowsPackageSmoke() {
   if (!launchSmoke.ok || !launchSmoke.text.includes('caul-packaged-launch-smoke')) {
     await failVmE2e('Windows packaged Electron launch smoke failed.', {
       details: launchSmoke.text,
-      gates: { ai: true, install: true, microphone: true, systemAudio: true, transcription: true }
+      gates: { ai: true, audioIsolation: true, install: true, microphone: true, systemAudio: true, transcription: true }
     });
   }
 
@@ -336,6 +350,7 @@ async function runWindowsPackageSmoke() {
       ].join('\n'),
       gates: {
         ai: true,
+        audioIsolation: true,
         install: launchSummary?.isPackaged === true,
         microphone: true,
         onboarding: Boolean(launchSummary?.hasOnboarding && launchSummary?.completion?.ok),
@@ -362,6 +377,7 @@ async function runWindowsPackageSmoke() {
   console.log(`Microphone level events: ${microphoneSummary.level_events}`);
   console.log(`Detected microphone input: ${meetsMinimumMicrophoneGate(microphoneSummary) ? 'yes' : 'no'} (max level ${formatLevel(microphoneSummary.max_level)})`);
   console.log(`Microphone restart: ${formatRestartSummary(microphoneRestartSummary)}`);
+  console.log(`Audio isolation: ${formatAudioIsolationSummary(audioIsolationSummary)}`);
   console.log(`Local transcription: ${formatTranscriptionSummary(transcriptionSummary)}`);
   console.log(`Renderer transcription: ${formatRendererTranscriptionSummary(rendererSummary)}`);
   console.log(`AI response: ${formatRendererAiSummary(aiSummary)}`);
@@ -372,6 +388,7 @@ async function runWindowsPackageSmoke() {
   const vmE2eSummary = {
     gates: {
       ai: true,
+      audioIsolation: true,
       install: true,
       microphone: true,
       onboarding: true,
@@ -647,6 +664,42 @@ async function runWindowsSystemRestartSmoke(backendPath) {
   return { smoke: fallback.ok ? fallback : primary, text };
 }
 
+async function runWindowsAudioIsolationSmoke(backendPath, systemDuringOutput) {
+  const microphoneProbe = await runPrlctl([
+    'exec',
+    vmName,
+    ...powershellEncodedArgs([
+      '$ErrorActionPreference = "Continue"',
+      `$job = Start-Job -ScriptBlock { ${windowsSpeechPlaybackScript(2)} }`,
+      'Start-Sleep -Milliseconds 250',
+      `& ${powershellString(backendPath)} --stream-microphone --duration 3 --smoke-summary`,
+      'Wait-Job $job -Timeout 8 | Out-Null',
+      'Receive-Job $job -ErrorAction SilentlyContinue',
+      'Remove-Job $job -Force -ErrorAction SilentlyContinue'
+    ].join('; '))
+  ], { timeout: 45_000, maxBuffer: 10 * 1024 * 1024 });
+  const microphoneDuringOutput = microphoneProbe.ok
+    ? parseMicrophoneSmokeSummary(microphoneProbe.text)
+    : null;
+  const gate = evaluateAudioIsolationGate({
+    microphoneDuringOutput,
+    systemDuringOutput
+  });
+
+  return {
+    details: [
+      `systemDuringOutput=${JSON.stringify(systemDuringOutput)}`,
+      `microphoneDuringOutput=${JSON.stringify(microphoneDuringOutput)}`,
+      `gate=${JSON.stringify(gate)}`,
+      microphoneProbe.text
+    ].join('\n'),
+    gate,
+    microphoneDuringOutput,
+    ok: microphoneProbe.ok && gate.ok,
+    systemDuringOutput
+  };
+}
+
 async function runLinuxPackageSmoke() {
   const repoPath = process.env[profile.repoEnv] ?? profile.defaultRepo;
   const sshUser = process.env[profile.userEnv] ?? profile.defaultUser;
@@ -728,6 +781,7 @@ async function runLinuxPackageSmoke() {
     const vmE2eSummary = {
       gates: {
         ai: false,
+        audioIsolation: false,
         install: true,
         microphone: false,
         onboarding: false,
@@ -850,6 +904,21 @@ async function runLinuxPackageSmoke() {
     });
   }
 
+  const audioIsolationSummary = await runLinuxAudioIsolationSmoke(
+    sshUser,
+    ipAddress,
+    knownHosts,
+    backendPath,
+    summary
+  );
+
+  if (!audioIsolationSummary.ok) {
+    await failVmE2e('Linux packaged audio isolation smoke detected output leaking into microphone capture.', {
+      details: audioIsolationSummary.details,
+      gates: { install: true, microphone: true, systemAudio: true }
+    });
+  }
+
   const transcriptionSummary = await runLinuxTranscriptionSmoke(
     sshUser,
     ipAddress,
@@ -884,7 +953,7 @@ async function runLinuxPackageSmoke() {
   if (!launchSmoke.ok || !launchSmoke.text.includes('caul-packaged-launch-smoke')) {
     await failVmE2e('Linux packaged Electron launch smoke failed.', {
       details: launchSmoke.text,
-      gates: { ai: true, install: true, microphone: true, systemAudio: true, transcription: true }
+      gates: { ai: true, audioIsolation: true, install: true, microphone: true, systemAudio: true, transcription: true }
     });
   }
 
@@ -895,6 +964,7 @@ async function runLinuxPackageSmoke() {
       details: launchSmoke.text,
       gates: {
         ai: true,
+        audioIsolation: true,
         install: launchSummary?.isPackaged === true,
         microphone: true,
         onboarding: Boolean(launchSummary?.hasOnboarding && launchSummary?.completion?.ok),
@@ -919,6 +989,7 @@ async function runLinuxPackageSmoke() {
   console.log(`Microphone level events: ${microphoneSummary.level_events}`);
   console.log(`Detected microphone input: ${meetsMinimumMicrophoneGate(microphoneSummary) ? 'yes' : 'no'} (max level ${formatLevel(microphoneSummary.max_level)})`);
   console.log(`Microphone restart: ${formatRestartSummary(microphoneRestartSummary)}`);
+  console.log(`Audio isolation: ${formatAudioIsolationSummary(audioIsolationSummary)}`);
   console.log(`Local transcription: ${formatTranscriptionSummary(transcriptionSummary)}`);
   console.log(`Renderer transcription: ${formatRendererTranscriptionSummary(rendererSummary)}`);
   console.log(`AI response: ${formatRendererAiSummary(aiSummary)}`);
@@ -928,6 +999,7 @@ async function runLinuxPackageSmoke() {
   const vmE2eSummary = {
     gates: {
       ai: true,
+      audioIsolation: true,
       install: true,
       microphone: true,
       onboarding: true,
@@ -1275,6 +1347,46 @@ async function runLinuxRendererAiSmoke(sshUser, ipAddress, knownHosts) {
   return assertRendererAiSmoke(smoke.text, 'Linux');
 }
 
+async function runLinuxAudioIsolationSmoke(
+  sshUser,
+  ipAddress,
+  knownHosts,
+  backendPath,
+  systemDuringOutput
+) {
+  const microphoneProbe = await runSsh(
+    sshUser,
+    ipAddress,
+    knownHosts,
+    [
+      linuxToneStimulusCommand('/tmp/caul-pw-play-mic-isolation.log'),
+      'sleep 0.3',
+      `${shellQuote(backendPath)} --stream-microphone --duration 3 --smoke-summary`
+    ].join(' && '),
+    { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 }
+  );
+  const microphoneDuringOutput = microphoneProbe.ok
+    ? parseMicrophoneSmokeSummary(microphoneProbe.text)
+    : null;
+  const gate = evaluateAudioIsolationGate({
+    microphoneDuringOutput,
+    systemDuringOutput
+  });
+
+  return {
+    details: [
+      `systemDuringOutput=${JSON.stringify(systemDuringOutput)}`,
+      `microphoneDuringOutput=${JSON.stringify(microphoneDuringOutput)}`,
+      `gate=${JSON.stringify(gate)}`,
+      microphoneProbe.text
+    ].join('\n'),
+    gate,
+    microphoneDuringOutput,
+    ok: microphoneProbe.ok && gate.ok,
+    systemDuringOutput
+  };
+}
+
 async function createLocalTranscriptionFixture(repetitions = 1) {
   const directory = await mkdtemp(path.join(tmpdir(), 'caul-transcription-fixture-'));
   const aiffPath = path.join(directory, 'known.aiff');
@@ -1443,6 +1555,16 @@ function formatRendererAiSummary(summary) {
   return `ok first text ${summary.stopToFirstResponseTextMs ?? 'unknown'}ms final "${summary.finalValue}"`;
 }
 
+function formatAudioIsolationSummary(summary) {
+  if (!summary) {
+    return 'not checked';
+  }
+
+  return summary.ok
+    ? `ok system=${formatLevel(summary.gate?.systemMaxLevel)} microphone=${formatLevel(summary.gate?.microphoneMaxLevel)} limit=${formatLevel(summary.gate?.microphoneLeakLimit)}`
+    : `failed system=${formatLevel(summary.gate?.systemMaxLevel)} microphone=${formatLevel(summary.gate?.microphoneMaxLevel)} limit=${formatLevel(summary.gate?.microphoneLeakLimit)}`;
+}
+
 function parseParakeetDirectBench(text) {
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 
@@ -1530,39 +1652,11 @@ function linuxToneStimulusCommand(logPath) {
 }
 
 function parseSmokeSummary(text) {
-  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    try {
-      const parsed = JSON.parse(lines[index]);
-
-      if (parsed?.type === 'system_audio_smoke') {
-        return parsed;
-      }
-    } catch {
-      // Ignore non-JSON build output.
-    }
-  }
-
-  return null;
+  return parseSmokeSummaryByType(text, 'system_audio_smoke');
 }
 
 function parseMicrophoneSmokeSummary(text) {
-  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    try {
-      const parsed = JSON.parse(lines[index]);
-
-      if (parsed?.type === 'microphone_smoke') {
-        return parsed;
-      }
-    } catch {
-      // Ignore non-JSON build output.
-    }
-  }
-
-  return null;
+  return parseSmokeSummaryByType(text, 'microphone_smoke');
 }
 
 function parseCaptureRestartSmokeSummary(text, source) {

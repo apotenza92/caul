@@ -2,6 +2,10 @@ import { execFile, spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import {
+  evaluateAudioIsolationGate,
+  parseSmokeSummaryByType
+} from './audio-isolation-gate.mjs';
 
 const execFileAsync = promisify(execFile);
 const vmName = process.env.CAUL_MACOS_VM_NAME ?? 'macOS';
@@ -126,6 +130,7 @@ async function failMacosE2e(message, { blocked = false, details = '', gates = {}
     error: message,
     gates: {
       ai: false,
+      audioIsolation: false,
       install: false,
       microphone: false,
       onboarding: false,
@@ -214,6 +219,7 @@ const microphoneSmoke = await runPrlctl([
   '3',
   '--smoke-summary'
 ], { timeout: 45_000 });
+const audioIsolationSummary = await runMacosAudioIsolationSmoke();
 const rendererLlmSmoke = await runGuestScript([
   `rm -rf ${shellQuote(userDataDir)}`,
   seedMacosUserDataScript(userDataDir),
@@ -238,6 +244,7 @@ const llmSummary = parsePrefixedJson(rendererLlmSmoke.text, 'caul-renderer-llm-s
 const transcriptionSummary = parsePrefixedJson(rendererTranscriptionSmoke.text, 'caul-renderer-transcription-smoke');
 const systemAudioOk = systemAudioSmoke.ok && /"type":"system_audio_smoke"/.test(systemAudioSmoke.text);
 const microphoneOk = microphoneSmoke.ok && /"type":"microphone_smoke"/.test(microphoneSmoke.text);
+const audioIsolationOk = audioIsolationSummary.ok;
 const aiOk = rendererLlmSmoke.ok && (
   Boolean(llmSummary?.ok)
   || Boolean(llmSummary?.speculativeResult?.ok)
@@ -248,7 +255,7 @@ const onboardingOk = Boolean(launchSummary?.completion?.ok);
 const privacyOk = Boolean(launchSummary?.privacy?.ok);
 const updatesOk = Boolean(launchSummary?.updates?.ok);
 const installOk = Boolean(launchSummary?.isPackaged);
-const ok = installOk && onboardingOk && systemAudioOk && microphoneOk && transcriptionOk && aiOk && privacyOk && updatesOk;
+const ok = installOk && onboardingOk && systemAudioOk && microphoneOk && audioIsolationOk && transcriptionOk && aiOk && privacyOk && updatesOk;
 const provisioningIssues = getMacosProvisioningIssues({
   aiOk,
   installOk,
@@ -263,6 +270,7 @@ const summary = {
   ok,
   gates: {
     ai: aiOk,
+    audioIsolation: audioIsolationOk,
     install: installOk,
     microphone: microphoneOk,
     onboarding: onboardingOk,
@@ -272,6 +280,7 @@ const summary = {
     updates: updatesOk
   },
   launch: launchSummary,
+  audioIsolation: audioIsolationSummary,
   packagePath,
   vmName
 };
@@ -286,6 +295,7 @@ console.log(`Install launch: ${formatGate(installOk)}`);
 console.log(`Onboarding completion: ${formatGate(onboardingOk)}`);
 console.log(`System audio: ${formatGate(systemAudioOk)}`);
 console.log(`Microphone: ${formatGate(microphoneOk)}`);
+console.log(`Audio isolation: ${formatAudioIsolationSummary(audioIsolationSummary)}`);
 console.log(`Local transcription: ${formatGate(transcriptionOk)}`);
 console.log(`AI response: ${formatGate(aiOk)}`);
 console.log(`Privacy: ${formatGate(privacyOk)}`);
@@ -329,6 +339,79 @@ function getMacosProvisioningIssues({
   }
 
   return issues;
+}
+
+async function runMacosAudioIsolationSmoke() {
+  const systemProbe = await runGuestScript([
+    macosToneStimulusScript('/tmp/caul-audio-isolation-output.log'),
+    `${shellQuote(backendPath)} --stream-system-audio --duration 3 --smoke-summary`
+  ].join('\n'), { timeout: 45_000, maxBuffer: 10 * 1024 * 1024 });
+  const microphoneProbe = await runGuestScript([
+    macosToneStimulusScript('/tmp/caul-audio-isolation-mic.log'),
+    `${shellQuote(backendPath)} --stream-microphone --duration 3 --smoke-summary`
+  ].join('\n'), { timeout: 45_000, maxBuffer: 10 * 1024 * 1024 });
+  const systemDuringOutput = systemProbe.ok
+    ? parseSmokeSummaryByType(systemProbe.text, 'system_audio_smoke')
+    : null;
+  const microphoneDuringOutput = microphoneProbe.ok
+    ? parseSmokeSummaryByType(microphoneProbe.text, 'microphone_smoke')
+    : null;
+  const gate = evaluateAudioIsolationGate({
+    microphoneDuringOutput,
+    systemDuringOutput
+  });
+
+  return {
+    details: [
+      `systemDuringOutput=${JSON.stringify(systemDuringOutput)}`,
+      `microphoneDuringOutput=${JSON.stringify(microphoneDuringOutput)}`,
+      `gate=${JSON.stringify(gate)}`,
+      systemProbe.text,
+      microphoneProbe.text
+    ].join('\n'),
+    gate,
+    microphoneDuringOutput,
+    ok: systemProbe.ok && microphoneProbe.ok && gate.ok,
+    systemDuringOutput
+  };
+}
+
+function macosToneStimulusScript(logPath) {
+  return [
+    `python3 -c ${shellQuote(macosToneFixturePython())}`,
+    `(afplay /tmp/caul-audio-isolation.wav >${shellQuote(logPath)} 2>&1 &)`
+  ].join('\n');
+}
+
+function macosToneFixturePython() {
+  return [
+    'import math, struct, wave',
+    "path = '/tmp/caul-audio-isolation.wav'",
+    'rate = 48000',
+    'seconds = 6',
+    "with wave.open(path, 'wb') as audio:",
+    '    audio.setnchannels(1)',
+    '    audio.setsampwidth(2)',
+    '    audio.setframerate(rate)',
+    '    for n in range(rate * seconds):',
+    '        envelope = min(1.0, n / (rate * 0.1), (rate * seconds - n) / (rate * 0.2))',
+    '        sample = int(math.sin(2 * math.pi * 880 * n / rate) * max(0.0, envelope) * 12000)',
+    "        audio.writeframesraw(struct.pack('<h', sample))"
+  ].join('\n');
+}
+
+function formatAudioIsolationSummary(summary) {
+  if (!summary) {
+    return 'not checked';
+  }
+
+  return summary.ok
+    ? `ok system=${formatLevel(summary.gate?.systemMaxLevel)} microphone=${formatLevel(summary.gate?.microphoneMaxLevel)} limit=${formatLevel(summary.gate?.microphoneLeakLimit)}`
+    : `failed system=${formatLevel(summary.gate?.systemMaxLevel)} microphone=${formatLevel(summary.gate?.microphoneMaxLevel)} limit=${formatLevel(summary.gate?.microphoneLeakLimit)}`;
+}
+
+function formatLevel(value) {
+  return Number.isFinite(Number(value)) ? Number(value).toFixed(6) : 'unknown';
 }
 
 function seedMacosUserDataScript(directory) {
