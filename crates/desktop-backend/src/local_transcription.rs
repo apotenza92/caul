@@ -138,6 +138,11 @@ struct PartialStability {
 
 #[derive(Debug)]
 enum BackendEvent {
+    SpeechStarted {
+        source: TranscriptSource,
+        utterance_id: u64,
+        start_ms: u64,
+    },
     Partial {
         source: TranscriptSource,
         utterance_id: u64,
@@ -163,6 +168,11 @@ enum BackendEvent {
 
 enum TranscriptionJob {
     Warmup,
+    SpeechStarted {
+        source: TranscriptSource,
+        utterance_id: u64,
+        start_ms: u64,
+    },
     Partial(SpeechPreview),
     Segment(SpeechSegment),
     Barrier(Sender<()>),
@@ -342,8 +352,6 @@ pub fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
                         prepare_active_session(
                             &mut session,
                             sources,
-                            &clock,
-                            &audio_tx,
                             &event_tx,
                             &job_tx,
                         )?;
@@ -367,7 +375,7 @@ pub fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 DaemonCommand::Stop => {
-                    pause_active_session(&mut session, &clock, &job_tx, &event_tx);
+                    stop_active_session(&mut session, &job_tx, &event_tx);
                 }
                 DaemonCommand::Quit => {
                     running.store(false, Ordering::SeqCst);
@@ -505,7 +513,9 @@ fn start_or_activate_session(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let can_reuse = session
         .as_ref()
-        .is_some_and(|active_session| active_session.sources == sources);
+        .is_some_and(|active_session| {
+            active_session.sources == sources && active_session.accepting_audio
+        });
 
     if !can_reuse {
         stop_active_session(session, job_tx, event_tx);
@@ -533,32 +543,14 @@ fn drain_audio_frames(receiver: &mpsc::Receiver<AudioFrame>) {
 
 fn prepare_active_session(
     session: &mut Option<ActiveSession>,
-    sources: Vec<TranscriptSource>,
-    clock: &PipelineClock,
-    audio_tx: &Sender<AudioFrame>,
+    _sources: Vec<TranscriptSource>,
     event_tx: &Sender<BackendEvent>,
     job_tx: &Sender<TranscriptionJob>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let can_reuse = session
-        .as_ref()
-        .is_some_and(|active_session| active_session.sources == sources);
-
-    if !can_reuse {
-        stop_active_session(session, job_tx, event_tx);
-        *session = Some(start_active_session(
-            sources, clock, audio_tx, event_tx, false,
-        )?);
-        return Ok(());
-    }
-
-    if let Some(active_session) = session.as_mut() {
-        active_session.accepting_audio = false;
-        active_session.saw_audio = false;
-        active_session.reset_batchers(clock);
-        event_tx.send(BackendEvent::Stage(
-            "local Parakeet hot capture prepared".to_string(),
-        ))?;
-    }
+    stop_active_session(session, job_tx, event_tx);
+    event_tx.send(BackendEvent::Stage(
+        "local Parakeet hot capture prepared".to_string(),
+    ))?;
 
     Ok(())
 }
@@ -617,37 +609,17 @@ fn stop_active_session(
     ));
 }
 
-fn pause_active_session(
-    session: &mut Option<ActiveSession>,
-    clock: &PipelineClock,
-    job_tx: &Sender<TranscriptionJob>,
-    event_tx: &Sender<BackendEvent>,
-) {
-    let Some(active_session) = session.as_mut() else {
-        return;
-    };
-
-    for batcher in active_session.batchers.values_mut() {
-        if let Some(segment) = batcher.flush() {
-            let _ = job_tx.send(TranscriptionJob::Segment(segment));
-        }
-    }
-
-    let (barrier_tx, barrier_rx) = mpsc::channel();
-    let _ = job_tx.send(TranscriptionJob::Barrier(barrier_tx));
-    let _ = barrier_rx.recv_timeout(Duration::from_secs(5));
-
-    active_session.accepting_audio = false;
-    active_session.saw_audio = false;
-    active_session.reset_batchers(clock);
-
-    let _ = event_tx.send(BackendEvent::Stage(
-        "local transcription stopped".to_string(),
-    ));
-}
-
 fn send_pipeline_output(job_tx: &Sender<TranscriptionJob>, output: PipelineOutput) {
     let job = match output {
+        PipelineOutput::SpeechStarted {
+            source,
+            utterance_id,
+            start_ms,
+        } => TranscriptionJob::SpeechStarted {
+            source,
+            utterance_id,
+            start_ms,
+        },
         PipelineOutput::Preview(preview) => TranscriptionJob::Partial(preview),
         PipelineOutput::Segment(segment) => TranscriptionJob::Segment(segment),
     };
@@ -782,7 +754,7 @@ pub fn run_fixture_pipeline_smoke() {
 fn collect_segments_into(segments: &mut Vec<SpeechSegment>, outputs: Vec<PipelineOutput>) {
     segments.extend(outputs.into_iter().filter_map(|output| match output {
         PipelineOutput::Segment(segment) => Some(segment),
-        PipelineOutput::Preview(_) => None,
+        PipelineOutput::SpeechStarted { .. } | PipelineOutput::Preview(_) => None,
     }));
 }
 
@@ -1028,7 +1000,10 @@ fn decode_pcm16_base64(encoded: &str) -> Result<Vec<f32>, String> {
 
 fn system_audio_started_stage() -> String {
     if cfg!(target_os = "macos") {
-        "Core Audio capture started".to_string()
+        match std::env::var("CAUL_MACOS_SYSTEM_AUDIO_BACKEND").as_deref() {
+            Ok("core-audio") | Ok("core_audio") => "Core Audio capture started".to_string(),
+            _ => "ScreenCaptureKit audio capture started".to_string(),
+        }
     } else if cfg!(target_os = "windows") {
         "WASAPI loopback capture started".to_string()
     } else if cfg!(target_os = "linux") {
@@ -1194,10 +1169,16 @@ struct SourcePipeline {
     active_utterance_id: Option<u64>,
     last_partial_end_sample: u64,
     partial_gate: Arc<AtomicBool>,
+    speech_started_emitted_for: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
 enum PipelineOutput {
+    SpeechStarted {
+        source: TranscriptSource,
+        utterance_id: u64,
+        start_ms: u64,
+    },
     Preview(SpeechPreview),
     Segment(SpeechSegment),
 }
@@ -1227,6 +1208,7 @@ impl SourcePipeline {
             active_utterance_id: None,
             last_partial_end_sample: 0,
             partial_gate,
+            speech_started_emitted_for: None,
         }
     }
 
@@ -1241,6 +1223,9 @@ impl SourcePipeline {
             .collect::<Vec<_>>();
 
         if outputs.is_empty() {
+            if let Some(output) = self.maybe_speech_started() {
+                outputs.push(output);
+            }
             if let Some(preview) = self.maybe_preview() {
                 outputs.push(PipelineOutput::Preview(preview));
             }
@@ -1272,6 +1257,7 @@ impl SourcePipeline {
             .unwrap_or(self.next_utterance_id);
         self.next_utterance_id = self.next_utterance_id.max(id + 1);
         self.last_partial_end_sample = 0;
+        self.speech_started_emitted_for = None;
         self.partial_gate.store(false, Ordering::SeqCst);
 
         let mut metrics = utterance.metrics;
@@ -1286,6 +1272,32 @@ impl SourcePipeline {
             metrics,
             samples: utterance.samples,
         }
+    }
+
+    fn maybe_speech_started(&mut self) -> Option<PipelineOutput> {
+        let snapshot = self.endpoint.active_snapshot()?;
+        let active_duration = snapshot.end_sample.saturating_sub(snapshot.start_sample);
+
+        if active_duration < ms_to_samples(LIVE_PARTIAL_MIN_MS) {
+            return None;
+        }
+
+        let id = self.active_utterance_id.unwrap_or_else(|| {
+            self.active_utterance_id = Some(self.next_utterance_id);
+            self.next_utterance_id
+        });
+
+        if self.speech_started_emitted_for == Some(id) {
+            return None;
+        }
+
+        self.speech_started_emitted_for = Some(id);
+
+        Some(PipelineOutput::SpeechStarted {
+            source: self.source,
+            utterance_id: id,
+            start_ms: samples_to_ms(snapshot.start_sample),
+        })
     }
 
     fn maybe_preview(&mut self) -> Option<SpeechPreview> {
@@ -1677,6 +1689,17 @@ fn run_transcription_worker(
         match job {
             TranscriptionJob::Warmup => {
                 let _ = get_or_load_local_model(&mut model, selected_model, &event_tx);
+            }
+            TranscriptionJob::SpeechStarted {
+                source,
+                utterance_id,
+                start_ms,
+            } => {
+                let _ = event_tx.send(BackendEvent::SpeechStarted {
+                    source,
+                    utterance_id,
+                    start_ms,
+                });
             }
             TranscriptionJob::Partial(preview) => {
                 emit_metric(
@@ -2178,6 +2201,16 @@ fn drain_events(receiver: &mpsc::Receiver<BackendEvent>) {
 
 fn emit_event(event: BackendEvent) {
     let value = match event {
+        BackendEvent::SpeechStarted {
+            source,
+            utterance_id,
+            start_ms,
+        } => json!({
+            "type": "speech_started",
+            "source": source.as_str(),
+            "utterance_id": utterance_id,
+            "start_ms": start_ms
+        }),
         BackendEvent::Partial {
             source,
             utterance_id,
@@ -2384,7 +2417,7 @@ mod tests {
             .into_iter()
             .filter_map(|output| match output {
                 PipelineOutput::Preview(preview) => Some(preview),
-                PipelineOutput::Segment(_) => None,
+                PipelineOutput::SpeechStarted { .. } | PipelineOutput::Segment(_) => None,
             })
             .collect::<Vec<_>>();
 
@@ -2405,7 +2438,7 @@ mod tests {
             .into_iter()
             .find_map(|output| match output {
                 PipelineOutput::Preview(preview) => Some(preview.id),
-                PipelineOutput::Segment(_) => None,
+                PipelineOutput::SpeechStarted { .. } | PipelineOutput::Segment(_) => None,
             })
             .expect("preview should emit");
         let mut segments = Vec::new();
@@ -2420,6 +2453,36 @@ mod tests {
 
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].id, preview_id);
+    }
+
+    #[test]
+    fn source_pipeline_emits_speech_started_before_live_preview() {
+        let clock = PipelineClock::new();
+        let mut pipeline = SourcePipeline::new(clock, EndpointConfig::default());
+        let outputs = pipeline.push_frame(test_frame(
+            TranscriptSource::System,
+            samples_for_ms(900, 0.05),
+        ));
+
+        assert!(matches!(
+            outputs.first(),
+            Some(PipelineOutput::SpeechStarted {
+                source: TranscriptSource::System,
+                utterance_id: 1,
+                start_ms: 0,
+            })
+        ));
+        assert!(matches!(outputs.get(1), Some(PipelineOutput::Preview(_))));
+
+        let repeated_outputs = pipeline.push_frame(test_frame(
+            TranscriptSource::System,
+            samples_for_ms(300, 0.05),
+        ));
+
+        assert!(!repeated_outputs.iter().any(|output| matches!(
+            output,
+            PipelineOutput::SpeechStarted { .. }
+        )));
     }
 
     #[test]

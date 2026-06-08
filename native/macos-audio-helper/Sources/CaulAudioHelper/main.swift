@@ -127,12 +127,14 @@ struct DaemonCommand: Decodable {
 
 final class ScreenCaptureKitSystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput, @unchecked Sendable {
   private let writer: EventWriter
+  private let transcriber: SlidingParakeetTranscriber?
   private var stream: SCStream?
   private var inputSampleRate = 48_000.0
   private var emittedFormat = false
 
-  init(writer: EventWriter) {
+  init(writer: EventWriter, transcriber: SlidingParakeetTranscriber? = nil) {
     self.writer = writer
+    self.transcriber = transcriber
     super.init()
   }
 
@@ -183,6 +185,7 @@ final class ScreenCaptureKitSystemAudioCapture: NSObject, SCStreamDelegate, SCSt
 
     try? await stream.stopCapture()
     self.stream = nil
+    transcriber?.finish()
     writer.emit(HelperEvent(type: "capture_stopped", ok: true))
   }
 
@@ -218,6 +221,18 @@ final class ScreenCaptureKitSystemAudioCapture: NSObject, SCStreamDelegate, SCSt
           level: level.percent,
           decibels: level.decibels
         ))
+
+        if let transcriber {
+          let parakeetSamples = resample(monoSamples, inputSampleRate: inputSampleRate, outputSampleRate: parakeetSampleRate)
+          writer.emit(HelperEvent(
+            type: "audio_frame",
+            sampleRate: inputSampleRate,
+            inputSampleRate: inputSampleRate,
+            channels: 1
+          ))
+          transcriber.append(parakeetSamples)
+          return
+        }
 
         let pcm16 = encodePCM16Base64(monoSamples)
 
@@ -412,6 +427,12 @@ final class SystemAudioCapture {
 
     if let transcriber {
       let parakeetSamples = resample(monoSamples, inputSampleRate: inputFormat.mSampleRate, outputSampleRate: parakeetSampleRate)
+      writer.emit(HelperEvent(
+        type: "audio_frame",
+        sampleRate: inputFormat.mSampleRate,
+        inputSampleRate: inputFormat.mSampleRate,
+        channels: 1
+      ))
       transcriber.append(parakeetSamples)
       return
     }
@@ -1238,7 +1259,8 @@ func startCaptureWithTimeout(
 func runModernCommand(arguments: Set<String>, writer: EventWriter) throws {
   if arguments.contains("--stream-screencapturekit-audio") {
     let duration = argumentValue(after: "--duration").flatMap(TimeInterval.init)
-    let capture = ScreenCaptureKitSystemAudioCapture(writer: writer)
+    let transcriber = arguments.contains("--transcribe-parakeet") ? SlidingParakeetTranscriber(writer: writer) : nil
+    let capture = ScreenCaptureKitSystemAudioCapture(writer: writer, transcriber: transcriber)
     let semaphore = DispatchSemaphore(value: 0)
     let startError = ErrorBox()
 
@@ -1265,6 +1287,8 @@ func runModernCommand(arguments: Set<String>, writer: EventWriter) throws {
     if let startError = startError.get() {
       throw startError
     }
+
+    transcriber?.prepare()
 
     if let duration {
       Thread.sleep(forTimeInterval: duration)

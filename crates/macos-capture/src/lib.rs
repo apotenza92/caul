@@ -50,14 +50,7 @@ pub struct HelperCommand {
 impl HelperCommand {
     pub fn system_audio(repository_root: impl AsRef<Path>, transcribe_parakeet: bool) -> Self {
         let repository_root = repository_root.as_ref();
-        let capture_args = if transcribe_parakeet {
-            vec![
-                "--stream-system-audio".to_string(),
-                "--transcribe-parakeet".to_string(),
-            ]
-        } else {
-            vec!["--stream-system-audio".to_string()]
-        };
+        let capture_args = system_audio_capture_args(transcribe_parakeet);
 
         if let Ok(helper_path) = std::env::var("CAUL_AUDIO_HELPER_PATH") {
             let helper_path = PathBuf::from(helper_path);
@@ -96,6 +89,20 @@ impl HelperCommand {
             args,
         }
     }
+}
+
+fn system_audio_capture_args(transcribe_parakeet: bool) -> Vec<String> {
+    let capture_arg = match std::env::var("CAUL_MACOS_SYSTEM_AUDIO_BACKEND").as_deref() {
+        Ok("core-audio") | Ok("core_audio") => "--stream-system-audio",
+        _ => "--stream-screencapturekit-audio",
+    };
+    let mut args = vec![capture_arg.to_string()];
+
+    if transcribe_parakeet {
+        args.push("--transcribe-parakeet".to_string());
+    }
+
+    args
 }
 
 pub struct RunningCapture {
@@ -328,10 +335,25 @@ mod tests {
     fn builds_swift_fallback_command() {
         let _guard = ENV_LOCK.lock().expect("env lock should be available");
         std::env::remove_var("CAUL_AUDIO_HELPER_PATH");
+        std::env::remove_var("CAUL_MACOS_SYSTEM_AUDIO_BACKEND");
 
         let command = HelperCommand::system_audio("/tmp/caul-missing-root", false);
 
         assert_eq!(command.command, PathBuf::from("swift"));
+        assert!(command
+            .args
+            .contains(&"--stream-screencapturekit-audio".to_string()));
+    }
+
+    #[test]
+    fn allows_core_audio_backend_override() {
+        let _guard = ENV_LOCK.lock().expect("env lock should be available");
+        std::env::remove_var("CAUL_AUDIO_HELPER_PATH");
+        std::env::set_var("CAUL_MACOS_SYSTEM_AUDIO_BACKEND", "core-audio");
+
+        let command = HelperCommand::system_audio("/tmp/caul-missing-root", false);
+
+        std::env::remove_var("CAUL_MACOS_SYSTEM_AUDIO_BACKEND");
         assert!(command.args.contains(&"--stream-system-audio".to_string()));
     }
 
@@ -340,11 +362,15 @@ mod tests {
         let _guard = ENV_LOCK.lock().expect("env lock should be available");
         let helper_path = std::env::current_exe().expect("test executable path");
         std::env::set_var("CAUL_AUDIO_HELPER_PATH", &helper_path);
+        std::env::remove_var("CAUL_MACOS_SYSTEM_AUDIO_BACKEND");
 
         let command = HelperCommand::system_audio("/tmp/caul-missing-root", false);
 
         std::env::remove_var("CAUL_AUDIO_HELPER_PATH");
         assert_eq!(command.command, helper_path);
-        assert_eq!(command.args, vec!["--stream-system-audio".to_string()]);
+        assert_eq!(
+            command.args,
+            vec!["--stream-screencapturekit-audio".to_string()]
+        );
     }
 }

@@ -22,6 +22,8 @@ const { buildLocalLlmPromptWithAttachments, forgetLocalLlmAttachments, preloadLo
 const { createProfileService } = require('./profile.cjs');
 const {
   buildSystemProfile,
+  getCurrentMemoryFit,
+  getBenchmarkCacheKey,
   loadBestModelCatalogue,
   recommendFromCatalogue,
   writeLiveModelCatalogue
@@ -124,6 +126,8 @@ const defaultPiChatGptProvider = 'openai-codex';
 const defaultPiChatGptModel = 'openai-codex/gpt-5.5';
 const defaultAiProvider = 'local';
 const onboardingModelCatalogueRefreshTimeoutMs = Number(process.env.CAUL_ONBOARDING_MODEL_CATALOGUE_REFRESH_TIMEOUT_MS ?? 8000);
+const localAiFirstTokenTargetMs = Number(process.env.CAUL_LOCAL_AI_FIRST_TOKEN_TARGET_MS ?? 2500);
+const localAiTotalResponseTargetMs = Number(process.env.CAUL_LOCAL_AI_TOTAL_RESPONSE_TARGET_MS ?? 9000);
 const parakeetRequiredFiles = [
   'encoder-model.int8.onnx',
   'decoder_joint-model.int8.onnx',
@@ -807,13 +811,61 @@ function isStarterPromptTemplateCustomised(template, starterTemplate) {
 function asCustomStarterPromptTemplate(template, existingTemplates = []) {
   const customId = getCustomStarterPromptTemplateId(template.id);
   const existingCustom = existingTemplates.find((item) => item.id === customId);
+  const collisionTemplates = existingTemplates.filter((item) => item.id !== customId && item.id !== template.id);
 
   return {
     ...template,
     createdAt: existingCustom?.createdAt ?? template.createdAt,
     id: customId,
+    name: getAvailablePromptTemplateName(template.name, collisionTemplates),
     updatedAt: template.updatedAt
   };
+}
+
+function getAvailablePromptTemplateName(name, templates) {
+  const trimmedName = String(name ?? '').trim();
+  const baseName = trimmedName || 'Untitled';
+  const usedNames = new Set(templates
+    .map((template) => String(template?.name ?? '').trim().toLocaleLowerCase())
+    .filter(Boolean));
+
+  if (!usedNames.has(baseName.toLocaleLowerCase())) {
+    return baseName;
+  }
+
+  const customName = `${baseName} custom`;
+
+  if (!usedNames.has(customName.toLocaleLowerCase())) {
+    return customName;
+  }
+
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${customName} ${index}`;
+
+    if (!usedNames.has(candidate.toLocaleLowerCase())) {
+      return candidate;
+    }
+  }
+
+  return `${customName} ${Date.now()}`;
+}
+
+function resolvePromptTemplateNameCollisions(templates) {
+  const starterTemplateIds = new Set(starterPromptTemplates.map((template) => template.id));
+
+  return templates.reduce((items, template) => {
+    if (starterTemplateIds.has(template.id)) {
+      return [...items, template];
+    }
+
+    return [
+      ...items,
+      {
+        ...template,
+        name: getAvailablePromptTemplateName(template.name, items)
+      }
+    ];
+  }, []);
 }
 
 function preserveCustomisedStarterPromptTemplates(templates) {
@@ -828,10 +880,10 @@ function preserveCustomisedStarterPromptTemplates(templates) {
   const existingCustomTemplates = templates.filter((template) => !starterTemplatesById.has(template.id));
   const customTemplatesById = new Map([...existingCustomTemplates, ...preservedCustomStarters].map((template) => [template.id, template]));
 
-  return [
+  return resolvePromptTemplateNameCollisions([
     ...starterTemplates,
     ...customTemplatesById.values()
-  ];
+  ]);
 }
 
 function normalisePromptTemplateAttachment(attachment) {
@@ -1164,6 +1216,10 @@ function normalisePortableSettings(value) {
 
   if (value.selectedAiProvider === 'cloud' || value.selectedAiProvider === 'local') {
     settings.selectedAiProvider = value.selectedAiProvider;
+  }
+
+  if (typeof value.selectedLocalAiModel === 'string' && value.selectedLocalAiModel.trim()) {
+    settings.selectedLocalAiModel = value.selectedLocalAiModel.trim();
   }
 
   if (portableLlmModels.has(value.llmModel)) {
@@ -2906,7 +2962,9 @@ function buildTranscriptionRecommendation() {
 function getAiRecommendation() {
   const profile = getLocalSystemProfile();
   const catalogue = getModelCatalogue();
-  const benchmarkRecommendation = recommendFromCatalogue(catalogue, profile);
+  const benchmarkRecommendation = recommendFromCatalogue(catalogue, profile, {
+    benchmarkCache: readLocalAiBenchmarkCache()
+  });
   const recommendedProvider = benchmarkRecommendation.ai.recommendation === 'cloud' ? 'cloud' : 'local';
 
   return {
@@ -2915,7 +2973,13 @@ function getAiRecommendation() {
       recommendationSource: benchmarkRecommendation.ai.source,
       staleEntries: benchmarkRecommendation.staleCatalogueEntries
     },
+    benchmarkRequired: benchmarkRecommendation.ai.benchmarkRequired,
+    candidateScore: benchmarkRecommendation.ai.candidateScore,
+    fallbackCandidateId: benchmarkRecommendation.ai.fallbackCandidateId,
+    fitFailures: benchmarkRecommendation.ai.fitFailures,
     localRuntime: benchmarkRecommendation.ai.localRuntime,
+    modelOptimisationProfile: benchmarkRecommendation.ai.modelOptimisationProfile,
+    performanceStatus: benchmarkRecommendation.ai.performanceStatus,
     provider: getSelectedAiProvider(recommendedProvider),
     recommended: benchmarkRecommendation.ai.recommendation,
     recommendedModel: benchmarkRecommendation.ai.model
@@ -2927,6 +2991,7 @@ function getAiRecommendation() {
       }
       : null,
     resources: profile,
+    selectionReason: benchmarkRecommendation.ai.selectionReason,
     status: 'ready',
     summary: benchmarkRecommendation.ai.recommendation === 'local'
       ? `Recommended: ${benchmarkRecommendation.ai.model.name} local AI responses`
@@ -2959,15 +3024,66 @@ function getModelCatalogue() {
   }
 }
 
+function getLocalAiBenchmarkCachePath() {
+  return path.join(app.getPath('userData'), 'model-catalogue', 'local-ai-benchmarks.json');
+}
+
+function readLocalAiBenchmarkCache() {
+  try {
+    const parsed = JSON.parse(fsSync.readFileSync(getLocalAiBenchmarkCachePath(), 'utf8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeLocalAiBenchmarkCache(cache) {
+  const cachePath = getLocalAiBenchmarkCachePath();
+  fsSync.mkdirSync(path.dirname(cachePath), { recursive: true });
+  fsSync.writeFileSync(cachePath, `${JSON.stringify(cache, null, 2)}\n`, 'utf8');
+}
+
+function getLocalAiBenchmarkCacheKey(model, profile = getLocalSystemProfile()) {
+  const recommendation = recommendFromCatalogue(getModelCatalogue(), profile);
+  const optimisationProfile = recommendation.ai.modelOptimisationProfile;
+
+  return getBenchmarkCacheKey(model, optimisationProfile);
+}
+
+async function benchmarkLocalAiModel(modelId = getPreferredLocalAiModelId(), { timeoutMs = 12_000 } = {}) {
+  const service = getLocalLlmService();
+  const model = service.getModelById(modelId);
+
+  if (!model) {
+    throw new Error('Requested local AI model is not available for this machine.');
+  }
+
+  const profile = getLocalSystemProfile();
+  const cacheKey = getLocalAiBenchmarkCacheKey(model, profile);
+  const benchmark = await service.benchmark(model.id, { timeoutMs });
+  const cache = readLocalAiBenchmarkCache();
+  cache[cacheKey] = {
+    ...benchmark,
+    createdAtMs: Date.now(),
+    machineFingerprint: recommendFromCatalogue(getModelCatalogue(), profile).ai.modelOptimisationProfile.machineFingerprint,
+    modelId: model.id,
+    quantisation: model.quantisation,
+    runtime: model.runtime
+  };
+  writeLocalAiBenchmarkCache(cache);
+
+  return benchmark;
+}
+
 let liveModelCatalogueRefreshPromise = null;
 let onboardingLiveModelCatalogueRefreshAttempted = false;
 
 async function refreshLiveModelCatalogue({ includeStatus = true, resetRuntime = true, timeoutMs = 0 } = {}) {
-  const bundledCatalogue = loadBestModelCatalogue({
-    allowLive: false,
+  const baseCatalogue = loadBestModelCatalogue({
+    allowLive: true,
     userDataPath: app.getPath('userData')
   });
-  const refreshTask = refreshModelCatalogue(bundledCatalogue)
+  const refreshTask = refreshModelCatalogue(baseCatalogue)
     .then((result) => ({
       result,
       livePath: writeLiveModelCatalogue(app.getPath('userData'), result.catalogue)
@@ -2976,10 +3092,11 @@ async function refreshLiveModelCatalogue({ includeStatus = true, resetRuntime = 
     ? await withTimeout(refreshTask, timeoutMs, 'Model catalogue refresh timed out.')
     : await refreshTask;
 
+  writeSetupState({ transcriptionRecommendation: null });
+
   if (resetRuntime) {
     localLlmService?.stop?.();
     localLlmService = null;
-    writeSetupState({ transcriptionRecommendation: null });
   }
 
   return {
@@ -3048,6 +3165,85 @@ async function refreshLiveModelCatalogueAfterUpdateCheck() {
   }
 
   await liveModelCatalogueRefreshPromise;
+  localLlmService?.stop?.();
+  localLlmService = null;
+  await reconcileAutoUpdatedModels();
+}
+
+async function reconcileAutoUpdatedModels() {
+  const settings = readProfileSettings();
+
+  if (process.env.CAUL_DISABLE_MODEL_AUTO_DOWNLOAD === '1') {
+    return;
+  }
+
+  if (captureStatus.state !== 'idle' || localTranscriptionActive) {
+    return;
+  }
+
+  if (settings.autoUpdateTranscriptionModel !== false) {
+    try {
+      await reconcileAutoUpdatedTranscriptionModel();
+    } catch (error) {
+      console.error('Automatic transcription model update failed:', error);
+    }
+  }
+
+  if (settings.autoUpdateAiModel !== false && getSelectedAiProvider() === 'local') {
+    try {
+      await reconcileAutoUpdatedLocalAiModel();
+    } catch (error) {
+      console.error('Automatic local AI model update failed:', error);
+    }
+  }
+}
+
+async function reconcileAutoUpdatedTranscriptionModel() {
+  const recommendation = getTranscriptionRecommendation();
+  const recommendedModelId = recommendation.recommendedModel?.id;
+
+  if (!recommendedModelId || !['parakeet', 'moonshine-tiny'].includes(recommendedModelId)) {
+    return;
+  }
+
+  const currentModelId = getSelectedLocalTranscriptionModelId();
+  if (currentModelId === recommendedModelId && validateLocalTranscriptionModel(recommendedModelId)) {
+    return;
+  }
+
+  const status = await downloadLocalTranscriptionModel(recommendedModelId);
+  if (status.installed && status.modelId === recommendedModelId) {
+    setPreferredLocalTranscriptionModel(recommendedModelId);
+  }
+}
+
+async function reconcileAutoUpdatedLocalAiModel() {
+  const recommendation = getAiRecommendation();
+  const recommendedModelId = recommendation.recommendedModel?.id;
+
+  if (recommendation.recommended !== 'local' || !recommendedModelId) {
+    return;
+  }
+
+  const model = getModelCatalogue().aiResponse.find((candidate) => candidate.id === recommendedModelId) ?? null;
+  const fit = model ? getCurrentMemoryFit(model, getLocalSystemProfile()) : { ok: false };
+
+  if (!fit.ok) {
+    return;
+  }
+
+  const currentModelId = getSelectedLocalAiModelId();
+  if (
+    currentModelId === recommendedModelId
+    && ['ready', 'warm', 'warming'].includes(getLocalLlmService().status(recommendedModelId).status)
+  ) {
+    return;
+  }
+
+  const status = await downloadLocalAiModel(recommendedModelId);
+  if (status.status === 'ready' && status.model?.id === recommendedModelId) {
+    setPreferredLocalAiModel(recommendedModelId);
+  }
 }
 
 function withTimeout(promise, timeoutMs, message) {
@@ -3078,8 +3274,29 @@ function getLocalLlmService() {
   return localLlmService;
 }
 
+function refreshLocalLlmService() {
+  localLlmService?.stop?.();
+  localLlmService = createLocalLlmService({
+    app,
+    catalogue: getModelCatalogue(),
+    emitStatus: emitLocalLlmStatus
+  });
+
+  return localLlmService;
+}
+
+function getLocalLlmServiceForModel(modelId) {
+  const service = getLocalLlmService();
+
+  if (!modelId || service.getModelById(modelId)) {
+    return service;
+  }
+
+  return refreshLocalLlmService();
+}
+
 function emitLocalLlmStatus() {
-  const status = getLocalLlmService().status();
+  const status = getLocalLlmService().status(getSelectedLocalAiModelId());
 
   BrowserWindow.getAllWindows().forEach((window) => {
     window.webContents.send('caul:local-llm-status', status);
@@ -3088,9 +3305,143 @@ function emitLocalLlmStatus() {
 
 function getLocalSystemProfile() {
   const profile = buildSystemProfile();
-  profile.localRuntimes.caulLlamaCpp = getLocalLlmService().status();
+  profile.localRuntimes.caulLlamaCpp = getLocalLlmService().status(getSelectedLocalAiModelId());
 
   return profile;
+}
+
+function getSelectedLocalAiModelId() {
+  const modelId = readProfileSettings().selectedLocalAiModel;
+  const service = getLocalLlmService();
+
+  return typeof modelId === 'string' && service.getModelById(modelId) ? modelId : null;
+}
+
+function getPreferredLocalAiModelId() {
+  return getSelectedLocalAiModelId() ?? getLocalLlmService().getRecommendedModel()?.id ?? null;
+}
+
+function setPreferredLocalAiModel(modelId) {
+  const service = getLocalLlmServiceForModel(modelId);
+  const model = service.getModelById(modelId);
+
+  if (!model) {
+    throw new Error('Requested local AI model is not available for this machine.');
+  }
+
+  updateProfileSettings({ selectedLocalAiModel: model.id });
+  emitLocalLlmStatus();
+  if (getSelectedAiProvider() === 'local') {
+    void warmSelectedLocalAiIfReady('model-selected');
+  }
+
+  return service.status(model.id);
+}
+
+async function downloadLocalAiModel(modelId = getPreferredLocalAiModelId()) {
+  const service = getLocalLlmServiceForModel(modelId);
+  const model = service.getModelById(modelId);
+
+  if (!model) {
+    throw new Error('Requested local AI model is not available for this machine.');
+  }
+
+  const status = await service.download(model.id);
+  updateProfileSettings({ selectedLocalAiModel: model.id });
+  emitLocalLlmStatus();
+  if (getSelectedAiProvider() === 'local') {
+    void warmSelectedLocalAiIfReady('download-complete');
+  }
+
+  return status;
+}
+
+function isLocalAiRuntimeInstalled(status) {
+  return Boolean(
+    status
+    && status.runtime?.supported
+    && status.runtime?.installed
+    && status.model?.installed
+  );
+}
+
+function isLocalAiRuntimeWarmable(status) {
+  return Boolean(
+    isLocalAiRuntimeInstalled(status)
+    && status.status !== 'downloading'
+    && status.status !== 'missing'
+  );
+}
+
+async function warmSelectedLocalAiIfReady(reason = 'startup') {
+  if (getSelectedAiProvider() !== 'local') {
+    return getLocalLlmService().status(getSelectedLocalAiModelId());
+  }
+
+  const modelId = getPreferredLocalAiModelId();
+  const service = getLocalLlmServiceForModel(modelId);
+  const status = service.status(modelId);
+
+  if (!isLocalAiRuntimeWarmable(status)) {
+    return status;
+  }
+
+  try {
+    return await service.warm(modelId);
+  } catch (error) {
+    console.error(`Local AI warm-up failed during ${reason}:`, error);
+    emitLocalLlmStatus();
+    return service.status(modelId);
+  }
+}
+
+async function adaptLocalAiModelAfterBenchmark(modelId) {
+  if (captureStatus.state !== 'idle' || localTranscriptionActive) {
+    return;
+  }
+
+  const benchmark = await benchmarkLocalAiModel(modelId).catch((error) => ({
+    failureReason: error.message,
+    modelId,
+    ok: false,
+    status: 'failed'
+  }));
+
+  if (isLocalAiBenchmarkLiveCallReady(benchmark)) {
+    return;
+  }
+
+  const nextRecommendation = getAiRecommendation();
+  const fallbackModelId = nextRecommendation.recommended === 'local'
+    && nextRecommendation.recommendedModel?.id !== modelId
+    ? nextRecommendation.recommendedModel.id
+    : nextRecommendation.fallbackCandidateId;
+
+  if (!fallbackModelId || fallbackModelId === modelId) {
+    return;
+  }
+
+  const fallbackModel = getLocalLlmService().getModelById(fallbackModelId);
+  const fit = fallbackModel ? getCurrentMemoryFit(fallbackModel, getLocalSystemProfile()) : { ok: false };
+  if (!fallbackModel || !fit.ok) {
+    return;
+  }
+
+  const fallbackStatus = await downloadLocalAiModel(fallbackModel.id);
+  if (fallbackStatus.status === 'ready' || fallbackStatus.status === 'warm') {
+    await benchmarkLocalAiModel(fallbackModel.id).catch((error) => {
+      console.error('Fallback local AI benchmark failed:', error);
+    });
+  }
+}
+
+function isLocalAiBenchmarkLiveCallReady(benchmark) {
+  return Boolean(
+    benchmark?.ok
+    && Number(benchmark.firstTokenMs ?? Infinity) <= localAiFirstTokenTargetMs
+    && Number(benchmark.totalMs ?? Infinity) <= localAiTotalResponseTargetMs
+    && Number(benchmark.tokensPerSecond ?? 0) >= 4
+  );
 }
 
 function getSelectedAiProvider(fallbackProvider = defaultAiProvider) {
@@ -3103,6 +3454,9 @@ function setSelectedAiProvider(provider) {
   const selectedAiProvider = provider === 'cloud' ? 'cloud' : 'local';
 
   updateProfileSettings({ selectedAiProvider });
+  if (selectedAiProvider === 'local') {
+    void warmSelectedLocalAiIfReady('provider-selected');
+  }
 
   return getOnboardingStatus();
 }
@@ -3773,9 +4127,7 @@ async function getOnboardingStatus({ refreshCatalogue = true } = {}) {
   const profileSettings = readProfileSettings();
   const selectedLocalTranscriptionModel = getSelectedLocalTranscriptionModelId();
   const selectedAiProvider = ai.provider;
-  const localAiReady = ai.localRuntime?.status === 'ready'
-    && Boolean(ai.localRuntime?.runtime?.installed)
-    && Boolean(ai.localRuntime?.model?.installed);
+  const localAiReady = isLocalAiRuntimeInstalled(ai.localRuntime);
   const cloudAiReady = Boolean(pi.connected);
   const aiReady = selectedAiProvider === 'local' ? localAiReady : cloudAiReady;
   const transcriptionModelReady = Boolean(
@@ -4117,6 +4469,10 @@ function prepareLocalTranscriptionCapture(options) {
     return { ok: false };
   }
 
+  writeTranscriptDebugLog('backend.prepare_requested', {
+    selectedSources
+  });
+
   localTranscriptionProcess.stdin.write(`${JSON.stringify({
     type: 'prepare',
     sources: selectedSources
@@ -4193,6 +4549,10 @@ function startLocalTranscriptionCapture(options) {
   if (!localTranscriptionProcess?.stdin?.writable) {
     throw new Error('Local transcription backend is unavailable.');
   }
+
+  writeTranscriptDebugLog('backend.start_requested', {
+    selectedSources
+  });
 
   localTranscriptionProcess.stdin.write(`${JSON.stringify({
     type: 'start',
@@ -4606,7 +4966,7 @@ async function requestLlmResponse(transcript, options = {}) {
   const text = selectedAiProvider === 'local'
     ? await getLocalLlmService().request(
       await buildLocalLlmPromptWithAttachments(trimmedTranscript, attachments),
-      { onDelta }
+      { modelId: getSelectedLocalAiModelId(), onDelta }
     )
     : await requestCloudLlmResponse(trimmedTranscript, { ...options, attachments }, onDelta);
   emitTranscriptionEvent({ type: 'llm-response', requestId, text });
@@ -7471,7 +7831,7 @@ function createWindow() {
             const events = [];
             const snapshots = [];
             const eventStartedAt = Date.now();
-            const statusPattern = /^(Not listening\\.|Requesting audio access\\.\\.\\.|Starting local Parakeet\\.\\.\\.|Loading local Parakeet\\.\\.\\.|Listening with local Parakeet\\.\\.\\.|Listening\\. Waiting for speech\\.\\.\\.|Speech detected\\.\\.\\.|Transcribing local audio\\.\\.\\.|local Parakeet capture started|local Parakeet loaded|reading default output device|creating Core Audio process tap|creating private aggregate device|reading Core Audio tap format|Core Audio tap format .*|creating aggregate device IO callback|starting aggregate device|Core Audio capture started|starting system audio capture|starting microphone capture|microphone capture started)$/;
+            const statusPattern = /^(Not listening\\.|Requesting audio access\\.\\.\\.|Starting local Parakeet\\.\\.\\.|Loading local Parakeet\\.\\.\\.|Listening with local Parakeet\\.\\.\\.|Listening\\. Waiting for speech\\.\\.\\.|Speech detected\\.\\.\\.|Transcribing local audio\\.\\.\\.|local Parakeet capture started|local Parakeet loaded|checking ScreenCaptureKit permission|reading ScreenCaptureKit shareable content|starting ScreenCaptureKit audio stream|ScreenCaptureKit format .*|ScreenCaptureKit audio capture started|reading default output device|creating Core Audio process tap|creating private aggregate device|reading Core Audio tap format|Core Audio tap format .*|creating aggregate device IO callback|starting aggregate device|Core Audio capture started|starting system audio capture|starting microphone capture|microphone capture started)$/;
             const transcriptPlaceholder = 'Your live transcript will appear here once you start listening.';
             let previousLongest = '';
             let clearCount = 0;
@@ -7938,6 +8298,7 @@ app.whenReady().then(async () => {
     startLocalTranscriptionWarmDaemon();
     void prepareLocalTranscriptionOnStartup();
   }
+  void warmSelectedLocalAiIfReady('startup');
   warmPersistentPiRpcBridge();
   updatePrivateOverlayState((state) => ({
     ...state,
@@ -8193,15 +8554,19 @@ ipcMain.handle('caul:pi-save-model', (_event, request) => {
 
 ipcMain.handle('caul:ai-provider', (_event, request) => setSelectedAiProvider(request?.provider));
 
-ipcMain.handle('caul:local-llm-status', () => getLocalLlmService().status());
+ipcMain.handle('caul:local-llm-status', () => getLocalLlmService().status(getSelectedLocalAiModelId()));
 
-ipcMain.handle('caul:local-llm-download', () => {
+ipcMain.handle('caul:local-llm-download', (_event, request) => {
   if (onboardingLocalAiLagSmoke) {
     return new Promise(() => {});
   }
 
-  return getLocalLlmService().download();
+  return downloadLocalAiModel(request?.modelId);
 });
+
+ipcMain.handle('caul:local-llm-set-model', (_event, request) => setPreferredLocalAiModel(request?.modelId));
+
+ipcMain.handle('caul:local-llm-benchmark', (_event, request) => benchmarkLocalAiModel(request?.modelId));
 
 ipcMain.handle('caul:local-llm-cancel-download', () => getLocalLlmService().cancelDownload());
 

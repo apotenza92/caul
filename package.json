@@ -62,6 +62,7 @@
     "models:audit": "node scripts/audit-model-catalogue.mjs",
     "models:recommend": "node scripts/recommend-models.mjs",
     "models:refresh": "node scripts/refresh-model-catalogue.mjs",
+    "diagnose:macos-audio-route": "npm run macos-audio:build && node scripts/diagnose-macos-audio-route.mjs",
     "smoke:muted-browser-system-audio": "npm run macos-audio:build && node scripts/smoke-muted-browser-system-audio.mjs",
     "smoke:sck-browser-system-audio": "npm run macos-audio:build && node scripts/smoke-sck-browser-system-audio.mjs",
     "smoke:core-audio-browser-system-audio": "npm run macos-audio:build && node scripts/smoke-core-audio-browser-system-audio.mjs",
