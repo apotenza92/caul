@@ -13,6 +13,14 @@ const liveSourceDefinitions = {
     name: 'Hugging Face Hub API',
     url: 'https://huggingface.co/docs/hub/api'
   },
+  huggingFaceGgufDiscovery: {
+    name: 'Hugging Face GGUF discovery',
+    url: 'https://huggingface.co/models?search=GGUF+Instruct'
+  },
+  huggingFaceMlxDiscovery: {
+    name: 'Hugging Face MLX discovery',
+    url: 'https://huggingface.co/models?search=MLX+4bit+Instruct'
+  },
   googleGemma: {
     name: 'Google DeepMind Gemma',
     url: 'https://deepmind.google/models/gemma/gemma-4/'
@@ -70,9 +78,41 @@ const liveModelSources = [
   },
   {
     artificialAnalysisUrl: null,
-    hfRepo: 'bartowski/gemma-4-12B-it-GGUF',
-    id: 'gemma-4-12b-it-q4_k_m',
-    preferredFileName: 'gemma-4-12B-it-Q4_K_M.gguf'
+    hfRepo: 'google/gemma-4-12B-it-qat-q4_0-gguf',
+    id: 'gemma-4-12b-it-q4_0',
+    localCandidate: {
+      benchmark: {
+        latencyBand: 'balanced-local',
+        preferenceSource: 'LMArena and Gemma 4 family comparisons',
+        qualityBand: 'strong-local',
+        qualitySource: 'Google DeepMind Gemma 4 12B launch benchmarks and Artificial Analysis Gemma 4 family benchmarks',
+        speedSource: 'Google DeepMind Gemma 4 12B local hardware guidance; Caul smoke pending'
+      },
+      caulSmokeStatus: 'live-metadata-only',
+      cloud: false,
+      contextWindowTokens: 131072,
+      defaultPriority: 0,
+      downloadSizeGb: 6.5,
+      estimatedMemoryGb: 12,
+      fileName: 'gemma-4-12b-it-qat-q4_0.gguf',
+      downloadUrl: 'https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-gguf/resolve/main/gemma-4-12b-it-qat-q4_0.gguf',
+      implemented: true,
+      licence: 'Apache-2.0',
+      local: true,
+      minimumCpuCores: 8,
+      minimumFreeMemoryGb: 10,
+      minimumTotalMemoryGb: 16,
+      minimumVramGb: 0,
+      modelSizeB: 12,
+      name: 'Gemma 4 12B IT Q4_0',
+      openWeights: true,
+      platforms: ['darwin', 'win32', 'linux'],
+      quantisation: ['Q4_0'],
+      reasoningSupport: true,
+      runtime: 'llama.cpp',
+      toolSupport: true
+    },
+    preferredFileName: 'gemma-4-12b-it-qat-q4_0.gguf'
   },
   {
     artificialAnalysisUrl: 'https://artificialanalysis.ai/models/qwen3-8b-instruct',
@@ -111,6 +151,18 @@ const liveModelSources = [
   }
 ];
 
+const liveDiscoveryQueries = [
+  'GGUF Instruct',
+  'GGUF Chat'
+];
+
+const liveMlxDiscoveryQueries = [
+  'MLX 4bit Instruct',
+  'MLX LM 4bit'
+];
+
+const maxDiscoveredModels = 8;
+
 async function refreshModelCatalogue(catalogue, {
   fetchFn = fetchUrl,
   now = new Date()
@@ -123,6 +175,8 @@ async function refreshModelCatalogue(catalogue, {
   next.sources = {
     ...next.sources,
     liveArtificialAnalysis: liveSourceDefinitions.artificialAnalysis,
+    liveHuggingFaceGgufDiscovery: liveSourceDefinitions.huggingFaceGgufDiscovery,
+    liveHuggingFaceMlxDiscovery: liveSourceDefinitions.huggingFaceMlxDiscovery,
     liveLmArena: liveSourceDefinitions.lmArena,
     liveHuggingFace: liveSourceDefinitions.huggingFace,
     liveGoogleGemma: liveSourceDefinitions.googleGemma,
@@ -137,6 +191,8 @@ async function refreshModelCatalogue(catalogue, {
     refreshGemmaOfficialSource(next, { fetchFn }),
     refreshLmArenaSource({ fetchFn }),
     refreshLiteRtLmRuntimeSource({ fetchFn }),
+    discoverHuggingFaceGgufModels(next, { fetchFn, reviewedAt }),
+    discoverHuggingFaceMlxModels(next, { fetchFn, reviewedAt }),
     refreshGitHubRuntimeSource(liveSourceDefinitions.llamaCpp, { fetchFn }),
     refreshGitHubRuntimeSource(liveSourceDefinitions.mlxLm, { fetchFn }),
     ...modelTasks
@@ -151,6 +207,385 @@ async function refreshModelCatalogue(catalogue, {
     reviewedAt,
     sourceReports
   };
+}
+
+async function discoverHuggingFaceGgufModels(catalogue, { fetchFn, reviewedAt }) {
+  const reports = [];
+  const discoveredRepos = new Set();
+  let addedCount = 0;
+
+  for (const query of liveDiscoveryQueries) {
+    const searchUrl = `https://huggingface.co/api/models?search=${encodeURIComponent(query)}&sort=downloads&direction=-1&limit=12`;
+
+    try {
+      const results = await fetchJson(fetchFn, searchUrl);
+      const models = Array.isArray(results) ? results : [];
+      reports.push({
+        ok: true,
+        source: liveSourceDefinitions.huggingFaceGgufDiscovery.name,
+        url: searchUrl,
+        detail: `${models.length} ${query} search results`
+      });
+
+      for (const model of models) {
+        const repoId = String(model.modelId ?? model.id ?? '').trim();
+        if (!repoId || discoveredRepos.has(repoId) || addedCount >= maxDiscoveredModels) {
+          continue;
+        }
+
+        discoveredRepos.add(repoId);
+        const added = await maybeAddDiscoveredGgufModel(catalogue, repoId, {
+          fetchFn,
+          reviewedAt,
+          searchMetadata: model
+        });
+
+        if (added) {
+          addedCount += 1;
+        }
+      }
+    } catch (error) {
+      reports.push({
+        ok: false,
+        source: liveSourceDefinitions.huggingFaceGgufDiscovery.name,
+        url: searchUrl,
+        detail: error.message
+      });
+    }
+  }
+
+  reports.push({
+    ok: true,
+    source: liveSourceDefinitions.huggingFaceGgufDiscovery.name,
+    url: liveSourceDefinitions.huggingFaceGgufDiscovery.url,
+    detail: `discovered ${addedCount} new public GGUF candidate${addedCount === 1 ? '' : 's'}`
+  });
+
+  return reports;
+}
+
+async function maybeAddDiscoveredGgufModel(catalogue, repoId, { fetchFn, reviewedAt, searchMetadata }) {
+  if (catalogue.aiResponse.some((model) => model.providerModelId === repoId || model.provenanceUrl === `https://huggingface.co/${repoId}`)) {
+    return false;
+  }
+
+  const metadata = await fetchJson(fetchFn, `https://huggingface.co/api/models/${repoId}`).catch(() => searchMetadata);
+  if (!isPublicHuggingFaceModel(metadata)) {
+    return false;
+  }
+
+  const ggufFiles = findPreferredGgufFiles(metadata);
+  if (ggufFiles.length === 0) {
+    return false;
+  }
+
+  for (const ggufFile of ggufFiles) {
+    const downloadUrl = `https://huggingface.co/${repoId}/resolve/main/${encodeURIComponent(ggufFile.rfilename)}`;
+    const downloadSizeGb = await fetchContentLengthGb(fetchFn, downloadUrl).catch(() => inferDownloadSizeGb(repoId, ggufFile.rfilename));
+    const modelSizeB = inferModelSizeB(repoId, ggufFile.rfilename, downloadSizeGb);
+    const quantisation = getGgufQuantisation(ggufFile.rfilename);
+    const modelId = getUniqueModelId(catalogue, `hf-${repoId}-${ggufFile.rfilename}`);
+
+    catalogue.aiResponse.push({
+      benchmark: {
+        latencyBand: modelSizeB <= 4 || quantisation.memoryFactor <= 0.42 ? 'fast-local' : 'balanced-local',
+        preferenceSource: 'Hugging Face GGUF discovery; LMArena family comparison pending',
+        qualityBand: modelSizeB >= 11 && quantisation.qualityPenalty <= 1 ? 'strong-local' : modelSizeB >= 7 ? 'balanced-local' : 'small-local',
+        qualitySource: 'Hugging Face public GGUF discovery; independent benchmark review pending',
+        speedSource: `llama.cpp GGUF ${quantisation.name} runtime compatibility metadata`
+      },
+      caulSmokeStatus: 'live-metadata-only',
+      cloud: false,
+      contextWindowTokens: inferContextWindowTokens(repoId, ggufFile.rfilename),
+      defaultPriority: quantisation.defaultPriority,
+      downloadSizeGb,
+      downloadUrl,
+      estimatedMemoryGb: inferEstimatedMemoryGb(modelSizeB, downloadSizeGb, quantisation),
+      fileName: ggufFile.rfilename,
+      id: modelId,
+      implemented: true,
+      licence: getHuggingFaceLicence(metadata),
+      local: true,
+      minimumCpuCores: modelSizeB >= 11 ? 8 : modelSizeB >= 7 ? 6 : 4,
+      minimumFreeMemoryGb: inferMinimumFreeMemoryGb(modelSizeB, downloadSizeGb, quantisation),
+      minimumTotalMemoryGb: inferMinimumTotalMemoryGb(modelSizeB, quantisation),
+      minimumVramGb: 0,
+      modelSizeB,
+      name: prettifyDiscoveredModelName(repoId, ggufFile.rfilename),
+      openWeights: true,
+      platforms: ['darwin', 'win32', 'linux'],
+      provenanceUrl: `https://huggingface.co/${repoId}`,
+      providerModelId: repoId,
+      quantisation: [quantisation.name],
+      reasoningSupport: /\b(r1|reasoning|qwen3|deepseek)\b/i.test(`${repoId} ${ggufFile.rfilename}`),
+      reviewedAt,
+      runtime: 'llama.cpp',
+      toolSupport: false
+    });
+  }
+
+  return ggufFiles.length > 0;
+}
+
+async function discoverHuggingFaceMlxModels(catalogue, { fetchFn, reviewedAt }) {
+  const reports = [];
+  const discoveredRepos = new Set();
+  let addedCount = 0;
+
+  for (const query of liveMlxDiscoveryQueries) {
+    const searchUrl = `https://huggingface.co/api/models?search=${encodeURIComponent(query)}&sort=downloads&direction=-1&limit=12`;
+
+    try {
+      const results = await fetchJson(fetchFn, searchUrl);
+      const models = Array.isArray(results) ? results : [];
+      reports.push({
+        ok: true,
+        source: liveSourceDefinitions.huggingFaceMlxDiscovery.name,
+        url: searchUrl,
+        detail: `${models.length} ${query} search results`
+      });
+
+      for (const model of models) {
+        const repoId = String(model.modelId ?? model.id ?? '').trim();
+        if (!repoId || discoveredRepos.has(repoId) || addedCount >= maxDiscoveredModels) {
+          continue;
+        }
+
+        discoveredRepos.add(repoId);
+        const added = await maybeAddDiscoveredMlxModel(catalogue, repoId, {
+          fetchFn,
+          reviewedAt,
+          searchMetadata: model
+        });
+
+        if (added) {
+          addedCount += 1;
+        }
+      }
+    } catch (error) {
+      reports.push({
+        ok: false,
+        source: liveSourceDefinitions.huggingFaceMlxDiscovery.name,
+        url: searchUrl,
+        detail: error.message
+      });
+    }
+  }
+
+  reports.push({
+    ok: true,
+    source: liveSourceDefinitions.huggingFaceMlxDiscovery.name,
+    url: liveSourceDefinitions.huggingFaceMlxDiscovery.url,
+    detail: `discovered ${addedCount} new public MLX candidate${addedCount === 1 ? '' : 's'}`
+  });
+
+  return reports;
+}
+
+async function maybeAddDiscoveredMlxModel(catalogue, repoId, { fetchFn, reviewedAt, searchMetadata }) {
+  if (catalogue.aiResponse.some((model) => model.providerModelId === repoId || model.provenanceUrl === `https://huggingface.co/${repoId}`)) {
+    return false;
+  }
+
+  const metadata = await fetchJson(fetchFn, `https://huggingface.co/api/models/${repoId}`).catch(() => searchMetadata);
+  if (!isPublicHuggingFaceModel(metadata) || !isMlxModelMetadata(repoId, metadata)) {
+    return false;
+  }
+
+  const modelSizeB = inferModelSizeB(repoId, '', 0);
+  const quantisation = /4bit|4-bit|int4/i.test(`${repoId} ${(metadata.tags ?? []).join(' ')}`) ? 'MLX-4bit' : 'MLX';
+  const downloadSizeGb = inferDownloadSizeGb(repoId, '');
+
+  catalogue.aiResponse.push({
+    benchmark: {
+      latencyBand: modelSizeB <= 4 ? 'fast-local' : 'balanced-local',
+      preferenceSource: 'Hugging Face MLX discovery; LMArena family comparison pending',
+      qualityBand: modelSizeB >= 11 ? 'strong-local' : modelSizeB >= 7 ? 'balanced-local' : 'small-local',
+      qualitySource: 'Hugging Face public MLX discovery; independent benchmark review pending',
+      speedSource: 'MLX LM Apple Silicon runtime compatibility metadata'
+    },
+    caulSmokeStatus: 'live-metadata-only',
+    cloud: false,
+    contextWindowTokens: inferContextWindowTokens(repoId, ''),
+    defaultPriority: 7,
+    downloadSizeGb,
+    estimatedMemoryGb: inferEstimatedMemoryGb(modelSizeB, downloadSizeGb, { memoryFactor: quantisation === 'MLX-4bit' ? 0.48 : 0.7 }),
+    id: getUniqueModelId(catalogue, `hf-mlx-${repoId}`),
+    implemented: true,
+    licence: getHuggingFaceLicence(metadata),
+    local: true,
+    minimumCpuCores: modelSizeB >= 11 ? 8 : modelSizeB >= 7 ? 6 : 4,
+    minimumFreeMemoryGb: inferMinimumFreeMemoryGb(modelSizeB, downloadSizeGb, { memoryFactor: quantisation === 'MLX-4bit' ? 0.48 : 0.7 }),
+    minimumTotalMemoryGb: inferMinimumTotalMemoryGb(modelSizeB, { memoryFactor: quantisation === 'MLX-4bit' ? 0.48 : 0.7 }),
+    minimumVramGb: 0,
+    modelSizeB,
+    name: prettifyDiscoveredModelName(repoId, repoId.split('/').pop() ?? repoId),
+    openWeights: true,
+    platforms: ['darwin'],
+    provenanceUrl: `https://huggingface.co/${repoId}`,
+    providerModelId: repoId,
+    quantisation: [quantisation],
+    reasoningSupport: /\b(r1|reasoning|qwen3|deepseek)\b/i.test(repoId),
+    reviewedAt,
+    runtime: 'mlx-lm',
+    toolSupport: false
+  });
+
+  return true;
+}
+
+function isPublicHuggingFaceModel(metadata) {
+  return metadata
+    && metadata.private !== true
+    && metadata.gated !== true
+    && String(metadata.disabled ?? '').toLowerCase() !== 'true';
+}
+
+function findPreferredGgufFiles(metadata) {
+  const siblings = Array.isArray(metadata?.siblings) ? metadata.siblings : [];
+  const ggufFiles = siblings.filter((sibling) => /\.gguf$/i.test(String(sibling.rfilename ?? '')));
+  const instructFiles = ggufFiles.filter((sibling) => /instruct|chat|it/i.test(sibling.rfilename));
+  const candidates = instructFiles.length > 0 ? instructFiles : ggufFiles;
+  const byQuantisation = new Map();
+
+  for (const sibling of candidates) {
+    const quantisation = getGgufQuantisation(sibling.rfilename);
+    if (!quantisation.supported || byQuantisation.has(quantisation.name)) {
+      continue;
+    }
+
+    byQuantisation.set(quantisation.name, sibling);
+  }
+
+  return ['Q3_K_M', 'Q4_0', 'Q4_K_M', 'Q5_K_M', 'Q6_K']
+    .map((quantisation) => byQuantisation.get(quantisation))
+    .filter(Boolean)
+    .slice(0, 3);
+}
+
+function getGgufQuantisation(fileName) {
+  const value = String(fileName ?? '');
+  if (/q3_k_m/i.test(value)) {
+    return { defaultPriority: 2, memoryFactor: 0.38, name: 'Q3_K_M', qualityPenalty: 2, supported: true };
+  }
+  if (/q4_k_m/i.test(value)) {
+    return { defaultPriority: 4, memoryFactor: 0.5, name: 'Q4_K_M', qualityPenalty: 1, supported: true };
+  }
+  if (/q4_0/i.test(value)) {
+    return { defaultPriority: 3, memoryFactor: 0.52, name: 'Q4_0', qualityPenalty: 1, supported: true };
+  }
+  if (/q5_k_m/i.test(value)) {
+    return { defaultPriority: 5, memoryFactor: 0.62, name: 'Q5_K_M', qualityPenalty: 0, supported: true };
+  }
+  if (/q6_k/i.test(value)) {
+    return { defaultPriority: 3, memoryFactor: 0.74, name: 'Q6_K', qualityPenalty: 0, supported: true };
+  }
+
+  return { defaultPriority: 0, memoryFactor: 0.5, name: 'GGUF', qualityPenalty: 2, supported: false };
+}
+
+function inferDownloadSizeGb(repoId, fileName) {
+  const sizeB = inferModelSizeB(repoId, fileName, 0);
+
+  return Math.round(Math.max(1, sizeB * 0.55) * 10) / 10;
+}
+
+function inferModelSizeB(repoId, fileName, downloadSizeGb) {
+  const text = `${repoId} ${fileName}`;
+  const match = text.match(/(?:^|[-_\s])(\d+(?:\.\d+)?)\s*b(?:[-_\s]|$)/i);
+  if (match) {
+    return Number(match[1]);
+  }
+
+  return Math.max(1, Math.round((Number(downloadSizeGb) || 2) * 1.8 * 10) / 10);
+}
+
+function inferEstimatedMemoryGb(modelSizeB, downloadSizeGb, quantisation = { memoryFactor: 0.55 }) {
+  return Math.round(Math.max(downloadSizeGb + 1.5, modelSizeB * quantisation.memoryFactor + 1.5) * 10) / 10;
+}
+
+function inferMinimumFreeMemoryGb(modelSizeB, downloadSizeGb, quantisation = { memoryFactor: 0.55 }) {
+  return Math.round(Math.max(3.5, inferEstimatedMemoryGb(modelSizeB, downloadSizeGb, quantisation) - 0.5) * 10) / 10;
+}
+
+function inferMinimumTotalMemoryGb(modelSizeB, quantisation = { memoryFactor: 0.55 }) {
+  const effectiveSize = modelSizeB * quantisation.memoryFactor;
+
+  if (modelSizeB >= 24) {
+    return 64;
+  }
+
+  if (effectiveSize >= 6) {
+    return 32;
+  }
+
+  if (effectiveSize >= 2.5) {
+    return 16;
+  }
+
+  return 8;
+}
+
+function inferContextWindowTokens(repoId, fileName) {
+  const text = `${repoId} ${fileName}`;
+  const match = text.match(/(?:^|[-_\s])(\d+)\s*k(?:[-_\s]|$)/i);
+
+  return match ? Number(match[1]) * 1000 : 32768;
+}
+
+function getHuggingFaceLicence(metadata) {
+  const tags = Array.isArray(metadata?.tags) ? metadata.tags : [];
+  const licenceTag = tags.find((tag) => String(tag).startsWith('license:'));
+
+  return licenceTag ? normaliseLicenceTag(licenceTag) : 'unknown';
+}
+
+function isMlxModelMetadata(repoId, metadata) {
+  const text = `${repoId} ${(metadata?.tags ?? []).join(' ')}`.toLowerCase();
+
+  return text.includes('mlx') && !text.includes('gguf');
+}
+
+function getUniqueModelId(catalogue, value) {
+  const baseId = toModelId(value).slice(0, 96) || 'hf-gguf-live-model';
+  const existing = new Set(catalogue.aiResponse.map((model) => model.id));
+
+  if (!existing.has(baseId)) {
+    return baseId;
+  }
+
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${baseId}-${index}`;
+    if (!existing.has(candidate)) {
+      return candidate;
+    }
+  }
+
+  return `${baseId}-${Date.now()}`;
+}
+
+function toModelId(value) {
+  return String(value ?? '')
+    .replace(/\.gguf$/i, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-');
+}
+
+function prettifyDiscoveredModelName(repoId, fileName) {
+  const repoName = String(repoId).split('/').pop() ?? repoId;
+  const base = String(fileName).replace(/\.gguf$/i, '') || repoName;
+  const name = base.length >= repoName.length ? base : repoName;
+
+  return name
+    .replace(/[-_]+/g, ' ')
+    .replace(/\bq4 0\b/i, 'Q4_0')
+    .replace(/\bq4 k m\b/i, 'Q4_K_M')
+    .replace(/\bgguf\b/i, 'GGUF')
+    .replace(/\bit\b/i, 'IT')
+    .replace(/\b([a-z])/g, (match) => match.toUpperCase())
+    .trim();
 }
 
 async function refreshLmArenaSource({ fetchFn }) {
@@ -287,7 +722,7 @@ async function refreshGemmaOfficialSource(catalogue, { fetchFn }) {
       detail: hasGemma12B ? 'Gemma 4 personal-computer class confirmed' : 'Gemma 4 12B signal not found'
     };
 
-    const gemma12B = catalogue.aiResponse.find((model) => model.id === 'gemma-4-12b-it-q4_k_m');
+    const gemma12B = catalogue.aiResponse.find((model) => model.id === 'gemma-4-12b-it-q4_0');
     if (gemma12B && hasGemma12B) {
       gemma12B.benchmark.qualitySource = 'Google DeepMind Gemma 4 12B launch benchmarks and Artificial Analysis Gemma 4 family benchmarks';
       gemma12B.benchmark.speedSource = 'Google DeepMind Gemma 4 12B local hardware guidance; Caul smoke pending';

@@ -22,6 +22,13 @@ function createLocalLlmService({
   let serverPort = null;
   let serverModelPath = null;
   let serverStartedAt = 0;
+  let warmState = {
+    error: null,
+    modelId: null,
+    modelPath: null,
+    promise: null,
+    status: null
+  };
 
   function getRoot() {
     return pathModule.join(app.getPath('userData'), 'local-llm');
@@ -51,18 +58,34 @@ function createLocalLlmService({
     return pathModule.join(getRoot(), 'models');
   }
 
-  function getRecommendedModel() {
-    const localModels = catalogue.aiResponse.filter((model) => (
+  function getEligibleLocalModels() {
+    return catalogue.aiResponse.filter((model) => (
       model.local
       && model.implemented
       && model.caulSmokeStatus !== 'failed-basic-instruction'
       && (!Array.isArray(model.platforms) || model.platforms.includes(process.platform))
     ));
+  }
+
+  function getRecommendedModel() {
+    const localModels = getEligibleLocalModels();
     const mlxModel = localModels.find((model) => model.runtime === 'mlx-lm' && process.platform === 'darwin' && process.arch === 'arm64');
 
     return mlxModel
       ?? localModels.find((model) => model.runtime === 'llama.cpp')
       ?? null;
+  }
+
+  function getModelById(modelId) {
+    if (!modelId) {
+      return null;
+    }
+
+    return getEligibleLocalModels().find((model) => model.id === modelId) ?? null;
+  }
+
+  function resolveModel(modelId = null) {
+    return getModelById(modelId) ?? getRecommendedModel();
   }
 
   function getRuntimeAsset() {
@@ -72,7 +95,7 @@ function createLocalLlmService({
     return runtime?.assets?.[key] ?? null;
   }
 
-  function getModelPath(model = getRecommendedModel()) {
+  function getModelPath(model = resolveModel()) {
     if (model?.runtime === 'mlx-lm') {
       return pathModule.join(getMlxModelRoot(), `models--${String(model.providerModelId ?? model.id).replace(/\//g, '--')}`);
     }
@@ -85,8 +108,8 @@ function createLocalLlmService({
     return findFile(getRuntimeRoot(), executableName);
   }
 
-  function status() {
-    const model = getRecommendedModel();
+  function status(modelId = null) {
+    const model = resolveModel(modelId);
     if (model?.runtime === 'mlx-lm') {
       return getMlxStatus(model);
     }
@@ -96,11 +119,13 @@ function createLocalLlmService({
     const runtimeAsset = getRuntimeAsset();
     const runtimeInstalled = Boolean(serverPath);
     const modelInstalled = Boolean(modelPath && fs.existsSync(modelPath));
+    const modelDownloading = Boolean(activeDownload && model?.id === activeDownload.modelId);
+    const warmStatus = getWarmStatus(model, modelPath);
 
     return {
       ok: true,
       provider: 'caul-llama.cpp',
-      status: activeDownload ? 'downloading' : runtimeInstalled && modelInstalled ? 'ready' : 'missing',
+      status: modelDownloading ? 'downloading' : (warmStatus ?? (runtimeInstalled && modelInstalled ? 'ready' : 'missing')),
       runtime: {
         assetName: runtimeAsset?.archiveName ?? null,
         installed: runtimeInstalled,
@@ -117,16 +142,16 @@ function createLocalLlmService({
           sizeGb: model.downloadSizeGb
         }
         : null,
-      progress: activeDownload?.progress
+      progress: modelDownloading ? activeDownload?.progress : undefined
     };
   }
 
-  async function download() {
+  async function download(modelId = null) {
     if (activeDownload) {
-      return status();
+      return status(activeDownload.modelId);
     }
 
-    const model = getRecommendedModel();
+    const model = resolveModel(modelId);
     if (model?.runtime === 'mlx-lm') {
       return downloadMlx(model);
     }
@@ -142,6 +167,7 @@ function createLocalLlmService({
     }
 
     const downloadState = {
+      modelId: model.id,
       progress: {
         downloadedBytes: 0,
         label: 'Preparing local AI runtime',
@@ -152,7 +178,7 @@ function createLocalLlmService({
       request: null
     };
     activeDownload = downloadState;
-    emitStatus(status());
+    emitStatus(status(model.id));
 
     const needsRuntime = !getServerPath();
     const needsModel = !fs.existsSync(getModelPath(model));
@@ -173,34 +199,37 @@ function createLocalLlmService({
       }
     } finally {
       activeDownload = null;
-      emitStatus(status());
+      emitStatus(status(model.id));
     }
 
-    return status();
+    return status(model.id);
   }
 
   function cancelDownload() {
+    const cancelledModelId = activeDownload?.modelId ?? null;
     if (activeDownload?.request) {
       activeDownload.request.destroy(new Error('Local AI download cancelled.'));
     }
 
     activeDownload = null;
-    emitStatus(status());
+    emitStatus(status(cancelledModelId));
 
-    return status();
+    return status(cancelledModelId);
   }
 
-  function getMlxStatus(model = getRecommendedModel()) {
+  function getMlxStatus(model = resolveModel()) {
     const serverPath = getMlxServerPath();
     const modelPath = getModelPath(model);
     const supported = process.platform === 'darwin' && process.arch === 'arm64';
     const runtimeInstalled = Boolean(serverPath);
     const modelInstalled = Boolean(modelPath && hasMlxSnapshot(modelPath));
+    const modelDownloading = Boolean(activeDownload && model?.id === activeDownload.modelId);
+    const warmStatus = getWarmStatus(model, modelPath);
 
     return {
       ok: true,
       provider: 'caul-mlx',
-      status: activeDownload ? 'downloading' : runtimeInstalled && modelInstalled ? 'ready' : 'missing',
+      status: modelDownloading ? 'downloading' : (warmStatus ?? (runtimeInstalled && modelInstalled ? 'ready' : 'missing')),
       runtime: {
         assetName: 'mlx-lm',
         installed: runtimeInstalled,
@@ -217,8 +246,24 @@ function createLocalLlmService({
           sizeGb: model.downloadSizeGb
         }
         : null,
-      progress: activeDownload?.progress
+      progress: modelDownloading ? activeDownload?.progress : undefined
     };
+  }
+
+  function getWarmStatus(model, modelPath) {
+    if (!model || !modelPath) {
+      return null;
+    }
+
+    if (serverProcess && serverModelPath === modelPath && serverPort) {
+      return 'warm';
+    }
+
+    if (warmState.modelId === model.id && warmState.modelPath === modelPath) {
+      return warmState.status;
+    }
+
+    return null;
   }
 
   function getMlxServerPath() {
@@ -240,6 +285,14 @@ function createLocalLlmService({
     );
   }
 
+  function getMlxHfPath() {
+    return pathModule.join(
+      getMlxToolRoot(),
+      process.platform === 'win32' ? 'Scripts' : 'bin',
+      process.platform === 'win32' ? 'hf.exe' : 'hf'
+    );
+  }
+
   function getMlxVersion() {
     const serverPath = getMlxServerPath();
 
@@ -248,7 +301,7 @@ function createLocalLlmService({
 
   async function downloadMlx(model) {
     if (activeDownload) {
-      return status();
+      return status(activeDownload.modelId);
     }
 
     if (process.platform !== 'darwin' || process.arch !== 'arm64') {
@@ -262,6 +315,7 @@ function createLocalLlmService({
     }
 
     const downloadState = {
+      modelId: model.id,
       progress: {
         downloadedBytes: 0,
         label: 'Preparing MLX local AI runtime',
@@ -272,7 +326,7 @@ function createLocalLlmService({
       request: null
     };
     activeDownload = downloadState;
-    emitStatus(status());
+    emitStatus(status(model.id));
 
     try {
       const needsRuntime = !getMlxServerPath();
@@ -293,10 +347,10 @@ function createLocalLlmService({
       }
     } finally {
       activeDownload = null;
-      emitStatus(status());
+      emitStatus(status(model.id));
     }
 
-    return status();
+    return status(model.id);
   }
 
   async function installMlxRuntime(downloadState, progressRange = { end: 100, start: 0 }) {
@@ -309,7 +363,7 @@ function createLocalLlmService({
       phase: 'runtime',
       totalBytes: null
     });
-    emitStatus(status());
+    emitStatus(status(downloadState.modelId));
     await runCommand('uv', [
       'venv',
       '--clear',
@@ -322,7 +376,7 @@ function createLocalLlmService({
       phase: 'runtime',
       totalBytes: null
     });
-    emitStatus(status());
+    emitStatus(status(downloadState.modelId));
     await runCommand('uv', [
       'pip',
       'install',
@@ -337,33 +391,30 @@ function createLocalLlmService({
       phase: 'runtime',
       totalBytes: null
     });
-    emitStatus(status());
+    emitStatus(status(downloadState.modelId));
   }
 
   async function downloadMlxModel(model, progressRange = { end: 100, start: 0 }, downloadState) {
     fs.mkdirSync(getMlxCacheRoot(), { recursive: true });
+    const totalBytes = Math.round((model.downloadSizeGb ?? 0) * 1024 * 1024 * 1024) || null;
     setDownloadProgress(downloadState, {
       downloadedBytes: 0,
       label: 'Downloading local AI model',
       percent: progressRange.start,
       phase: 'model',
-      totalBytes: Math.round((model.downloadSizeGb ?? 0) * 1024 * 1024 * 1024) || null
+      totalBytes
     });
-    emitStatus(status());
-    const port = await ensureMlxServer(model);
-    setDownloadProgress(downloadState, {
-      downloadedBytes: 0,
-      label: 'Preparing local AI model',
-      percent: Math.round(progressRange.start + ((progressRange.end - progressRange.start) * 0.85)),
-      phase: 'model',
-      totalBytes: downloadState.progress.totalBytes
-    });
-    emitStatus(status());
-    await requestChatCompletion(port, 'Reply with exactly: OK', {
-      modelId: model.providerModelId,
-      onDelta: () => undefined
-    });
-    stop();
+    emitStatus(status(downloadState.modelId));
+    const stopProgressPolling = startMlxModelProgressPolling(model, downloadState, progressRange, totalBytes);
+    try {
+      await runCommand(getMlxHfPath(), [
+        'download',
+        model.providerModelId
+      ], 'Failed to download MLX local AI model.', { env: getMlxEnv() });
+      await waitForMlxSnapshotComplete(model, Math.max(60_000, Number(process.env.CAUL_LOCAL_LLM_MODEL_DOWNLOAD_TIMEOUT_MS ?? 30 * 60_000)));
+    } finally {
+      stopProgressPolling();
+    }
     if (!hasMlxSnapshot(getModelPath(model))) {
       throw new Error('MLX local AI model did not download into the Caul model cache.');
     }
@@ -372,9 +423,67 @@ function createLocalLlmService({
       label: 'Downloaded local AI model',
       percent: progressRange.end,
       phase: 'model',
-      totalBytes: downloadState.progress.totalBytes
+      totalBytes
     });
-    emitStatus(status());
+    emitStatus(status(downloadState.modelId));
+  }
+
+  function startMlxModelProgressPolling(model, downloadState, progressRange, totalBytes) {
+    if (!totalBytes) {
+      return () => undefined;
+    }
+
+    let stopped = false;
+    let timer = null;
+    const modelPath = getModelPath(model);
+    const poll = () => {
+      if (stopped) {
+        return;
+      }
+
+      const downloadedBytes = getDirectorySizeBytes(modelPath);
+      const transferPercent = Math.min(99, Math.round((downloadedBytes / totalBytes) * 100));
+      setDownloadProgress(downloadState, {
+        downloadedBytes,
+        label: 'Downloading local AI model',
+        percent: mapDownloadPercent(transferPercent, {
+          overallEnd: progressRange.end,
+          overallStart: progressRange.start
+        }),
+        phase: 'model',
+        totalBytes
+      });
+      emitStatus(status(downloadState.modelId));
+      timer = setTimeout(poll, 750);
+      timer.unref?.();
+    };
+
+    poll();
+
+    return () => {
+      stopped = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
+  }
+
+  function getDirectorySizeBytes(directoryPath) {
+    try {
+      const stats = fs.statSync(directoryPath);
+      if (stats.isFile()) {
+        return stats.size;
+      }
+      if (!stats.isDirectory()) {
+        return 0;
+      }
+
+      return fs.readdirSync(directoryPath).reduce((total, entry) => (
+        total + getDirectorySizeBytes(pathModule.join(directoryPath, entry))
+      ), 0);
+    } catch {
+      return 0;
+    }
   }
 
   function getMlxEnv() {
@@ -383,6 +492,20 @@ function createLocalLlmService({
       HF_HOME: pathModule.join(getMlxCacheRoot(), 'huggingface'),
       UV_CACHE_DIR: pathModule.join(getMlxCacheRoot(), 'uv')
     };
+  }
+
+  async function waitForMlxSnapshotComplete(model, timeoutMs) {
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < timeoutMs) {
+      if (hasMlxSnapshot(getModelPath(model))) {
+        return;
+      }
+
+      await wait(1000);
+    }
+
+    throw new Error('MLX local AI model download did not finish before the timeout.');
   }
 
   async function downloadRuntime(runtimeAsset, downloadState, progressRange = { end: 100, start: 0 }) {
@@ -406,7 +529,7 @@ function createLocalLlmService({
       phase: 'runtime',
       totalBytes: runtimeAsset.sizeBytes ?? null
     });
-    emitStatus(status());
+    emitStatus(status(downloadState.modelId));
     await extractArchive(archivePath, getRuntimeRoot());
     fs.rmSync(archivePath, { force: true });
     const serverPath = getServerPath();
@@ -425,7 +548,7 @@ function createLocalLlmService({
       phase: 'runtime',
       totalBytes: runtimeAsset.sizeBytes ?? null
     });
-    emitStatus(status());
+    emitStatus(status(downloadState.modelId));
   }
 
   async function downloadModel(model, downloadState, progressRange = { end: 100, start: 0 }) {
@@ -486,13 +609,13 @@ function createLocalLlmService({
           if (percent !== lastEmittedPercent || now - lastEmittedAt > 500) {
             lastEmittedPercent = percent;
             lastEmittedAt = now;
-            emitStatus(status());
+            emitStatus(status(downloadState.modelId));
           }
         });
 
         response.pipe(file);
         file.once('finish', () => {
-          emitStatus(status());
+          emitStatus(status(downloadState.modelId));
           file.close(resolve);
         });
       });
@@ -581,8 +704,8 @@ function createLocalLlmService({
     });
   }
 
-  async function request(prompt, { onDelta = () => undefined, signal } = {}) {
-    const model = getRecommendedModel();
+  async function request(prompt, { modelId = null, onDelta = () => undefined, signal } = {}) {
+    const model = resolveModel(modelId);
     if (model?.runtime === 'mlx-lm') {
       return requestMlx(prompt, model, { onDelta, signal });
     }
@@ -596,6 +719,133 @@ function createLocalLlmService({
     const port = await ensureServer(modelPath);
 
     return requestChatCompletion(port, prompt, { onDelta, signal });
+  }
+
+  async function warm(modelId = null) {
+    const model = resolveModel(modelId);
+    const currentStatus = status(model?.id ?? modelId);
+
+    if (!model || currentStatus.status === 'missing' || currentStatus.status === 'downloading') {
+      return currentStatus;
+    }
+
+    const modelPath = getModelPath(model);
+    if (serverProcess && serverModelPath === modelPath && serverPort) {
+      return status(model.id);
+    }
+
+    if (warmState.promise && warmState.modelId === model.id && warmState.modelPath === modelPath) {
+      return warmState.promise;
+    }
+
+    warmState = {
+      error: null,
+      modelId: model.id,
+      modelPath,
+      promise: null,
+      status: 'warming'
+    };
+    emitStatus(status(model.id));
+
+    const warmPromise = (async () => {
+      try {
+        if (model.runtime === 'mlx-lm') {
+          await ensureMlxServer(model);
+        } else {
+          await ensureServer(modelPath);
+        }
+
+        warmState = {
+          error: null,
+          modelId: model.id,
+          modelPath,
+          promise: null,
+          status: 'warm'
+        };
+        emitStatus(status(model.id));
+        return status(model.id);
+      } catch (error) {
+        warmState = {
+          error,
+          modelId: model.id,
+          modelPath,
+          promise: null,
+          status: 'error'
+        };
+        emitStatus(status(model.id));
+        return status(model.id);
+      }
+    })();
+
+    warmState = {
+      error: null,
+      modelId: model.id,
+      modelPath,
+      promise: warmPromise,
+      status: 'warming'
+    };
+
+    return warmPromise;
+  }
+
+  async function benchmark(modelId = null, {
+    prompt = 'Reply with one short sentence about a meeting action item.',
+    timeoutMs = 12_000
+  } = {}) {
+    const model = resolveModel(modelId);
+    const startedAt = Date.now();
+    let firstTokenMs = null;
+    let outputText = '';
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      controller.abort();
+    }, timeoutMs);
+
+    try {
+      if (!model) {
+        throw new Error('No Caul-managed local AI model is available for this build.');
+      }
+
+      const statusBefore = status(model.id);
+      if (statusBefore.status !== 'ready' && statusBefore.status !== 'warm') {
+        throw new Error('Local AI model is not ready for benchmarking.');
+      }
+
+      outputText = await request(prompt, {
+        modelId: model.id,
+        onDelta: (delta) => {
+          if (firstTokenMs === null && delta.trim()) {
+            firstTokenMs = Date.now() - startedAt;
+          }
+        },
+        signal: controller.signal
+      });
+
+      const totalMs = Date.now() - startedAt;
+      const outputTokens = Math.max(1, outputText.split(/\s+/).filter(Boolean).length);
+
+      return {
+        failureReason: null,
+        firstTokenMs: firstTokenMs ?? totalMs,
+        modelId: model.id,
+        ok: true,
+        status: 'passed',
+        tokensPerSecond: Math.round((outputTokens / Math.max(1, totalMs / 1000)) * 10) / 10,
+        totalMs
+      };
+    } catch (error) {
+      return {
+        failureReason: error.message,
+        firstTokenMs,
+        modelId: model?.id ?? modelId ?? null,
+        ok: false,
+        status: 'failed',
+        tokensPerSecond: 0,
+        totalMs: Date.now() - startedAt
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   async function ensureServer(modelPath) {
@@ -708,6 +958,13 @@ function createLocalLlmService({
     serverProcess = null;
     serverPort = null;
     serverModelPath = null;
+    warmState = {
+      error: null,
+      modelId: null,
+      modelPath: null,
+      promise: null,
+      status: null
+    };
   }
 
   function getAvailablePort() {
@@ -861,15 +1118,18 @@ function createLocalLlmService({
   }
 
   return {
+    benchmark,
     cancelDownload,
     download,
+    getModelById,
     getModelPath,
     getRecommendedModel,
     getRuntimeAsset,
     getServerPath,
     request,
     status,
-    stop
+    stop,
+    warm
   };
 }
 
@@ -907,14 +1167,50 @@ function hasMlxSnapshot(modelCachePath) {
       return false;
     }
 
+    if (hasIncompleteHuggingFaceBlob(modelCachePath)) {
+      return false;
+    }
+
     const snapshotRoot = path.join(modelCachePath, 'snapshots');
     if (!fsSync.existsSync(snapshotRoot)) {
       return false;
     }
 
     return fsSync.readdirSync(snapshotRoot, { withFileTypes: true }).some((entry) => (
-      entry.isDirectory() && fsSync.existsSync(path.join(snapshotRoot, entry.name, 'config.json'))
+      entry.isDirectory()
+        && fsSync.existsSync(path.join(snapshotRoot, entry.name, 'config.json'))
+        && hasMlxWeightFile(path.join(snapshotRoot, entry.name))
     ));
+  } catch {
+    return false;
+  }
+}
+
+function hasMlxWeightFile(directoryPath) {
+  try {
+    return fsSync.readdirSync(directoryPath, { withFileTypes: true }).some((entry) => {
+      const entryPath = path.join(directoryPath, entry.name);
+      if (entry.isDirectory()) {
+        return hasMlxWeightFile(entryPath);
+      }
+
+      return /\.(safetensors|npz|bin)$/i.test(entry.name) && fsSync.existsSync(entryPath);
+    });
+  } catch {
+    return false;
+  }
+}
+
+function hasIncompleteHuggingFaceBlob(directoryPath) {
+  try {
+    return fsSync.readdirSync(directoryPath, { withFileTypes: true }).some((entry) => {
+      const entryPath = path.join(directoryPath, entry.name);
+      if (entry.isDirectory()) {
+        return hasIncompleteHuggingFaceBlob(entryPath);
+      }
+
+      return /\.incomplete$/i.test(entry.name);
+    });
   } catch {
     return false;
   }

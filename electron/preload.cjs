@@ -64,8 +64,9 @@ contextBridge.exposeInMainWorld('caul', {
   settings: {
     ai: {
       disconnect: () => ipcRenderer.invoke('caul:pi-disconnect'),
+      benchmarkLocal: (modelId) => ipcRenderer.invoke('caul:local-llm-benchmark', { modelId }),
       cancelLocalDownload: () => ipcRenderer.invoke('caul:local-llm-cancel-download'),
-      downloadLocal: () => ipcRenderer.invoke('caul:local-llm-download'),
+      downloadLocal: (modelId) => ipcRenderer.invoke('caul:local-llm-download', { modelId }),
       localStatus: () => ipcRenderer.invoke('caul:local-llm-status'),
       onLocalStatus: (callback) => {
         const listener = (_event, payload) => callback(payload);
@@ -82,6 +83,7 @@ contextBridge.exposeInMainWorld('caul', {
       refreshCatalogue: () => ipcRenderer.invoke('caul:model-catalogue-refresh'),
       saveModel: (model) => ipcRenderer.invoke('caul:pi-save-model', { model }),
       setProvider: (provider) => ipcRenderer.invoke('caul:ai-provider', { provider }),
+      setLocalModel: (modelId) => ipcRenderer.invoke('caul:local-llm-set-model', { modelId }),
       status: () => ipcRenderer.invoke('caul:pi-status')
     },
     onboarding: {

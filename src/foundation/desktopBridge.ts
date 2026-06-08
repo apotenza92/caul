@@ -136,7 +136,17 @@ export type LocalLlmStatus = {
     supported: boolean;
     version: string | null;
   };
-  status: 'downloading' | 'missing' | 'ready';
+  status: 'downloading' | 'error' | 'missing' | 'ready' | 'warm' | 'warming';
+};
+
+export type LocalLlmBenchmarkResult = {
+  failureReason: string | null;
+  firstTokenMs: number | null;
+  modelId: string | null;
+  ok: boolean;
+  status: 'failed' | 'passed';
+  tokensPerSecond: number;
+  totalMs: number;
 };
 
 export type SystemGpuProfile = {
@@ -164,7 +174,30 @@ export type SystemModelResources = {
 
 export type AiRecommendation = {
   benchmark: ModelBenchmarkStatus;
+  benchmarkRequired?: boolean;
+  candidateScore?: number;
+  fallbackCandidateId?: string | null;
+  fitFailures?: string[];
   localRuntime: LocalLlmStatus;
+  modelOptimisationProfile?: SystemModelResources & {
+    machineFingerprint?: string;
+    memoryBucketGb?: number;
+    runtimeSupport?: {
+      llamaCpp: boolean;
+      mlxLm: boolean;
+    };
+    runtimeVersions?: {
+      llamaCpp: string | null;
+      mlxLm: string | null;
+    };
+  };
+  performanceStatus?: {
+    failureReason?: string;
+    firstTokenMs?: number;
+    status: 'degraded' | 'failed' | 'not-applicable' | 'passed' | 'unknown';
+    tokensPerSecond?: number;
+    totalMs?: number;
+  };
   provider: AiProvider;
   recommended: 'cloud' | 'local' | 'none';
   recommendedModel: null | {
@@ -174,6 +207,7 @@ export type AiRecommendation = {
     runtime: string;
   };
   resources: SystemModelResources;
+  selectionReason?: string;
   status: 'ready';
   summary: string;
   viable: boolean;
@@ -304,6 +338,7 @@ export type PortablePreferences = {
   llmModel?: LlmModel;
   llmReasoning?: LlmReasoning;
   selectedAiProvider?: AiProvider;
+  selectedLocalAiModel?: string;
   selectedLocalTranscriptionModel?: LocalTranscriptionModelId;
 };
 
@@ -385,9 +420,10 @@ export type PrivateOverlayBridge = {
 
 export type SettingsBridge = {
   ai?: {
+    benchmarkLocal: (modelId?: string) => Promise<LocalLlmBenchmarkResult>;
     cancelLocalDownload: () => Promise<LocalLlmStatus>;
     disconnect: () => Promise<PiStatus>;
-    downloadLocal: () => Promise<LocalLlmStatus>;
+    downloadLocal: (modelId?: string) => Promise<LocalLlmStatus>;
     localStatus: () => Promise<LocalLlmStatus>;
     onLocalStatus: (callback: (status: LocalLlmStatus) => void) => () => void;
     openChatGptLogin: () => Promise<{ ok: boolean; message?: string }>;
@@ -396,6 +432,7 @@ export type SettingsBridge = {
     refreshCatalogue: () => Promise<ModelCatalogueRefreshResult>;
     saveModel: (model: string) => Promise<PiStatus>;
     setProvider: (provider: AiProvider) => Promise<OnboardingStatus>;
+    setLocalModel: (modelId: string) => Promise<LocalLlmStatus>;
     status: () => Promise<PiStatus>;
   };
   onboarding?: {

@@ -280,12 +280,12 @@
       "provenanceUrl": "https://deepmind.google/models/gemma/"
     },
     {
-      "id": "gemma-4-12b-it-q4_k_m",
-      "name": "Gemma 4 12B IT Q4",
+      "id": "gemma-4-12b-it-q4_0",
+      "name": "Gemma 4 12B IT Q4_0",
       "runtime": "llama.cpp",
       "local": true,
       "cloud": false,
-      "implemented": false,
+      "implemented": true,
       "openWeights": true,
       "licence": "Apache-2.0",
       "modelSizeB": 12,
@@ -296,14 +296,14 @@
       "minimumCpuCores": 8,
       "minimumVramGb": 0,
       "contextWindowTokens": 131072,
-      "quantisation": ["Q4_K_M"],
+      "quantisation": ["Q4_0"],
       "toolSupport": true,
       "reasoningSupport": true,
       "platforms": ["darwin", "win32", "linux"],
-      "caulSmokeStatus": "pending",
+      "caulSmokeStatus": "live-metadata-only",
       "defaultPriority": 0,
-      "fileName": "gemma-4-12b-it-Q4_K_M.gguf",
-      "downloadUrl": "https://huggingface.co/bartowski/gemma-4-12B-it-GGUF/resolve/main/gemma-4-12B-it-Q4_K_M.gguf",
+      "fileName": "gemma-4-12b-it-qat-q4_0.gguf",
+      "downloadUrl": "https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-gguf/resolve/main/gemma-4-12b-it-qat-q4_0.gguf",
       "benchmark": {
         "qualitySource": "Google DeepMind Gemma 4 12B launch benchmarks and Artificial Analysis Gemma 4 family benchmarks",
         "preferenceSource": "LMArena and Gemma 4 family comparisons",
@@ -312,7 +312,8 @@
         "latencyBand": "balanced-local"
       },
       "reviewedAt": "2026-06-06",
-      "provenanceUrl": "https://deepmind.google/models/gemma/gemma-4/"
+      "provenanceUrl": "https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-gguf",
+      "providerModelId": "google/gemma-4-12B-it-qat-q4_0-gguf"
     },
     {
       "id": "openai-codex/gpt-5.5",

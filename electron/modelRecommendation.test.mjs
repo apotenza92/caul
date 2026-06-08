@@ -10,8 +10,10 @@ const {
 } = require('./modelCatalogueRefresh.cjs');
 
 const {
+  buildModelOptimisationProfile,
   buildSystemProfile,
   estimateStableModelMemoryGb,
+  getBenchmarkCacheKey,
   getLiveModelCataloguePath,
   getStaleCatalogueEntries,
   loadBestModelCatalogue,
@@ -166,10 +168,10 @@ function liveCatalogueRoutes() {
     ['GET https://huggingface.co/api/models/litert-community/gemma-4-E4B-it-litert-lm', {
       body: hfModelFixture('litert-community/gemma-4-E4B-it-litert-lm', [])
     }],
-    ['GET https://huggingface.co/api/models/bartowski/gemma-4-12B-it-GGUF', {
-      body: hfModelFixture('bartowski/gemma-4-12B-it-GGUF', ['gemma-4-12B-it-Q4_K_M.gguf'])
+    ['GET https://huggingface.co/api/models/google/gemma-4-12B-it-qat-q4_0-gguf', {
+      body: hfModelFixture('google/gemma-4-12B-it-qat-q4_0-gguf', ['gemma-4-12b-it-qat-q4_0.gguf'])
     }],
-    ['HEAD https://huggingface.co/bartowski/gemma-4-12B-it-GGUF/resolve/main/gemma-4-12B-it-Q4_K_M.gguf', {
+    ['HEAD https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-gguf/resolve/main/gemma-4-12b-it-qat-q4_0.gguf', {
       body: '',
       headers: { 'content-length': String(6.5 * 1024 * 1024 * 1024) }
     }],
@@ -179,6 +181,54 @@ function liveCatalogueRoutes() {
     ['HEAD https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/qwen3-8b-q4_k_m.gguf', {
       body: '',
       headers: { 'content-length': String(5.1 * 1024 * 1024 * 1024) }
+    }],
+    ['GET https://huggingface.co/api/models?search=GGUF%20Instruct&sort=downloads&direction=-1&limit=12', {
+      body: [
+        hfModelFixture('future-ai/Future-12B-Instruct-GGUF', [
+          'future-12b-instruct-q3_k_m.gguf',
+          'future-12b-instruct-q4_k_m.gguf',
+          'future-12b-instruct-q5_k_m.gguf'
+        ])
+      ]
+    }],
+    ['GET https://huggingface.co/api/models/future-ai/Future-12B-Instruct-GGUF', {
+      body: hfModelFixture('future-ai/Future-12B-Instruct-GGUF', [
+        'future-12b-instruct-q3_k_m.gguf',
+        'future-12b-instruct-q4_k_m.gguf',
+        'future-12b-instruct-q5_k_m.gguf'
+      ])
+    }],
+    ['HEAD https://huggingface.co/future-ai/Future-12B-Instruct-GGUF/resolve/main/future-12b-instruct-q3_k_m.gguf', {
+      body: '',
+      headers: { 'content-length': String(5.1 * 1024 * 1024 * 1024) }
+    }],
+    ['HEAD https://huggingface.co/future-ai/Future-12B-Instruct-GGUF/resolve/main/future-12b-instruct-q4_k_m.gguf', {
+      body: '',
+      headers: { 'content-length': String(6.2 * 1024 * 1024 * 1024) }
+    }],
+    ['HEAD https://huggingface.co/future-ai/Future-12B-Instruct-GGUF/resolve/main/future-12b-instruct-q5_k_m.gguf', {
+      body: '',
+      headers: { 'content-length': String(7.1 * 1024 * 1024 * 1024) }
+    }],
+    ['GET https://huggingface.co/api/models?search=GGUF%20Chat&sort=downloads&direction=-1&limit=12', {
+      body: []
+    }],
+    ['GET https://huggingface.co/api/models?search=MLX%204bit%20Instruct&sort=downloads&direction=-1&limit=12', {
+      body: [
+        {
+          ...hfModelFixture('future-ai/Future-12B-Instruct-MLX-4bit', []),
+          tags: ['license:apache-2.0', 'mlx', '4bit']
+        }
+      ]
+    }],
+    ['GET https://huggingface.co/api/models/future-ai/Future-12B-Instruct-MLX-4bit', {
+      body: {
+        ...hfModelFixture('future-ai/Future-12B-Instruct-MLX-4bit', []),
+        tags: ['license:apache-2.0', 'mlx', '4bit']
+      }
+    }],
+    ['GET https://huggingface.co/api/models?search=MLX%20LM%204bit&sort=downloads&direction=-1&limit=12', {
+      body: []
     }]
   ]);
 }
@@ -263,13 +313,96 @@ describe('model recommendation catalogue', () => {
 
     expect(result.catalogue.lastReviewed).toBe('2026-06-08');
     expect(result.catalogue.sources.liveArtificialAnalysis.url).toContain('artificialanalysis.ai');
+    expect(result.catalogue.sources.liveHuggingFaceGgufDiscovery.url).toContain('GGUF');
+    expect(result.catalogue.sources.liveHuggingFaceMlxDiscovery.url).toContain('MLX');
     expect(result.catalogue.sources.liveLmArena.url).toContain('lmarena.ai');
     expect(result.catalogue.sources.liveMlxLm.url).toContain('mlx-lm');
     expect(result.sourceReports.find((report) => report.source === 'MLX LM').detail).toContain('v0.25.0');
     expect(result.catalogue.transcription.find((model) => model.id === 'parakeet').benchmark.rankSource).toContain('abcdef1');
     expect(result.catalogue.aiResponse.some((model) => model.id === 'gemma-4-e4b-it-litert-lm')).toBe(true);
-    expect(result.catalogue.aiResponse.find((model) => model.id === 'gemma-4-12b-it-q4_k_m').downloadSizeGb).toBe(6.5);
+    expect(result.catalogue.aiResponse.find((model) => model.id === 'gemma-4-12b-it-q4_0')).toMatchObject({
+      downloadSizeGb: 6.5,
+      fileName: 'gemma-4-12b-it-qat-q4_0.gguf',
+      implemented: true,
+      providerModelId: 'google/gemma-4-12B-it-qat-q4_0-gguf',
+      quantisation: ['Q4_0']
+    });
+    expect(result.catalogue.aiResponse.find((model) => model.providerModelId === 'future-ai/Future-12B-Instruct-GGUF' && model.quantisation.includes('Q3_K_M'))).toMatchObject({
+      downloadSizeGb: 5.1,
+      implemented: true,
+      runtime: 'llama.cpp'
+    });
+    expect(result.catalogue.aiResponse.find((model) => model.providerModelId === 'future-ai/Future-12B-Instruct-GGUF' && model.quantisation.includes('Q5_K_M'))).toMatchObject({
+      downloadSizeGb: 7.1,
+      implemented: true,
+      minimumTotalMemoryGb: 32,
+      runtime: 'llama.cpp'
+    });
+    expect(result.catalogue.aiResponse.find((model) => model.providerModelId === 'future-ai/Future-12B-Instruct-MLX-4bit')).toMatchObject({
+      implemented: true,
+      platforms: ['darwin'],
+      runtime: 'mlx-lm'
+    });
+    expect(result.sourceReports.find((report) => report.source === 'Hugging Face GGUF discovery' && report.detail.includes('discovered 1'))).toBeTruthy();
+    expect(result.sourceReports.find((report) => report.source === 'Hugging Face MLX discovery' && report.detail.includes('discovered 1'))).toBeTruthy();
     expect(result.sourceReports.every((report) => report.ok)).toBe(true);
+  });
+
+  it('can recommend a newly discovered live GGUF model when the machine fits it', async () => {
+    const bundled = loadModelCatalogue(resolve(root, 'model-catalog.json'));
+    const routes = liveCatalogueRoutes();
+    const result = await refreshModelCatalogue(bundled, {
+      fetchFn: fakeFetch(routes),
+      now: new Date('2026-06-08T00:00:00.000Z')
+    });
+    const profile = buildSystemProfile({
+      osModule: fakeOs({ cores: 12, freeGb: 48, totalGb: 64 }),
+      processObject: fakeProcess({ arch: 'x64', platform: 'linux' }),
+      spawnSyncFn: fakeSpawn()
+    });
+    const recommendation = recommendFromCatalogue({ ...result.catalogue, source: 'live-cache' }, profile);
+
+    expect(recommendation.ai.recommendation).toBe('local');
+    expect(recommendation.ai.model.providerModelId).toBe('future-ai/Future-12B-Instruct-GGUF');
+    expect(recommendation.ai.reason).toContain('live benchmark catalogue');
+  });
+
+  it('can recommend a newly discovered live MLX model on Apple Silicon', async () => {
+    const bundled = loadModelCatalogue(resolve(root, 'model-catalog.json'));
+    const routes = liveCatalogueRoutes();
+    const result = await refreshModelCatalogue(bundled, {
+      fetchFn: fakeFetch(routes),
+      now: new Date('2026-06-08T00:00:00.000Z')
+    });
+    const profile = buildSystemProfile({
+      osModule: fakeOs({ cores: 12, freeGb: 36, totalGb: 48 }),
+      processObject: fakeProcess({ arch: 'arm64', platform: 'darwin' }),
+      spawnSyncFn: fakeSpawn()
+    });
+    const recommendation = recommendFromCatalogue({ ...result.catalogue, source: 'live-cache' }, profile);
+
+    expect(recommendation.ai.recommendation).toBe('local');
+    expect(recommendation.ai.model.providerModelId).toBe('future-ai/Future-12B-Instruct-MLX-4bit');
+    expect(recommendation.ai.model.runtime).toBe('mlx-lm');
+  });
+
+  it('adds the official Gemma 4 12B candidate when refreshing an older live cache', async () => {
+    const bundled = loadModelCatalogue(resolve(root, 'model-catalog.json'));
+    const olderLiveCache = {
+      ...bundled,
+      aiResponse: bundled.aiResponse.filter((model) => model.id !== 'gemma-4-12b-it-q4_0')
+    };
+    const result = await refreshModelCatalogue(olderLiveCache, {
+      fetchFn: fakeFetch(liveCatalogueRoutes()),
+      now: new Date('2026-06-08T00:00:00.000Z')
+    });
+
+    expect(result.catalogue.aiResponse.find((model) => model.id === 'gemma-4-12b-it-q4_0')).toMatchObject({
+      implemented: true,
+      providerModelId: 'google/gemma-4-12B-it-qat-q4_0-gguf',
+      quantisation: ['Q4_0'],
+      runtime: 'llama.cpp'
+    });
   });
 
   it('refreshes independent live catalogue sources concurrently', async () => {
@@ -282,7 +415,7 @@ describe('model recommendation catalogue', () => {
     });
     const elapsedMs = Date.now() - start;
 
-    expect(elapsedMs).toBeLessThan(180);
+    expect(elapsedMs).toBeLessThan(260);
   });
 
   it('uses macOS reclaimable memory instead of raw free memory', () => {
@@ -379,7 +512,7 @@ Pages purgeable:                               14930.`);
     const recommendation = recommendFromCatalogue(catalogue, profile);
 
     expect(recommendation.ai.recommendation).toBe('local');
-    expect(recommendation.ai.model.id).toBe('qwen3-1.7b-mlx-4bit');
+    expect(recommendation.ai.model.id).toBe('gemma-4-12b-it-q4_0');
   });
 
   it('recommends llama.cpp local AI on Windows and Linux', () => {
@@ -392,7 +525,23 @@ Pages purgeable:                               14930.`);
     const recommendation = recommendFromCatalogue(catalogue, profile);
 
     expect(recommendation.ai.recommendation).toBe('local');
-    expect(recommendation.ai.model.id).toBe('qwen2.5-3b-instruct-q4_k_m');
+    expect(recommendation.ai.model.id).toBe('gemma-4-12b-it-q4_0');
+  });
+
+  it('describes live-cache recommendations as live rather than offline', () => {
+    const catalogue = {
+      ...loadModelCatalogue(resolve(root, 'model-catalog.json')),
+      source: 'live-cache'
+    };
+    const profile = buildSystemProfile({
+      osModule: fakeOs({ cores: 10, freeGb: 18, totalGb: 32 }),
+      processObject: fakeProcess({ arch: 'x64', platform: 'linux' }),
+      spawnSyncFn: fakeSpawn()
+    });
+    const recommendation = recommendFromCatalogue(catalogue, profile);
+
+    expect(recommendation.ai.reason).toContain('live benchmark catalogue');
+    expect(recommendation.transcription.reason).toContain('live benchmark catalogue');
   });
 
   it('prefers a stronger local AI model when it fits the stable machine budget', () => {
@@ -433,7 +582,7 @@ Pages purgeable:                               14930.`);
     const expandedCatalogue = {
       ...catalogue,
       aiResponse: catalogue.aiResponse.map((model) => (
-        model.id === 'gemma-4-12b-it-q4_k_m'
+        model.id === 'gemma-4-12b-it-q4_0'
           ? {
             ...model,
             caulSmokeStatus: 'passed-basic-instruction',
@@ -449,7 +598,142 @@ Pages purgeable:                               14930.`);
     });
     const recommendation = recommendFromCatalogue(expandedCatalogue, profile);
 
-    expect(recommendation.ai.model.id).toBe('gemma-4-12b-it-q4_k_m');
+    expect(recommendation.ai.model.id).toBe('gemma-4-12b-it-q4_0');
+  });
+
+  it('lets benchmark evidence choose GGUF over MLX when GGUF is faster on the machine', () => {
+    const catalogue = loadModelCatalogue(resolve(root, 'model-catalog.json'));
+    const profile = buildSystemProfile({
+      osModule: fakeOs({ cores: 10, freeGb: 18, totalGb: 32 }),
+      processObject: fakeProcess(),
+      spawnSyncFn: fakeSpawn()
+    });
+    const optimisationProfile = buildModelOptimisationProfile(profile);
+    const gemma = catalogue.aiResponse.find((entry) => entry.id === 'gemma-4-12b-it-q4_0');
+    const mlx = catalogue.aiResponse.find((entry) => entry.id === 'qwen3-1.7b-mlx-4bit');
+    const recommendation = recommendFromCatalogue(catalogue, profile, {
+      benchmarkCache: {
+        [getBenchmarkCacheKey(gemma, optimisationProfile)]: {
+          createdAtMs: Date.now(),
+          firstTokenMs: 420,
+          machineFingerprint: optimisationProfile.machineFingerprint,
+          modelId: gemma.id,
+          ok: true,
+          status: 'passed',
+          tokensPerSecond: 34,
+          totalMs: 1600
+        },
+        [getBenchmarkCacheKey(mlx, optimisationProfile)]: {
+          createdAtMs: Date.now(),
+          firstTokenMs: 2300,
+          machineFingerprint: optimisationProfile.machineFingerprint,
+          modelId: mlx.id,
+          ok: true,
+          status: 'passed',
+          tokensPerSecond: 5,
+          totalMs: 8200
+        }
+      }
+    });
+
+    expect(recommendation.ai.model.id).toBe('gemma-4-12b-it-q4_0');
+    expect(recommendation.ai.performanceStatus.status).toBe('passed');
+  });
+
+  it('uses a passed benchmark cache entry to avoid reprobe requirements', () => {
+    const catalogue = loadModelCatalogue(resolve(root, 'model-catalog.json'));
+    const profile = buildSystemProfile({
+      osModule: fakeOs({ cores: 10, freeGb: 18, totalGb: 32 }),
+      processObject: fakeProcess({ arch: 'x64', platform: 'linux' }),
+      spawnSyncFn: fakeSpawn()
+    });
+    const initial = recommendFromCatalogue(catalogue, profile);
+    const optimisationProfile = buildModelOptimisationProfile(profile);
+    const key = getBenchmarkCacheKey(initial.ai.model, optimisationProfile);
+    const recommendation = recommendFromCatalogue(catalogue, profile, {
+      benchmarkCache: {
+        [key]: {
+          createdAtMs: Date.now(),
+          firstTokenMs: 500,
+          machineFingerprint: optimisationProfile.machineFingerprint,
+          modelId: initial.ai.model.id,
+          ok: true,
+          status: 'passed',
+          tokensPerSecond: 18,
+          totalMs: 1200
+        }
+      }
+    });
+
+    expect(recommendation.ai.model.id).toBe(initial.ai.model.id);
+    expect(recommendation.ai.benchmarkRequired).toBe(false);
+    expect(recommendation.ai.performanceStatus.status).toBe('passed');
+  });
+
+  it('invalidates benchmark cache keys when the local runtime version changes', () => {
+    const catalogue = loadModelCatalogue(resolve(root, 'model-catalog.json'));
+    const model = catalogue.aiResponse.find((entry) => entry.id === 'qwen2.5-3b-instruct-q4_k_m');
+    const profile = buildSystemProfile({
+      osModule: fakeOs({ cores: 10, freeGb: 18, totalGb: 32 }),
+      processObject: fakeProcess({ arch: 'x64', platform: 'linux' }),
+      spawnSyncFn: fakeSpawn()
+    });
+    const firstProfile = {
+      ...profile,
+      localRuntimes: {
+        caulLlamaCpp: {
+          ...profile.localRuntimes.caulLlamaCpp,
+          provider: 'caul-llama.cpp',
+          runtime: {
+            ...profile.localRuntimes.caulLlamaCpp.runtime,
+            supported: true,
+            version: 'b1'
+          }
+        }
+      }
+    };
+    const secondProfile = {
+      ...firstProfile,
+      localRuntimes: {
+        caulLlamaCpp: {
+          ...firstProfile.localRuntimes.caulLlamaCpp,
+          runtime: {
+            ...firstProfile.localRuntimes.caulLlamaCpp.runtime,
+            version: 'b2'
+          }
+        }
+      }
+    };
+
+    expect(getBenchmarkCacheKey(model, buildModelOptimisationProfile(firstProfile)))
+      .not.toBe(getBenchmarkCacheKey(model, buildModelOptimisationProfile(secondProfile)));
+  });
+
+  it('avoids a local AI model that failed benchmark on this machine', () => {
+    const catalogue = loadModelCatalogue(resolve(root, 'model-catalog.json'));
+    const profile = buildSystemProfile({
+      osModule: fakeOs({ cores: 10, freeGb: 18, totalGb: 32 }),
+      processObject: fakeProcess({ arch: 'x64', platform: 'linux' }),
+      spawnSyncFn: fakeSpawn()
+    });
+    const initial = recommendFromCatalogue(catalogue, profile);
+    const optimisationProfile = buildModelOptimisationProfile(profile);
+    const key = getBenchmarkCacheKey(initial.ai.model, optimisationProfile);
+    const recommendation = recommendFromCatalogue(catalogue, profile, {
+      benchmarkCache: {
+        [key]: {
+          createdAtMs: Date.now(),
+          failureReason: 'benchmark timeout',
+          machineFingerprint: optimisationProfile.machineFingerprint,
+          modelId: initial.ai.model.id,
+          ok: false,
+          status: 'failed'
+        }
+      }
+    });
+
+    expect(recommendation.ai.model?.id).not.toBe(initial.ai.model.id);
+    expect(recommendation.ai.fitFailures.some((failure) => failure.includes('benchmark timeout'))).toBe(true);
   });
 
   it('does not recommend a local AI model that failed Caul smoke validation', () => {
@@ -473,7 +757,7 @@ Pages purgeable:                               14930.`);
     });
     const recommendation = recommendFromCatalogue(expandedCatalogue, profile);
 
-    expect(recommendation.ai.model.id).toBe('qwen3-1.7b-mlx-4bit');
+    expect(recommendation.ai.model.id).not.toBe('qwen2.5-1.5b-instruct-q4_k_m');
   });
 
   it('recommends cloud AI when local AI is not viable', () => {

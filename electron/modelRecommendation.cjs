@@ -4,6 +4,9 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const catalogueStaleAfterMs = 90 * 24 * 60 * 60 * 1000;
+const localAiBenchmarkTtlMs = 30 * 24 * 60 * 60 * 1000;
+const liveCallFirstTokenTargetMs = 2500;
+const liveCallTotalTargetMs = 9000;
 
 function getDefaultModelCataloguePath(rootDir = path.resolve(__dirname, '..')) {
   return path.join(rootDir, 'model-catalog.json');
@@ -139,6 +142,60 @@ function buildSystemProfile({
     platform,
     totalMemoryGb
   };
+}
+
+function buildModelOptimisationProfile(profile) {
+  const memoryBucketGb = getMemoryBucketGb(profile.totalMemoryGb);
+  const runtimeSupport = {
+    llamaCpp: Boolean(profile.localRuntimes?.caulLlamaCpp?.runtime?.supported),
+    mlxLm: profile.platform === 'darwin' && profile.arch === 'arm64'
+  };
+  const runtimeVersions = {
+    llamaCpp: profile.localRuntimes?.caulLlamaCpp?.provider === 'caul-llama.cpp'
+      ? profile.localRuntimes.caulLlamaCpp.runtime?.version ?? null
+      : null,
+    mlxLm: profile.localRuntimes?.caulLlamaCpp?.provider === 'caul-mlx'
+      ? profile.localRuntimes.caulLlamaCpp.runtime?.version ?? null
+      : null
+  };
+
+  return {
+    accelerator: profile.accelerator,
+    arch: profile.arch,
+    cpuCores: profile.cpuCores,
+    currentAvailableMemoryGb: profile.currentAvailableMemoryGb,
+    gpu: profile.gpu,
+    machineFingerprint: [
+      profile.platform,
+      profile.arch,
+      profile.accelerator,
+      `${memoryBucketGb}gb`,
+      profile.gpu?.vendor ?? 'unknown',
+      profile.gpu?.unifiedMemory ? 'unified' : `${Math.round(Number(profile.gpu?.vramGb ?? 0))}gb-vram`
+    ].join(':'),
+    memoryBucketGb,
+    modelMemoryGb: profile.modelMemoryGb,
+    platform: profile.platform,
+    runtimeVersions,
+    runtimeSupport,
+    totalMemoryGb: profile.totalMemoryGb
+  };
+}
+
+function getMemoryBucketGb(totalMemoryGb) {
+  if (totalMemoryGb >= 64) {
+    return 64;
+  }
+  if (totalMemoryGb >= 32) {
+    return 32;
+  }
+  if (totalMemoryGb >= 16) {
+    return 16;
+  }
+  if (totalMemoryGb >= 8) {
+    return 8;
+  }
+  return 4;
 }
 
 function detectAvailableMemoryGb({ osModule, platform, spawnSyncFn }) {
@@ -388,11 +445,12 @@ function parseVramGb(value) {
 }
 
 function recommendFromCatalogue(catalogue, profile, {
+  benchmarkCache = null,
   cloudAiImplemented = true,
   cloudTranscriptionImplemented = false
 } = {}) {
   return {
-    ai: recommendAiResponseModel(catalogue, profile, { cloudAiImplemented }),
+    ai: recommendAiResponseModel(catalogue, profile, { benchmarkCache, cloudAiImplemented }),
     staleCatalogueEntries: getStaleCatalogueEntries(catalogue),
     transcription: recommendTranscriptionModel(catalogue, profile, { cloudTranscriptionImplemented })
   };
@@ -416,7 +474,7 @@ function recommendTranscriptionModel(catalogue, profile, { cloudTranscriptionImp
       candidateCount: candidates.length,
       model: best,
       recommendation: best.id === 'parakeet' ? 'local-parakeet' : 'local-moonshine-tiny',
-      reason: `${best.name} is the best implemented live transcription fit for this machine from the bundled benchmark catalogue.`,
+      reason: `${best.name} is the best implemented live transcription fit for this machine from the ${getCatalogueSourceLabel(catalogue)}.`,
       source: best.benchmark.rankSource,
       viable: true
     };
@@ -443,26 +501,40 @@ function scoreTranscriptionModel(model, profile) {
   return accuracyScore + latencyScore + maturityScore + acceleratorScore - model.estimatedMemoryGb;
 }
 
-function recommendAiResponseModel(catalogue, profile, { cloudAiImplemented = true } = {}) {
-  const localCandidates = catalogue.aiResponse
+function recommendAiResponseModel(catalogue, profile, { benchmarkCache = null, cloudAiImplemented = true } = {}) {
+  const optimisationProfile = buildModelOptimisationProfile(profile);
+  const evaluatedCandidates = catalogue.aiResponse
     .filter((model) => model.local && model.implemented)
     .filter((model) => model.caulSmokeStatus !== 'failed-basic-instruction')
     .filter((model) => !Array.isArray(model.platforms) || model.platforms.includes(profile.platform))
     .map((model) => ({
       model,
+      performance: getBenchmarkPerformanceStatus(model, optimisationProfile, benchmarkCache),
       fit: getHardwareFit(model, profile),
-      score: scoreAiModel(model, profile)
-    }))
+      score: scoreAiModel(model, profile, optimisationProfile, benchmarkCache)
+    }));
+  const localCandidates = evaluatedCandidates
     .filter((candidate) => candidate.fit.ok)
+    .filter((candidate) => candidate.performance.status !== 'failed')
     .sort((a, b) => b.score - a.score);
+  const fitFailures = getAiFitFailures(evaluatedCandidates);
 
   if (localCandidates.length > 0) {
-    const best = localCandidates[0].model;
+    const bestCandidate = localCandidates[0];
+    const best = bestCandidate.model;
+    const fallback = localCandidates.find((candidate) => candidate.model.id !== best.id) ?? null;
     return {
+      benchmarkRequired: bestCandidate.performance.status === 'unknown',
+      candidateScore: bestCandidate.score,
+      fallbackCandidateId: fallback?.model.id ?? null,
+      fitFailures,
       localRuntime: profile.localRuntimes.caulLlamaCpp,
       model: best,
+      modelOptimisationProfile: optimisationProfile,
+      performanceStatus: bestCandidate.performance,
       recommendation: 'local',
-      reason: `${best.name} is the best local AI response fit for this machine from the bundled benchmark catalogue.`,
+      reason: `${best.name} is the best local AI response fit for this machine from the ${getCatalogueSourceLabel(catalogue)}.`,
+      selectionReason: buildAiSelectionReason(best, bestCandidate, fallback),
       source: best.benchmark.qualitySource,
       viable: true
     };
@@ -471,32 +543,229 @@ function recommendAiResponseModel(catalogue, profile, { cloudAiImplemented = tru
   const cloudModel = catalogue.aiResponse.find((model) => model.cloud && model.implemented) ?? null;
 
   return {
+    benchmarkRequired: false,
+    candidateScore: 0,
+    fallbackCandidateId: null,
+    fitFailures,
     localRuntime: profile.localRuntimes.caulLlamaCpp,
     model: cloudAiImplemented ? cloudModel : null,
+    modelOptimisationProfile: optimisationProfile,
+    performanceStatus: { status: 'not-applicable' },
     recommendation: cloudAiImplemented ? 'cloud' : 'none',
     reason: 'No benchmark-grounded local AI model is likely to run comfortably on this machine.',
+    selectionReason: 'No local model passed compatibility and measured-performance checks.',
     source: cloudModel?.benchmark.qualitySource ?? catalogue.sources.llmLeaderboard.name,
     viable: false
   };
 }
 
-function scoreAiModel(model, profile) {
+function getAiFitFailures(candidates) {
+  return candidates.flatMap((candidate) => {
+    if (candidate.performance.status === 'failed') {
+      return [`${candidate.model.name}: ${candidate.performance.failureReason ?? 'benchmark failed'}`];
+    }
+
+    return candidate.fit.failures.map((failure) => `${candidate.model.name}: ${failure}`);
+  });
+}
+
+function getCatalogueSourceLabel(catalogue) {
+  return catalogue.source === 'live-cache'
+    ? 'live benchmark catalogue'
+    : 'offline benchmark catalogue';
+}
+
+function scoreAiModel(model, profile, optimisationProfile = buildModelOptimisationProfile(profile), benchmarkCache = null) {
+  const predictedFit = scoreAiPredictedFit(model, profile, optimisationProfile);
+  const predictedLiveCallValue = scoreAiPredictedLiveCallValue(model, profile, optimisationProfile);
+  const performance = getBenchmarkPerformanceStatus(model, optimisationProfile, benchmarkCache);
+  const benchmarkAdjustment = performance.status === 'passed'
+    ? getPassedBenchmarkAdjustment(performance)
+    : performance.status === 'degraded'
+      ? -30
+      : performance.status === 'failed'
+        ? -1000
+        : 0;
+
+  return predictedFit + predictedLiveCallValue + benchmarkAdjustment;
+}
+
+function getPassedBenchmarkAdjustment(performance) {
+  const firstTokenMs = Number(performance.firstTokenMs ?? liveCallFirstTokenTargetMs);
+  const totalMs = Number(performance.totalMs ?? liveCallTotalTargetMs);
+  const tokensPerSecond = Number(performance.tokensPerSecond ?? 0);
+  const firstTokenHeadroom = Math.max(0, liveCallFirstTokenTargetMs - firstTokenMs) / liveCallFirstTokenTargetMs;
+  const totalHeadroom = Math.max(0, liveCallTotalTargetMs - totalMs) / liveCallTotalTargetMs;
+  const throughputBonus = Math.min(16, Math.max(0, tokensPerSecond - 4));
+
+  return 34 + firstTokenHeadroom * 18 + totalHeadroom * 14 + throughputBonus;
+}
+
+function scoreAiPredictedFit(model, profile, optimisationProfile = buildModelOptimisationProfile(profile)) {
+  const fit = getHardwareFit(model, profile);
+  if (!fit.ok) {
+    return -1000 - fit.failures.length * 50;
+  }
+
+  const memoryHeadroom = getRecommendationMemoryGb(profile) - model.minimumFreeMemoryGb;
+  const currentMemoryHeadroom = Number(profile.currentAvailableMemoryGb ?? 0) - Number(model.minimumFreeMemoryGb ?? 0);
+  const runtimeFitScore = getRuntimeFitScore(model, optimisationProfile);
+  const quantisationScore = getQuantisationFitScore(model, optimisationProfile);
+  const smokeScore = model.caulSmokeStatus === 'passed-basic-instruction'
+    ? 12
+    : model.caulSmokeStatus === 'live-metadata-only'
+      ? -1
+      : 0;
+  const sizePenalty = (Number(model.downloadSizeGb ?? 0) * 0.8)
+    + (Number(model.estimatedMemoryGb ?? 0) * 0.7);
+
+  return 45 + memoryHeadroom * 2 + Math.min(10, currentMemoryHeadroom) + runtimeFitScore + quantisationScore + smokeScore - sizePenalty;
+}
+
+function scoreAiPredictedLiveCallValue(model, profile, optimisationProfile = buildModelOptimisationProfile(profile)) {
   const qualityScore = model.benchmark.qualityBand === 'strong-local'
-    ? 85
+    ? 115
     : model.benchmark.qualityBand === 'balanced-local'
-      ? 55
+      ? 70
       : model.benchmark.qualityBand === 'small-local'
         ? 35
         : 30;
   const speedScore = model.benchmark.latencyBand === 'fast-local' ? 30 : 20;
-  const memoryHeadroom = getRecommendationMemoryGb(profile) - model.minimumFreeMemoryGb;
   const acceleratorScore = profile.accelerator === 'apple-silicon' || profile.gpu.available ? 10 : 0;
+  const runtimeFitScore = getRuntimeFitScore(model, optimisationProfile);
   const defaultPriorityScore = Math.min(8, Number(model.defaultPriority ?? 0) / 4);
-  const sizePenalty = (Number(model.modelSizeB ?? 0) * 1.2)
+  const sizePenalty = (Number(model.modelSizeB ?? 0) * 1.4)
     + (Number(model.downloadSizeGb ?? 0) * 0.7)
     + (Number(model.estimatedMemoryGb ?? 0) * 0.5);
 
-  return qualityScore + speedScore + acceleratorScore + memoryHeadroom + defaultPriorityScore - sizePenalty;
+  return qualityScore + speedScore + acceleratorScore + runtimeFitScore + defaultPriorityScore - sizePenalty;
+}
+
+function getRuntimeFitScore(model, optimisationProfile) {
+  if (model.runtime === 'mlx-lm') {
+    if (optimisationProfile.accelerator !== 'apple-silicon') {
+      return 0;
+    }
+
+    return Number(model.modelSizeB ?? 0) >= 7 ? 18 : 8;
+  }
+
+  if (model.runtime === 'llama.cpp') {
+    return optimisationProfile.platform === 'darwin' && optimisationProfile.accelerator === 'apple-silicon' ? 4 : 10;
+  }
+
+  return 0;
+}
+
+function getQuantisationFitScore(model, optimisationProfile) {
+  const quantisation = Array.isArray(model.quantisation) ? model.quantisation.join(' ') : String(model.quantisation ?? '');
+  const memoryBucketGb = optimisationProfile.memoryBucketGb;
+
+  if (/q3_k_m/i.test(quantisation)) {
+    return memoryBucketGb <= 8 ? 14 : -4;
+  }
+  if (/q4_0/i.test(quantisation)) {
+    return memoryBucketGb <= 16 ? 10 : 4;
+  }
+  if (/q4_k_m/i.test(quantisation)) {
+    return memoryBucketGb <= 16 ? 12 : 5;
+  }
+  if (/q5_k_m/i.test(quantisation)) {
+    return memoryBucketGb >= 16 ? 10 : -8;
+  }
+  if (/q6_k/i.test(quantisation)) {
+    return memoryBucketGb >= 32 ? 8 : -16;
+  }
+  if (/mlx/i.test(quantisation)) {
+    return optimisationProfile.accelerator === 'apple-silicon' ? 10 : -100;
+  }
+
+  return 0;
+}
+
+function getBenchmarkPerformanceStatus(model, optimisationProfile, benchmarkCache) {
+  const record = getBenchmarkRecordForModel(model, optimisationProfile, benchmarkCache);
+
+  if (!record) {
+    return { status: 'unknown' };
+  }
+
+  if (record.status === 'failed') {
+    return {
+      failureReason: record.failureReason ?? 'benchmark failed',
+      status: 'failed'
+    };
+  }
+
+  const firstTokenMs = Number(record.firstTokenMs ?? 0);
+  const totalMs = Number(record.totalMs ?? 0);
+  const tokensPerSecond = Number(record.tokensPerSecond ?? 0);
+
+  if (
+    firstTokenMs > liveCallFirstTokenTargetMs
+    || totalMs > liveCallTotalTargetMs
+    || tokensPerSecond < 4
+  ) {
+    return {
+      firstTokenMs,
+      totalMs,
+      tokensPerSecond,
+      status: 'degraded'
+    };
+  }
+
+  return {
+    firstTokenMs,
+    totalMs,
+    tokensPerSecond,
+    status: 'passed'
+  };
+}
+
+function getBenchmarkRecordForModel(model, optimisationProfile, benchmarkCache) {
+  if (!benchmarkCache || typeof benchmarkCache !== 'object') {
+    return null;
+  }
+
+  const key = getBenchmarkCacheKey(model, optimisationProfile);
+  const record = benchmarkCache[key];
+  if (!record || typeof record !== 'object') {
+    return null;
+  }
+
+  if (record.machineFingerprint !== optimisationProfile.machineFingerprint) {
+    return null;
+  }
+
+  if (Date.now() - Number(record.createdAtMs ?? 0) > localAiBenchmarkTtlMs) {
+    return null;
+  }
+
+  return record;
+}
+
+function getBenchmarkCacheKey(model, optimisationProfile) {
+  const runtimeVersion = String(optimisationProfile.runtimeVersions?.[model.runtime === 'mlx-lm' ? 'mlxLm' : 'llamaCpp'] ?? 'runtime-unknown');
+  const quantisation = Array.isArray(model.quantisation) ? model.quantisation.join('+') : String(model.quantisation ?? 'unknown');
+
+  return [
+    model.id,
+    model.runtime,
+    quantisation,
+    optimisationProfile.machineFingerprint,
+    runtimeVersion
+  ].join('|');
+}
+
+function buildAiSelectionReason(model, candidate, fallback) {
+  const performance = candidate.performance.status === 'passed'
+    ? 'passed local benchmark'
+    : candidate.performance.status === 'degraded'
+      ? 'has slower benchmark history'
+      : 'needs local benchmark';
+  const fallbackText = fallback ? ` Fallback candidate: ${fallback.model.name}.` : '';
+
+  return `${model.name} has the best balanced live-call score (${Math.round(candidate.score)}) and ${performance}.${fallbackText}`;
 }
 
 function getHardwareFit(model, profile) {
@@ -544,10 +813,12 @@ function getRecommendationMemoryGb(profile) {
 
 module.exports = {
   buildSystemProfile,
+  buildModelOptimisationProfile,
   createMissingLocalLlmStatus,
   detectAvailableMemoryGb,
   estimateStableModelMemoryGb,
   getCurrentMemoryFit,
+  getBenchmarkCacheKey,
   getDefaultModelCataloguePath,
   getHardwareFit,
   getRecommendationMemoryGb,
