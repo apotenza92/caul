@@ -17,6 +17,7 @@ const userDataDir = process.env.CAUL_MACOS_E2E_USER_DATA ?? '/tmp/caul-macos-e2e
 const smokeOutputFile = `${userDataDir}/smoke-output.log`;
 const summaryDir = path.join(process.cwd(), 'artifacts', 'vm-e2e');
 const summaryPath = path.join(summaryDir, 'macos.json');
+const keepVmE2eBuilds = process.env.CAUL_VM_E2E_KEEP_BUILDS === '1';
 
 async function runPrlctl(args, options = {}) {
   if (typeof options.input === 'string') {
@@ -183,6 +184,8 @@ if (!ready) {
   });
 }
 
+await muteMacosVmAudio();
+
 const appDirectoryCheck = await runPrlctl(['exec', vmName, '/bin/test', '-d', packagePath]);
 const appBinaryCheck = await runPrlctl(['exec', vmName, '/bin/test', '-x', `${packagePath}/Contents/MacOS/Caul`]);
 const backendBinaryCheck = await runPrlctl(['exec', vmName, '/bin/test', '-x', backendPath]);
@@ -342,10 +345,64 @@ if (provisioningIssues.length > 0) {
     console.log(`- ${issue}`);
   }
 }
-console.log(`caul-vm-e2e ${JSON.stringify(summary)}`);
 
 if (!ok) {
   process.exit(1);
+}
+
+const cleanup = await cleanupMacosE2e();
+
+if (!cleanup.ok) {
+  await failMacosE2e('macOS VM E2E cleanup failed after a successful smoke run.', {
+    details: cleanup.text,
+    gates: summary.gates
+  });
+}
+
+summary.cleanup = cleanup.summary;
+await writeSummary(summary);
+console.log(`caul-vm-e2e ${JSON.stringify(summary)}`);
+
+async function muteMacosVmAudio() {
+  const mute = await runPrlctl([
+    'exec',
+    vmName,
+    '--current-user',
+    '/bin/zsh',
+    '-lc',
+    "osascript -e 'set volume output muted true' -e 'set volume output volume 0'"
+  ]);
+
+  if (!mute.ok) {
+    console.warn(`macOS VM audio mute failed: ${mute.text}`);
+  }
+}
+
+async function cleanupMacosE2e() {
+  if (keepVmE2eBuilds) {
+    const summary = { kept: true, reason: 'CAUL_VM_E2E_KEEP_BUILDS=1' };
+    console.log(`macOS cleanup: skipped (${summary.reason})`);
+    return { ok: true, summary, text: '' };
+  }
+
+  const cleanup = await runGuestScript([
+    `pkill -x Caul >/dev/null 2>&1 || true`,
+    `rm -rf ${shellQuote(userDataDir)}`,
+    `rm -rf ${shellQuote(packagePath)}`,
+    'rm -f /tmp/caul-audio-isolation.wav /tmp/caul-audio-isolation-output.log /tmp/caul-audio-isolation-mic.log',
+    `printf 'caul-macos-cleanup {"kept":false,"removedPackagePath":true,"preservedModelPath":%s}\\n' ${shellQuote(JSON.stringify(modelPath))}`
+  ].join('\n'), { timeout: 45_000, maxBuffer: 10 * 1024 * 1024 });
+  const cleanupSummary = parsePrefixedJson(cleanup.text, 'caul-macos-cleanup') ?? {
+    kept: false,
+    preservedModelPath: modelPath,
+    raw: cleanup.text
+  };
+
+  if (cleanup.ok) {
+    console.log(`macOS cleanup: ${JSON.stringify(cleanupSummary)}`);
+  }
+
+  return { ok: cleanup.ok, summary: cleanupSummary, text: cleanup.text };
 }
 
 function getMacosProvisioningIssues({

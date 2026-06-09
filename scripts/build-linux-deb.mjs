@@ -113,6 +113,21 @@ Description: ${packageJson.description}
 `
 );
 
+writeFileSync(
+  path.join(controlDir, 'postinst'),
+  `#!/bin/sh
+set -e
+
+if [ -f "/opt/${appDisplayName}/chrome-sandbox" ]; then
+  chown root:root "/opt/${appDisplayName}/chrome-sandbox" || true
+  chmod 4755 "/opt/${appDisplayName}/chrome-sandbox" || true
+fi
+
+exit 0
+`
+);
+chmodSync(path.join(controlDir, 'postinst'), 0o755);
+
 rmSync(outputPath, { force: true });
 execFileSync('dpkg-deb', ['--root-owner-group', '--build', packageDir, outputPath], {
   stdio: 'inherit'

@@ -18,6 +18,7 @@ const packageArch = process.env.CAUL_PACKAGE_ARCH;
 const winArchitectures = packageArch ? [packageArch] : ['arm64'];
 const linuxArchitectures = packageArch ? [packageArch] : ['arm64'];
 const linuxArtifactArch = packageArch ?? '${arch}';
+const backendTargetTriple = resolveBackendTargetTriple(packagePlatform, packageArch);
 
 console.log(`\nCaul build configuration for v${version}`);
 console.log(`  Type: ${buildChannel}`);
@@ -43,6 +44,9 @@ const icons = isBeta || isDevBuild ? iconPaths.beta : iconPaths.stable;
 const backendBinaryName = packagePlatform === 'win' || packagePlatform === 'win32'
   ? 'caul-desktop-backend.exe'
   : 'caul-desktop-backend';
+const backendReleaseDir = backendTargetTriple
+  ? `target/${backendTargetTriple}/release`
+  : 'target/release';
 const macConfig = {
   artifactName: `${artifactPrefix}-macos-\${arch}.\${ext}`,
   category: 'public.app-category.productivity',
@@ -73,7 +77,7 @@ const macConfig = {
 };
 const commonExtraResources = [
   {
-    from: `target/release/${backendBinaryName}`,
+    from: `${backendReleaseDir}/${backendBinaryName}`,
     to: `bin/${backendBinaryName}`
   },
   {
@@ -92,6 +96,33 @@ const macExtraResources = [
     to: 'bin/CaulAudioHelper'
   }
 ];
+
+function resolveBackendTargetTriple(platform, arch) {
+  const targetArch = arch ?? process.arch;
+  const normalisedPlatform = platform === 'win' ? 'win32' : platform === 'mac' ? 'darwin' : platform;
+
+  if (normalisedPlatform === process.platform && targetArch === process.arch) {
+    return null;
+  }
+
+  if (normalisedPlatform === 'linux' && targetArch === 'arm64') {
+    return 'aarch64-unknown-linux-gnu';
+  }
+
+  if (normalisedPlatform === 'linux' && targetArch === 'x64') {
+    return 'x86_64-unknown-linux-gnu';
+  }
+
+  if (normalisedPlatform === 'win32' && targetArch === 'arm64') {
+    return 'aarch64-pc-windows-msvc';
+  }
+
+  if (normalisedPlatform === 'win32' && targetArch === 'x64') {
+    return 'x86_64-pc-windows-msvc';
+  }
+
+  return null;
+}
 
 module.exports = {
   afterPack: './scripts/after-pack.cjs',

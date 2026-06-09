@@ -6,11 +6,15 @@ const configPath = require.resolve('../electron-builder.config.cjs');
 
 function loadConfig(env = {}) {
   const originalEnv = {
+    CAUL_PACKAGE_ARCH: process.env.CAUL_PACKAGE_ARCH,
+    CAUL_PACKAGE_PLATFORM: process.env.CAUL_PACKAGE_PLATFORM,
     FORCE_BETA_BUILD: process.env.FORCE_BETA_BUILD,
     FORCE_DEV_BUILD: process.env.FORCE_DEV_BUILD,
     FORCE_DEV_PRIVATE_BUILD: process.env.FORCE_DEV_PRIVATE_BUILD
   };
 
+  delete process.env.CAUL_PACKAGE_ARCH;
+  delete process.env.CAUL_PACKAGE_PLATFORM;
   delete process.env.FORCE_BETA_BUILD;
   delete process.env.FORCE_DEV_BUILD;
   delete process.env.FORCE_DEV_PRIVATE_BUILD;
@@ -74,5 +78,49 @@ describe('electron-builder Windows config', () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
 
     expect(loadConfig().nsis.uninstallDisplayName).toBe('${productName}');
+  });
+
+  it('bundles the Windows-targeted backend for Windows arm64 packages', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const config = loadConfig({
+      CAUL_PACKAGE_ARCH: 'arm64',
+      CAUL_PACKAGE_PLATFORM: 'win'
+    });
+
+    expect(config.extraResources[0]).toMatchObject({
+      from: 'target/aarch64-pc-windows-msvc/release/caul-desktop-backend.exe',
+      to: 'bin/caul-desktop-backend.exe'
+    });
+  });
+});
+
+describe('electron-builder Linux config', () => {
+  it('bundles the Linux-targeted backend for Linux arm64 packages', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const config = loadConfig({
+      CAUL_PACKAGE_ARCH: 'arm64',
+      CAUL_PACKAGE_PLATFORM: 'linux'
+    });
+
+    expect(config.extraResources[0]).toMatchObject({
+      from: 'target/aarch64-unknown-linux-gnu/release/caul-desktop-backend',
+      to: 'bin/caul-desktop-backend'
+    });
+  });
+
+  it('bundles the Linux-targeted backend for Linux x64 packages', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const config = loadConfig({
+      CAUL_PACKAGE_ARCH: 'x64',
+      CAUL_PACKAGE_PLATFORM: 'linux'
+    });
+
+    expect(config.extraResources[0]).toMatchObject({
+      from: 'target/x86_64-unknown-linux-gnu/release/caul-desktop-backend',
+      to: 'bin/caul-desktop-backend'
+    });
   });
 });

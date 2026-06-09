@@ -75,6 +75,8 @@ if (!profile) {
 
 const vmName = process.env[profile.envName] ?? profile.defaultName;
 const packagePath = process.env[profile.packageEnv] ?? profile.defaultPackagePath;
+const keepVmE2eBuilds = process.env.CAUL_VM_E2E_KEEP_BUILDS === '1';
+const killLinuxBackendProcessesCommand = "ps -eo pid,args | awk '/caul-desktop-backend/ && !/awk/ { print $1 }' | xargs -r kill -9 >/dev/null 2>&1 || true";
 
 function powershellEncodedArgs(script) {
   return [
@@ -194,6 +196,7 @@ if (profile.os === 'linux') {
 }
 
 if (profileName === 'win') {
+  await muteWindowsVmAudio();
   await runWindowsPackageSmoke();
   process.exit(0);
 }
@@ -390,6 +393,7 @@ async function runWindowsPackageSmoke() {
   console.log(`External privacy capture: ${formatExternalPrivacyCaptureSummary(privacyCaptureSummary)}`);
   console.log(`Onboarding completion: ${formatCompletionSummary(launchSummary.completion)}`);
   const vmE2eSummary = {
+    aiResponse: aiSummary,
     gates: {
       ai: true,
       audioIsolation: true,
@@ -402,12 +406,115 @@ async function runWindowsPackageSmoke() {
       updates: true
     },
     ok: true,
+    onboarding: {
+      clickMethod: launchSummary.completion?.clickMethod ?? null,
+      click: launchSummary.completion?.click ?? null,
+      ok: onboardingGuiClickOk
+    },
     packagePath,
     profile: profileName,
+    rendererTranscription: {
+      guiClickMode: rendererSummary.guiClickMode === true,
+      guiClickCount: Array.isArray(rendererSummary.guiClicks) ? rendererSummary.guiClicks.length : 0,
+      guiClicksOk: Array.isArray(rendererSummary.guiClicks)
+        && rendererSummary.guiClicks.length >= 3
+        && rendererSummary.guiClicks.every((click) => click?.ok === true),
+      guiClicks: rendererSummary.guiClicks ?? [],
+      ok: rendererSummary.detected === true
+    },
     vmName
   };
+
+  const cleanup = await cleanupWindowsPackageSmoke(installation);
+
+  if (!cleanup.ok) {
+    await failVmE2e('Windows VM E2E cleanup failed after a successful smoke run.', {
+      details: cleanup.text,
+      gates: vmE2eSummary.gates
+    });
+  }
+
+  vmE2eSummary.cleanup = cleanup.summary;
   await writeVmE2eSummary(profileName, vmE2eSummary);
   console.log(`caul-vm-e2e ${JSON.stringify(vmE2eSummary)}`);
+}
+
+async function muteWindowsVmAudio() {
+  const signature = '[DllImport("winmm.dll")] public static extern int waveOutSetVolume(System.IntPtr hwo, uint dwVolume);';
+  const mute = await runPrlctl([
+    'exec',
+    vmName,
+    ...powershellEncodedArgs([
+      `$signature = ${powershellString(signature)}`,
+      'Add-Type -Namespace Caul -Name VmAudio -MemberDefinition $signature',
+      '[Caul.VmAudio]::waveOutSetVolume([IntPtr]::Zero, 0) | Out-Null',
+      'Write-Output "caul-vm-audio-muted windows"'
+    ].join('; '))
+  ], { timeout: 15_000, maxBuffer: 1024 * 1024 });
+
+  if (!mute.ok) {
+    console.warn(`Windows VM audio mute failed: ${mute.text}`);
+  }
+}
+
+async function cleanupWindowsPackageSmoke(installation) {
+  if (keepVmE2eBuilds) {
+    const summary = { kept: true, reason: 'CAUL_VM_E2E_KEEP_BUILDS=1' };
+    console.log(`Windows cleanup: skipped (${summary.reason})`);
+    return { ok: true, summary, text: '' };
+  }
+
+  const cleanup = await runPrlctl([
+    'exec',
+    vmName,
+    ...powershellEncodedArgs([
+      '$ErrorActionPreference = "Stop"',
+      `$appExe = ${powershellString(installation.appExe)}`,
+      `$packagePath = ${powershellString(packagePath)}`,
+      `$installedFromSetup = ${installation.installedFromSetup ? '$true' : '$false'}`,
+      '$appRoot = Split-Path -Parent $appExe',
+      'Get-Process Caul -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue',
+      '$tempNames = @("caul-win-launch-smoke", "caul-win-renderer-transcription-smoke", "caul-win-renderer-ai-smoke")',
+      'foreach ($name in $tempNames) { Remove-Item -Force -Recurse (Join-Path $env:TEMP $name) -ErrorAction SilentlyContinue }',
+      'Remove-Item -Force (Join-Path $env:TEMP "caul-known-16k.wav") -ErrorAction SilentlyContinue',
+      'Get-ChildItem $env:TEMP -Directory -Filter "caul-external-privacy-*" -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue',
+      '$removedAppRoot = $false',
+      '$removedPackagePath = $false',
+      'if ($installedFromSetup) {',
+      '  $uninstaller = Join-Path $appRoot "Uninstall Caul.exe"',
+      '  if (Test-Path $uninstaller) {',
+      '    $uninstall = Start-Process -PassThru -Wait -FilePath $uninstaller -ArgumentList "/S"',
+      '    if ($uninstall.ExitCode -ne 0) { throw "Uninstaller exited with code $($uninstall.ExitCode)" }',
+      '  }',
+      '  if (Test-Path $appRoot) { Remove-Item -Force -Recurse $appRoot -ErrorAction SilentlyContinue }',
+      '  $removedAppRoot = -not (Test-Path $appRoot)',
+      '} else {',
+      '  $caulCurrent = Join-Path $env:USERPROFILE "caul-current"',
+      '  $disposableDirectory = $appRoot.StartsWith($caulCurrent, [System.StringComparison]::OrdinalIgnoreCase) -or $appRoot.StartsWith($env:TEMP, [System.StringComparison]::OrdinalIgnoreCase)',
+      '  if ($disposableDirectory -and (Test-Path $appRoot)) {',
+      '    Remove-Item -Force -Recurse $appRoot',
+      '    $removedAppRoot = $true',
+      '  }',
+      '}',
+      '$packageIsDisposable = $packagePath.StartsWith((Join-Path $env:USERPROFILE "caul-current"), [System.StringComparison]::OrdinalIgnoreCase) -or $packagePath.StartsWith($env:TEMP, [System.StringComparison]::OrdinalIgnoreCase)',
+      'if ($packageIsDisposable -and (Test-Path $packagePath)) {',
+      '  Remove-Item -Force -Recurse $packagePath',
+      '  $removedPackagePath = $true',
+      '}',
+      '$summary = New-Object psobject -Property @{ kept = $false; removedAppRoot = $removedAppRoot; removedPackagePath = $removedPackagePath; appRoot = $appRoot }',
+      'Write-Output ("caul-windows-cleanup " + ($summary | ConvertTo-Json -Compress))'
+    ].join('; '))
+  ], { timeout: 90_000, maxBuffer: 10 * 1024 * 1024 });
+  const summary = parsePrefixedJson(cleanup.text, 'caul-windows-cleanup') ?? {
+    kept: false,
+    raw: cleanup.text
+  };
+
+  if (cleanup.ok) {
+    console.log(`Windows cleanup: ${JSON.stringify(summary)}`);
+  }
+
+  return { ok: cleanup.ok, summary, text: cleanup.text };
 }
 
 async function prepareWindowsPackageForSmoke() {
@@ -760,13 +867,37 @@ async function runLinuxPackageSmoke() {
     });
   }
 
+  await muteLinuxVmAudio(sshUser, ipAddress, knownHosts);
+
+  const preflightCleanup = await runLinuxCommand(
+    [
+      'pkill -x caul >/dev/null 2>&1 || true',
+      'pkill -x caul-desktop-backend >/dev/null 2>&1 || true',
+      killLinuxBackendProcessesCommand,
+      'pkill -x pw-record >/dev/null 2>&1 || true',
+      'pkill -x pw-play >/dev/null 2>&1 || true'
+    ].join(' && '),
+    sshUser,
+    ipAddress,
+    knownHosts
+  );
+
+  if (!preflightCleanup.ok) {
+    await failVmE2e('Linux VM E2E preflight cleanup failed.', {
+      details: preflightCleanup.text
+    });
+  }
+
   const packageCheck = await runLinuxCommand(
     [
       `test -f ${shellQuote(packagePath)}`,
       linuxPackageMetadataCheck(packagePath),
       profile.packageInstallOnly
         ? null
-        : `test -x ${shellQuote(`${repoPath}/release/linux-arm64-unpacked/resources/bin/caul-desktop-backend`)}`
+        : `test -x ${shellQuote(`${repoPath}/release/linux-arm64-unpacked/resources/bin/caul-desktop-backend`)}`,
+      profile.packageInstallOnly
+        ? null
+        : `file ${shellQuote(`${repoPath}/release/linux-arm64-unpacked/resources/bin/caul-desktop-backend`)} | grep -q 'ELF 64-bit.*ARM aarch64'`
     ].filter(Boolean).join(' && '),
     sshUser,
     ipAddress,
@@ -840,6 +971,16 @@ async function runLinuxPackageSmoke() {
       profile: profileName,
       vmName
     };
+    const cleanup = await cleanupLinuxPackageSmoke(repoPath);
+
+    if (!cleanup.ok) {
+      await failVmE2e('Linux VM E2E cleanup failed after a successful RPM install smoke run.', {
+        details: cleanup.text,
+        gates: vmE2eSummary.gates
+      });
+    }
+
+    vmE2eSummary.cleanup = cleanup.summary;
     await writeVmE2eSummary(profileName, vmE2eSummary);
     console.log(`caul-vm-e2e ${JSON.stringify(vmE2eSummary)}`);
     return;
@@ -1047,6 +1188,7 @@ async function runLinuxPackageSmoke() {
   console.log(`Pre-setup privacy: ${formatPrivacySummary(launchSummary.privacy)}`);
   console.log(`Onboarding completion: ${formatCompletionSummary(launchSummary.completion)}`);
   const vmE2eSummary = {
+    aiResponse: aiSummary,
     gates: {
       ai: true,
       audioIsolation: true,
@@ -1059,12 +1201,123 @@ async function runLinuxPackageSmoke() {
       updates: true
     },
     ok: true,
+    onboarding: {
+      clickMethod: launchSummary.completion?.clickMethod ?? null,
+      click: launchSummary.completion?.click ?? null,
+      ok: onboardingGuiClickOk
+    },
     packagePath,
     profile: profileName,
+    rendererTranscription: {
+      guiClickMode: rendererSummary.guiClickMode === true,
+      guiClickCount: Array.isArray(rendererSummary.guiClicks) ? rendererSummary.guiClicks.length : 0,
+      guiClicksOk: Array.isArray(rendererSummary.guiClicks)
+        && rendererSummary.guiClicks.length >= 3
+        && rendererSummary.guiClicks.every((click) => click?.ok === true),
+      guiClicks: rendererSummary.guiClicks ?? [],
+      ok: rendererSummary.detected === true
+    },
     vmName
   };
+  const cleanup = await cleanupLinuxPackageSmoke(repoPath);
+
+  if (!cleanup.ok) {
+    await failVmE2e('Linux VM E2E cleanup failed after a successful smoke run.', {
+      details: cleanup.text,
+      gates: vmE2eSummary.gates
+    });
+  }
+
+  vmE2eSummary.cleanup = cleanup.summary;
   await writeVmE2eSummary(profileName, vmE2eSummary);
   console.log(`caul-vm-e2e ${JSON.stringify(vmE2eSummary)}`);
+}
+
+async function muteLinuxVmAudio(sshUser, ipAddress, knownHosts) {
+  const mute = await runLinuxCommand(
+    [
+      'wpctl set-volume @DEFAULT_AUDIO_SINK@ 0 2>/dev/null || pactl set-sink-volume @DEFAULT_SINK@ 0% 2>/dev/null || true',
+      'wpctl set-mute @DEFAULT_AUDIO_SINK@ 1 2>/dev/null || pactl set-sink-mute @DEFAULT_SINK@ 1 2>/dev/null || true',
+      'wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null || pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null || true'
+    ].join(' && '),
+    sshUser,
+    ipAddress,
+    knownHosts
+  );
+
+  if (!mute.ok) {
+    console.warn(`Linux VM audio mute failed: ${mute.text}`);
+  }
+}
+
+async function cleanupLinuxPackageSmoke(repoPath) {
+  if (keepVmE2eBuilds) {
+    const summary = { kept: true, reason: 'CAUL_VM_E2E_KEEP_BUILDS=1' };
+    console.log(`Linux cleanup: skipped (${summary.reason})`);
+    return { ok: true, summary, text: '' };
+  }
+
+  const packageIsShared = isSharedVmPath(packagePath);
+  const repoIsShared = isSharedVmPath(repoPath);
+  const buildCleanup = [];
+
+  if (!packageIsShared) {
+    buildCleanup.push(`rm -rf ${shellQuote(packagePath)}`);
+  }
+
+  if (!repoIsShared) {
+    buildCleanup.push(
+      `rm -rf ${shellQuote(`${repoPath}/release/linux-arm64-unpacked`)}`,
+      `rm -rf ${shellQuote(`${repoPath}/artifacts/linux-renderer-transcription-smoke-user-data`)}`
+    );
+  }
+
+  const uninstallCommand = profile.packageType === 'rpm'
+    ? '(rpm -q caul >/dev/null 2>&1 && (dnf remove -y caul || rpm -e caul)) || true'
+    : '(dpkg -s caul >/dev/null 2>&1 && dpkg -r caul) || true';
+  const cleanupCommand = [
+    'set -euo pipefail',
+    'pkill -x caul >/dev/null 2>&1 || true',
+    'pkill -x caul-desktop-backend >/dev/null 2>&1 || true',
+    killLinuxBackendProcessesCommand,
+    'pkill -x pw-record >/dev/null 2>&1 || true',
+    'pkill -x pw-play >/dev/null 2>&1 || true',
+    uninstallCommand,
+    'pkill -x caul >/dev/null 2>&1 || true',
+    'pkill -x caul-desktop-backend >/dev/null 2>&1 || true',
+    killLinuxBackendProcessesCommand,
+    'pkill -x pw-record >/dev/null 2>&1 || true',
+    'pkill -x pw-play >/dev/null 2>&1 || true',
+    'rm -rf /tmp/caul-linux-launch-smoke-user-data /tmp/caul-linux-renderer-ai-smoke',
+    'rm -f /tmp/caul-known-16k.wav /tmp/caul-renderer-known-16k.wav /tmp/caul-audio-stimulus.wav',
+    'rm -f /tmp/caul-pw-play*.log /tmp/caul-renderer-pw-play.log',
+    'rm -f /var/crash/_opt_Caul_caul*.crash',
+    ...buildCleanup,
+    `printf 'caul-linux-cleanup {"kept":false,"packagePathRemoved":${packageIsShared ? 'false' : 'true'},"repoReleaseRemoved":${repoIsShared ? 'false' : 'true'}}\\n'`
+  ].join('\n');
+  const cleanup = await runPrlctl([
+    'exec',
+    vmName,
+    '/bin/bash',
+    '-lc',
+    cleanupCommand
+  ], { timeout: 90_000, maxBuffer: 10 * 1024 * 1024 });
+  const summary = parsePrefixedJson(cleanup.text, 'caul-linux-cleanup') ?? {
+    kept: false,
+    raw: cleanup.text,
+    packagePathShared: packageIsShared,
+    repoPathShared: repoIsShared
+  };
+
+  if (cleanup.ok) {
+    console.log(`Linux cleanup: ${JSON.stringify(summary)}`);
+  }
+
+  return { ok: cleanup.ok, summary, text: cleanup.text };
+}
+
+function isSharedVmPath(value) {
+  return /^\/(?:media\/psf|mnt\/hgfs)\//.test(String(value));
 }
 
 async function runLinuxCommand(command, sshUser, ipAddress, knownHosts, options = {}) {

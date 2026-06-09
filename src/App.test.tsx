@@ -735,7 +735,7 @@ describe('App', () => {
     expect(screen.queryByLabelText('Reasoning')).not.toBeInTheDocument();
   });
 
-  it('requires ChatGPT sign in when Cloud is selected', async () => {
+  it('does not require ChatGPT sign in before onboarding can finish', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
     const user = userEvent.setup();
     const bridge = installTestBridge();
@@ -747,7 +747,7 @@ describe('App', () => {
     expect(bridge.selectedAiProviders).toEqual(['cloud']);
     expect(screen.getByText('Sends to ChatGPT. Faster and smarter than Local.')).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'Sign in with ChatGPT' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Start using Caul' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Start using Caul' })).toBeEnabled();
   });
 
   it('starts the Caul-managed local AI download from onboarding', async () => {
@@ -844,7 +844,7 @@ describe('App', () => {
     expect(await screen.findAllByText('Still needed')).not.toHaveLength(0);
     expect(screen.getAllByText('Screen & System Audio Recording')).not.toHaveLength(0);
     expect(screen.getAllByText('Local transcription')).not.toHaveLength(0);
-    expect(screen.getAllByText('Local AI')).not.toHaveLength(0);
+    expect(screen.queryByText('Local AI')).not.toBeInTheDocument();
     expect(screen.queryByText('ChatGPT sign in')).not.toBeInTheDocument();
   });
 
@@ -1187,7 +1187,7 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Caul Settings' })).not.toHaveClass('border-border');
   });
 
-  it('keeps the top-right X close button on non-macOS platforms', async () => {
+  it('puts quit before hide on non-macOS platforms', async () => {
     installTestBridge({
       runtimeContext: testRuntimeContext({
         isMac: false,
@@ -1201,11 +1201,11 @@ describe('App', () => {
       expect(screen.getByRole('button', { name: 'Hide Caul app' })).toHaveAttribute('data-platform', 'desktop');
     });
 
-    expect(screen.getByRole('button', { name: 'Hide Caul app' })).toHaveClass('right-9');
+    expect(screen.getByRole('button', { name: 'Hide Caul app' })).toHaveClass('right-1');
     expect(screen.getByRole('button', { name: 'Hide Caul app' })).toHaveClass('cursor-default');
     expect(screen.getByRole('button', { name: 'Hide Caul app' }).querySelector('svg')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Quit Caul' })).toHaveAttribute('data-platform', 'desktop');
-    expect(screen.getByRole('button', { name: 'Quit Caul' })).toHaveClass('right-1');
+    expect(screen.getByRole('button', { name: 'Quit Caul' })).toHaveClass('right-9');
     expect(screen.getByRole('button', { name: 'Quit Caul' }).querySelector('svg')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Caul Settings' })).toHaveClass('left-1.5');
     expect(screen.getByRole('button', { name: 'Caul Settings' })).not.toHaveClass('right-1.5');
@@ -1247,14 +1247,8 @@ describe('App', () => {
     'right',
     'bottom',
     'left'
-  ] as const)('adapts home actions to the %s handle edge', async (handleEdge) => {
+  ] as const)('keeps home toolbar tooltip directions stable with the %s handle edge', async (handleEdge) => {
     const user = userEvent.setup();
-    const expectedTooltipSide = {
-      bottom: 'top',
-      left: 'right',
-      right: 'left',
-      top: 'bottom'
-    }[handleEdge];
 
     installTestBridge({
       privateOverlayState: testPrivateOverlayStateForEdge(handleEdge)
@@ -1326,7 +1320,7 @@ describe('App', () => {
     expect(startListeningTooltip).toHaveTextContent(
       'Click Start Listening while playing something through your speakers or headphones.'
     );
-    expect(startListeningTooltip).toHaveAttribute('data-side', expectedTooltipSide);
+    expect(startListeningTooltip).toHaveAttribute('data-side', 'bottom');
 
     await user.unhover(transcriptQueries.getByRole('button', { name: 'Start Listening' }));
 
@@ -4488,9 +4482,6 @@ function installTestBridge(overrides: {
         }
       }
     };
-    const localAiReady = Boolean(localLlmStatus.runtime.installed && localLlmStatus.model?.installed);
-    const cloudAiReady = Boolean(piStatus.connected);
-    const aiReady = selectedAiProvider === 'cloud' ? cloudAiReady : localAiReady;
     const transcriptionReady = Boolean(
       selectedLocalTranscriptionModel
       && parakeetStatus.installed
@@ -4498,7 +4489,7 @@ function installTestBridge(overrides: {
     );
     const permissions = await window.caul!.permissions!.status();
     const permissionsReady = permissions.permissions.every((permission) => permission.status === 'granted');
-    const complete = permissionsReady && transcriptionReady && aiReady;
+    const complete = permissionsReady && transcriptionReady;
 
     return {
       ...current,

@@ -45,6 +45,12 @@ impl RunningSystemAudio {
     }
 }
 
+impl Drop for RunningSystemAudio {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
 #[allow(dead_code)]
 enum PlatformRunningSystemAudio {
     #[cfg(target_os = "macos")]

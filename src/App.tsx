@@ -91,8 +91,8 @@ const layout = {
   windowTitleBar: 'relative z-[60] flex h-8 select-none items-center justify-center border-b border-border/70 bg-background/95 text-muted-foreground',
   windowTitleBarDragArea: 'absolute inset-0 flex min-w-0 cursor-default items-center justify-center px-12 active:cursor-default',
   windowTitleBarTitle: 'truncate text-sm font-medium text-foreground',
-  windowTitleBarButton: 'absolute right-9 top-1/2 z-10 size-7 -translate-y-1/2 cursor-default text-muted-foreground hover:text-foreground',
-  windowTitleBarQuitButton: 'absolute right-1 top-1/2 z-10 size-7 -translate-y-1/2 cursor-default text-muted-foreground hover:text-foreground',
+  windowTitleBarButton: 'absolute right-1 top-1/2 z-10 size-7 -translate-y-1/2 cursor-default text-muted-foreground hover:text-foreground',
+  windowTitleBarQuitButton: 'absolute right-9 top-1/2 z-10 size-7 -translate-y-1/2 cursor-default text-muted-foreground hover:text-foreground',
   windowTitleBarSettingsButton: 'absolute top-1/2 z-[70] flex size-7 -translate-y-1/2 items-center justify-center rounded-md bg-transparent p-0 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
   windowTitleBarSettingsButtonMac: 'right-1.5',
   windowTitleBarSettingsButtonDesktop: 'left-1.5',
@@ -1439,10 +1439,6 @@ function getMissingOnboardingItems(status: OnboardingStatus | null) {
     missing.push('Local transcription');
   }
 
-  if (!isOnboardingAiReady(status)) {
-    missing.push(status.ai.provider === 'cloud' ? 'ChatGPT sign-in' : 'Local AI');
-  }
-
   return missing;
 }
 
@@ -1452,14 +1448,6 @@ function isOnboardingTranscriptionModelReady(status: OnboardingStatus) {
     && status.parakeet.installed
     && status.parakeet.modelId === status.selectedLocalTranscriptionModel
   );
-}
-
-function isOnboardingAiReady(status: OnboardingStatus) {
-  const localRuntime = getCaulLocalLlmStatus(status);
-  const localReady = Boolean(localRuntime?.runtime.installed && localRuntime.model?.installed);
-  const cloudReady = Boolean(status.pi.connected);
-
-  return status.ai.provider === 'cloud' ? cloudReady : localReady;
 }
 
 function OnboardingPanel({
@@ -2236,16 +2224,9 @@ function getHomePanelGridClassName(edge: OverlayEdge) {
   return layout.panelGrid;
 }
 
-function getButtonTooltipSideForEdge(edge: OverlayEdge): TooltipSide {
-  const sideByEdge = {
-    bottom: 'top',
-    left: 'right',
-    right: 'left',
-    top: 'bottom'
-  } as const satisfies Record<OverlayEdge, TooltipSide>;
+const homeTopToolbarTooltipSide = 'bottom' satisfies TooltipSide;
+const homeBottomToolbarTooltipSide = 'top' satisfies TooltipSide;
 
-  return sideByEdge[edge];
-}
 
 function isLeadingToolbarEdge(edge: OverlayEdge) {
   return edge === 'top';
@@ -2872,7 +2853,7 @@ function HomePage({
   const autoSendTooltip = 'Sends the transcript to AI when listening stops.';
   const hasTranscriptSessions = visibleTranscriptSessions.length > 0;
   const isVerticalToolbar = isVerticalToolbarEdge(edge);
-  const bottomActionTooltipSide = getButtonTooltipSideForEdge(edge);
+  const bottomActionTooltipSide = homeBottomToolbarTooltipSide;
   const activeTranscriptSessionId = visibleTranscriptSessions.at(-1)?.id ?? null;
   const activeAiResponseId = visibleAiResponses.at(-1)?.id ?? null;
   const lastScrolledTranscriptSessionIdRef = useRef<string | null>(null);
@@ -3422,7 +3403,7 @@ function HomeActionToolbar({
   toggleListening: () => void;
 }) {
   const isVertical = isVerticalToolbarEdge(edge);
-  const tooltipSide = getButtonTooltipSideForEdge(edge);
+  const tooltipSide = homeTopToolbarTooltipSide;
   const hasAudioSource = listenToMicrophone || listenToSystemAudio;
   const startButtonDisabled = isBusy || (!canStartListening && hasAudioSource);
   const startListeningTooltip = isListening
@@ -3596,7 +3577,7 @@ function HomeBottomActionToolbar({
   onDownloadTranscript: (format: TranscriptDownloadFormat) => void;
   transcriptionIsAsking: boolean;
 }) {
-  const tooltipSide = getButtonTooltipSideForEdge(edge);
+  const tooltipSide = homeBottomToolbarTooltipSide;
 
   return (
     <div className={layout.homeToolbarBottomActions} aria-label="Bottom transcript actions">

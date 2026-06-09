@@ -289,15 +289,15 @@ textarea,
 
   .caul-handle-button {
     --handle-surface: oklch(1 0 0 / 100%);
-    --handle-surface-closed: oklch(1 0 0 / 42%);
-    --handle-surface-hover: oklch(1 0 0 / 84%);
-    --handle-border: oklch(0.12 0 0 / 18%);
+    --handle-surface-closed: oklch(1 0 0 / 96%);
+    --handle-surface-hover: oklch(1 0 0 / 100%);
+    --handle-border: transparent;
     --handle-icon: oklch(0.12 0 0 / 96%);
     --handle-icon-hover: oklch(0.08 0 0 / 100%);
     align-items: center;
     appearance: none;
     background: var(--handle-surface);
-    border: 0.5px solid var(--handle-border);
+    border: 0;
     border-radius: 9999px;
     box-shadow: none;
     color: var(--handle-icon);
@@ -322,9 +322,9 @@ textarea,
 
   .dark .caul-handle-button {
     --handle-surface: oklch(0.035 0 0 / 100%);
-    --handle-surface-closed: oklch(0.035 0 0 / 44%);
-    --handle-surface-hover: oklch(0.035 0 0 / 86%);
-    --handle-border: oklch(1 0 0 / 20%);
+    --handle-surface-closed: oklch(0.035 0 0 / 92%);
+    --handle-surface-hover: oklch(0.035 0 0 / 100%);
+    --handle-border: transparent;
     --handle-icon: oklch(0.985 0 0 / 96%);
     --handle-icon-hover: oklch(1 0 0 / 100%);
   }

@@ -265,10 +265,10 @@ async function getPrivateWindowProtectionSummary() {
   const diagnosticWindow = getPrivateWindowProtectionDiagnosticSummary();
   const captureProbe = await getPrivateWindowCaptureProbeSummary();
   const windows = [
-    ['overlay', privateOverlayWindow],
-    ['handle', privateOverlayHandleWindow],
+    ['overlay', privateOverlayWindow, true],
+    ['handle', privateOverlayHandleWindow, false],
     ...(shouldProtectAllAppWindows() ? [['onboarding', onboardingWindow]] : [])
-  ].map(([name, window]) => {
+  ].map(([name, window, requiresProtection = true]) => {
     const exists = Boolean(window && !window.isDestroyed());
     const contentProtected = exists && typeof window.isContentProtected === 'function'
       ? window.isContentProtected()
@@ -279,7 +279,8 @@ async function getPrivateWindowProtectionSummary() {
       exists,
       name,
       nativeProtection: exists ? packagedPrivacySmokeState.nativeProtection.get(window) ?? null : null,
-      protectionAttempted: exists ? packagedPrivacySmokeState.protectedWindows.has(window) : false
+      protectionAttempted: exists ? packagedPrivacySmokeState.protectedWindows.has(window) : false,
+      requiresProtection
     };
   });
   const shouldProtect = shouldProtectPrivateWindowContent();
@@ -290,6 +291,7 @@ async function getPrivateWindowProtectionSummary() {
     diagnosticWindow,
     ok: !shouldProtect || windows.every((window) => (
       !window.exists
+      || !window.requiresProtection
       || (
         process.platform === 'win32'
           ? captureProbe?.ok === true && window.protectionAttempted === true
@@ -4143,15 +4145,12 @@ async function getOnboardingStatus({ refreshCatalogue = true } = {}) {
   const profileSettings = readProfileSettings();
   const selectedLocalTranscriptionModel = getSelectedLocalTranscriptionModelId();
   const selectedAiProvider = ai.provider;
-  const localAiReady = isLocalAiRuntimeInstalled(ai.localRuntime);
-  const cloudAiReady = Boolean(pi.connected);
-  const aiReady = selectedAiProvider === 'local' ? localAiReady : cloudAiReady;
   const transcriptionModelReady = Boolean(
     selectedLocalTranscriptionModel
     && parakeet.installed
     && parakeet.modelId === selectedLocalTranscriptionModel
   );
-  const complete = permissionsComplete && transcriptionModelReady && aiReady;
+  const complete = permissionsComplete && transcriptionModelReady;
 
   return {
     ok: true,
@@ -4408,7 +4407,7 @@ function stopLocalTranscriptionWarmDaemon(force = false) {
   }
 
   if (force) {
-    child.kill('SIGTERM');
+    child.kill(process.platform === 'win32' ? undefined : 'SIGKILL');
   }
 
   localTranscriptionProcess = null;
@@ -5936,8 +5935,8 @@ function createPrivateOverlayWindow() {
     useContentSize: true,
     show: false,
     frame: false,
-    transparent: !shouldUseOpaquePrivateWindowsForProtection(),
-    backgroundColor: shouldUseOpaquePrivateWindowsForProtection() ? '#111111' : '#00000000',
+    transparent: true,
+    backgroundColor: '#00000000',
     title: getAppDisplayName(),
     skipTaskbar: true,
     resizable: false,
@@ -6795,8 +6794,8 @@ function createPrivateOverlayHandleWindow() {
     useContentSize: true,
     show: false,
     frame: false,
-    transparent: !shouldUseOpaquePrivateWindowsForProtection(),
-    backgroundColor: shouldUseOpaquePrivateWindowsForProtection() ? '#111111' : '#00000000',
+    transparent: true,
+    backgroundColor: '#00000000',
     title: 'Caul Overlay Handle',
     alwaysOnTop: true,
     focusable: false,
@@ -6819,8 +6818,6 @@ function createPrivateOverlayHandleWindow() {
   if (!shouldUseOpaquePrivateWindowsForProtection()) {
     privateOverlayHandleWindow.setOpacity(state.handle.opacity);
   }
-  applyPrivateWindowProtection(privateOverlayHandleWindow);
-  refreshPrivateWindowContentProtectionSoon(privateOverlayHandleWindow);
   persistPrivateOverlayHandleState(privateOverlayHandleWindow);
   loadRendererSurface(privateOverlayHandleWindow, 'handle');
   runPackagedLaunchSmokeIfRequested(privateOverlayHandleWindow, 'private-overlay-handle');
@@ -8597,10 +8594,7 @@ app.on('before-quit', () => {
     return;
   }
 
-  if (localTranscriptionProcess?.stdin?.writable) {
-    writeChildStdin(localTranscriptionProcess, { type: 'quit' }, 'before-quit-local-transcription');
-    localTranscriptionProcess.stdin.end();
-  }
+  stopLocalTranscriptionWarmDaemon(true);
   stopSystemAudioCapture();
   stopLocalParakeetDaemon({ force: true });
   cancelParakeetDownload();
