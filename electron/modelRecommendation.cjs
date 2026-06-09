@@ -608,7 +608,6 @@ function scoreAiPredictedFit(model, profile, optimisationProfile = buildModelOpt
   }
 
   const memoryHeadroom = getRecommendationMemoryGb(profile) - model.minimumFreeMemoryGb;
-  const currentMemoryHeadroom = Number(profile.currentAvailableMemoryGb ?? 0) - Number(model.minimumFreeMemoryGb ?? 0);
   const runtimeFitScore = getRuntimeFitScore(model, optimisationProfile);
   const quantisationScore = getQuantisationFitScore(model, optimisationProfile);
   const smokeScore = model.caulSmokeStatus === 'passed-basic-instruction'
@@ -619,7 +618,7 @@ function scoreAiPredictedFit(model, profile, optimisationProfile = buildModelOpt
   const sizePenalty = (Number(model.downloadSizeGb ?? 0) * 0.8)
     + (Number(model.estimatedMemoryGb ?? 0) * 0.7);
 
-  return 45 + memoryHeadroom * 2 + Math.min(10, currentMemoryHeadroom) + runtimeFitScore + quantisationScore + smokeScore - sizePenalty;
+  return 45 + memoryHeadroom * 2 + runtimeFitScore + quantisationScore + smokeScore - sizePenalty;
 }
 
 function scoreAiPredictedLiveCallValue(model, profile, optimisationProfile = buildModelOptimisationProfile(profile)) {

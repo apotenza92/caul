@@ -1359,7 +1359,7 @@ function linuxPackageMetadataCheck(packagePath) {
   return [
     `dpkg-deb -f ${shellQuote(packagePath)} Package | grep -qx caul`,
     `dpkg-deb -f ${shellQuote(packagePath)} Architecture | grep -qx arm64`,
-    `dpkg-deb -c ${shellQuote(packagePath)} | grep -q '/opt/Caul/resources/bin/caul-desktop-backend$'`
+    `dpkg-deb -c ${shellQuote(packagePath)} | awk '/\\/opt\\/Caul\\/resources\\/bin\\/caul-desktop-backend$/ { found = 1 } END { exit found ? 0 : 1 }'`
   ].join(' && ');
 }
 

@@ -672,11 +672,17 @@ describe('local LLM service', () => {
 
   it('installs the Caul-managed MLX runtime and prepares the MLX model on Apple Silicon', async () => {
     const root = mkdtempSync(join(tmpdir(), 'caul-local-mlx-test-'));
+    const progressEvents = [];
 
     try {
       const service = createLocalLlmService({
         app: { getPath: () => root },
         catalogue: createMlxOnlyCatalogue(),
+        emitStatus: (status) => {
+          if (status.progress) {
+            progressEvents.push(status.progress);
+          }
+        },
         spawn: fakeMlxSpawn(root),
         spawnSync: fakeMlxSpawnSync()
       });
@@ -690,6 +696,7 @@ describe('local LLM service', () => {
       expect(status.provider).toBe('caul-mlx');
       expect(status.runtime.installed).toBe(process.platform === 'darwin' && process.arch === 'arm64');
       expect(status.model.id).toBe('qwen3-1.7b-mlx-4bit');
+      expect(progressEvents.map((progress) => progress.label)).toContain('Finalising local AI model');
     } finally {
       rmSync(root, { force: true, recursive: true });
     }

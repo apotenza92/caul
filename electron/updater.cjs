@@ -351,14 +351,22 @@ function createUpdaterService({
   }
 
   async function installDownloadedUpdate() {
+    downloading = false;
+    lastResult = {
+      ok: true,
+      status: 'installing',
+      message: 'Restarting to install update.'
+    };
+    emitStatus();
+
     if (process.platform === 'darwin' || isLinuxAppImage()) {
       onBeforeInstallDownloadedUpdate?.();
       autoUpdater.quitAndInstall(false, true);
-      return { ok: true };
+      return status();
     }
 
     await shell.openExternal(availableUpdate?.downloadUrl || repositoryUrl);
-    return { ok: true };
+    return status();
   }
 
   async function openDownloadPage() {

@@ -17,6 +17,7 @@ const { getPreferredOverlaySizeForEdge } = require('./privateOverlayGeometry.cjs
 const { createStopFlushController } = require('./transcriptionStopFlush.cjs');
 const { createUpdaterService } = require('./updater.cjs');
 const { createHistoryService } = require('./history.cjs');
+const { getUsableSelectedLocalAiModelId } = require('./localAiSelection.cjs');
 const { createLocalLlmService } = require('./localLlm.cjs');
 const { buildLocalLlmPromptWithAttachments, forgetLocalLlmAttachments, preloadLocalLlmAttachments } = require('./llmAttachments.cjs');
 const { createProfileService } = require('./profile.cjs');
@@ -81,6 +82,14 @@ function emitSmokeLine(line) {
   } catch (error) {
     console.error(`caul-smoke-output failed ${error.message}`);
   }
+}
+
+function exitSmokeProcess(code = app.exitCode || process.exitCode || 0) {
+  if (typeof process.reallyExit === 'function') {
+    process.reallyExit(code);
+  }
+
+  process.exit(code);
 }
 const defaultHandleSizePreset = 'medium';
 const onboardingContentSize = {
@@ -3327,10 +3336,10 @@ function getLocalSystemProfile() {
 }
 
 function getSelectedLocalAiModelId() {
-  const modelId = readProfileSettings().selectedLocalAiModel;
-  const service = getLocalLlmService();
-
-  return typeof modelId === 'string' && service.getModelById(modelId) ? modelId : null;
+  return getUsableSelectedLocalAiModelId({
+    selectedModelId: readProfileSettings().selectedLocalAiModel,
+    service: getLocalLlmService()
+  });
 }
 
 function getPreferredLocalAiModelId() {
@@ -6620,7 +6629,7 @@ async function runOnboardingSmokeIfRequested(window) {
           fsSync.writeFileSync(path.join(onboardingSmokeDir, 'local-ai-lag.png'), image.toPNG());
           console.log(`caul-onboarding-local-ai-lag-smoke ${JSON.stringify(clickTarget)}`);
           app.exitCode = 1;
-          app.quit();
+          exitSmokeProcess();
           return;
         }
 
@@ -6740,11 +6749,11 @@ async function runOnboardingSmokeIfRequested(window) {
           app.exitCode = 1;
         }
 
-        app.quit();
+        exitSmokeProcess();
       } catch (error) {
         console.error(`caul-onboarding-local-ai-lag-smoke ${JSON.stringify({ ok: false, error: error.message })}`);
         app.exitCode = 1;
-        app.quit();
+        exitSmokeProcess();
       }
     }, 800);
     return;
@@ -6770,11 +6779,11 @@ async function runOnboardingSmokeIfRequested(window) {
       }
 
       console.log(`caul-onboarding-smoke ${JSON.stringify({ ok: true, dir: onboardingSmokeDir })}`);
-      app.quit();
+      exitSmokeProcess();
     } catch (error) {
       console.error(`caul-onboarding-smoke ${JSON.stringify({ ok: false, error: error.message })}`);
       app.exitCode = 1;
-      app.quit();
+      exitSmokeProcess();
     }
   }, 800);
 }
@@ -7874,17 +7883,8 @@ function createWindow() {
         app.exitCode = 1;
         process.exitCode = 1;
       } finally {
-        setTimeout(() => {
-          if (app.exitCode) {
-            app.exit(app.exitCode);
-            return;
-          }
-
-          app.exit(0);
-        }, smokeExitMs);
-        setTimeout(() => {
-          process.exit(app.exitCode || process.exitCode || 0);
-        }, smokeExitMs + 1_000).unref();
+        stopLocalTranscriptionWarmDaemon(true);
+        exitSmokeProcess();
       }
     });
   }
@@ -8533,7 +8533,9 @@ app.whenReady().then(async () => {
     startLocalTranscriptionWarmDaemon();
     void prepareLocalTranscriptionOnStartup();
   }
-  void warmSelectedLocalAiIfReady('startup');
+  if (smokeExitMs === 0 && !onboardingSmokeDir) {
+    void warmSelectedLocalAiIfReady('startup');
+  }
   warmPersistentPiRpcBridge();
   updatePrivateOverlayState((state) => ({
     ...state,
@@ -8579,31 +8581,29 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on('before-quit', () => {
-  isQuitting = true;
-  globalShortcut.unregisterAll();
-  updaterService?.stopSchedule();
-
-  if (isInstallingDownloadedUpdate) {
-    stopSystemAudioCapture();
-    stopLocalTranscriptionWarmDaemon(true);
-    stopLocalParakeetDaemon({ force: true });
-    cancelParakeetDownload();
-    getLocalLlmService().cancelDownload();
-    getLocalLlmService().stop();
-    return;
-  }
-
+function performAppShutdownCleanup() {
   stopLocalTranscriptionWarmDaemon(true);
   stopSystemAudioCapture();
   stopLocalParakeetDaemon({ force: true });
   cancelParakeetDownload();
   getLocalLlmService().cancelDownload();
   getLocalLlmService().stop();
+
+  if (isInstallingDownloadedUpdate) {
+    return;
+  }
+
   persistentPiRpcBridge?.dispose();
   persistentPiRpcBridge = null;
   backupPersistentPiRpcBridge?.dispose();
   backupPersistentPiRpcBridge = null;
+}
+
+app.on('before-quit', () => {
+  isQuitting = true;
+  globalShortcut.unregisterAll();
+  updaterService?.stopSchedule();
+  performAppShutdownCleanup();
 });
 
 app.on('window-all-closed', () => {

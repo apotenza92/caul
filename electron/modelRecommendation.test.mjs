@@ -515,6 +515,20 @@ Pages purgeable:                               14930.`);
     expect(recommendation.ai.model.id).toBe('gemma-4-12b-it-q4_0');
   });
 
+  it('does not down-rank a stronger model just because current free memory is temporarily low', () => {
+    const catalogue = loadModelCatalogue(resolve(root, 'model-catalog.json'));
+    const profile = buildSystemProfile({
+      osModule: fakeOs({ cores: 10, freeGb: 6.8, totalGb: 32 }),
+      processObject: fakeProcess(),
+      spawnSyncFn: fakeSpawn()
+    });
+    const recommendation = recommendFromCatalogue(catalogue, profile);
+
+    expect(recommendation.ai.recommendation).toBe('local');
+    expect(profile.modelMemoryGb).toBeGreaterThanOrEqual(16);
+    expect(recommendation.ai.model.id).toBe('gemma-4-12b-it-q4_0');
+  });
+
   it('recommends llama.cpp local AI on Windows and Linux', () => {
     const catalogue = loadModelCatalogue(resolve(root, 'model-catalog.json'));
     const profile = buildSystemProfile({

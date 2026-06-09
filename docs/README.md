@@ -12,7 +12,7 @@ The page currently offers a primary autodetected stable download button plus opt
 
 ## Updates
 
-Packaged stable and beta apps include GitHub-backed update checks. Stable builds stay on stable releases. Beta builds track the newest release across stable and prerelease tags while preserving the beta app identity. Automatic checks default to weekly and can be changed from `Settings > General > Updates`. Release privacy smokes disable update checks with `CAUL_DISABLE_UPDATE_CHECKS=1` so expected GitHub release traffic is not counted as hidden pre-setup network activity.
+Packaged stable and beta apps include GitHub-backed update checks. Stable builds stay on stable releases. Beta builds track the newest release across stable and prerelease tags while preserving the beta app identity. Automatic checks default to weekly and can be changed from `Settings > Updates`. Release privacy smokes disable update checks with `CAUL_DISABLE_UPDATE_CHECKS=1` so expected GitHub release traffic is not counted as hidden pre-setup network activity.
 
 ## Reading Guide
 

@@ -129,10 +129,11 @@ describe('App', () => {
     render(<App />);
 
     await openSettings(user);
+    await openSettingsSection(user, 'Storage');
 
     expect(await screen.findByLabelText('Save HTML history')).toBeChecked();
     expect(screen.getByText('/Users/alex/Documents/Caul')).toBeInTheDocument();
-    expect(screen.getByRole('group', { name: 'Caul folder' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'History and storage' })).toBeInTheDocument();
     expect(screen.getByText('Moved Caul folder, but 1 HTML history file could not be moved.')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Open Caul Folder' }));
@@ -170,9 +171,9 @@ describe('App', () => {
     expect(screen.getByText('System Audio')).toBeInTheDocument();
     expect(screen.queryByText('Microphone & System Audio')).not.toBeInTheDocument();
     expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual([
-      'Permissions',
       'Transcription',
-      'AI Model'
+      'AI responses',
+      'Permissions'
     ]);
     expect(screen.queryByText('Permission setup')).not.toBeInTheDocument();
   });
@@ -386,7 +387,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await screen.findByText('AI Model');
+    await screen.findByText('AI responses');
 
     expect(screen.queryByText('Permissions')).not.toBeInTheDocument();
     expect(screen.queryByText('Screen & System Audio Recording')).not.toBeInTheDocument();
@@ -577,10 +578,38 @@ describe('App', () => {
     expect(screen.getByText('Ready')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Use' })).not.toBeInTheDocument();
 
-    await selectSetting(user, 'Transcription model', 'Lightweight');
+    await selectSetting(user, 'Transcription model', 'Lower memory use');
 
     expect(screen.queryByText('Ready')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Use' })).toBeEnabled();
+  });
+
+  it('organises settings into clearer General, Storage, Updates and Models sections', async () => {
+    const user = userEvent.setup();
+
+    installTestBridge();
+    render(<App />);
+
+    await openSettings(user);
+
+    expect(screen.getByRole('group', { name: 'Floating button' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Auto-collapse' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Auto-collapse' })).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Caul folder' })).not.toBeInTheDocument();
+
+    await openSettingsSection(user, 'Storage');
+    expect(screen.getByRole('group', { name: 'History and storage' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Save HTML history' })).toBeInTheDocument();
+
+    await openSettingsSection(user, 'Updates');
+    expect(screen.getByRole('group', { name: 'Updates' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Automatic checks')).toHaveTextContent('Weekly');
+
+    await openSettingsSection(user, 'Models');
+    expect(screen.getByRole('group', { name: 'Transcription' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'AI responses' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'AI recommendations' })).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Model list' })).not.toBeInTheDocument();
   });
 
   it('starts ChatGPT sign in from onboarding', async () => {
@@ -620,6 +649,7 @@ describe('App', () => {
     expect(screen.getByText('Recommended')).toBeInTheDocument();
     expect(screen.getByText('Local and private. Slower and less intelligent than ChatGPT.')).toBeInTheDocument();
     expect(screen.queryByText('Qwen 2.5 3B Instruct Q4')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Local AI recommendation details' })).toBeInTheDocument();
     expect(screen.queryByText(/Artificial Analysis LLM Leaderboard/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Sign in with ChatGPT' })).not.toBeInTheDocument();
   });
@@ -631,7 +661,7 @@ describe('App', () => {
     render(<App />);
 
     const transcriptionHeading = await screen.findByRole('heading', { name: 'Transcription' });
-    const aiHeading = await screen.findByRole('heading', { name: 'AI Model' });
+    const aiHeading = await screen.findByRole('heading', { name: 'AI responses' });
 
     expect(transcriptionHeading.compareDocumentPosition(aiHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
@@ -705,12 +735,12 @@ describe('App', () => {
     await openSettings(user);
     await openSettingsSection(user, 'Models');
 
-    expect(screen.getByText('Check for newer model options.')).toBeInTheDocument();
+    expect(screen.getByText('Check for newer AI recommendations.')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Refresh Model List' }));
+    await user.click(screen.getByRole('button', { name: 'Refresh AI recommendations' }));
 
     await waitFor(() => expect(bridge.modelCatalogueRefreshes).toBe(1));
-    expect(await screen.findByText(/Model list refreshed/)).toHaveTextContent('2 sources checked');
+    expect(await screen.findByText(/AI recommendations refreshed/)).toHaveTextContent('2 sources checked');
   });
 
   it('keeps cloud model controls hidden until ChatGPT is signed in', async () => {
@@ -766,7 +796,8 @@ describe('App', () => {
 
     expect(bridge.localLlmDownloads).toBe(1);
     expect(bridge.selectedLocalAiDownloads).toEqual(['qwen2.5-3b-instruct-q4_k_m']);
-    expect(await screen.findByText('Preparing local AI · 0%')).toBeInTheDocument();
+    expect(await screen.findByText('Preparing local AI')).toBeInTheDocument();
+    expect(screen.queryByText('Preparing local AI · 0%')).not.toBeInTheDocument();
 
     act(() => {
       resolveDownload(testReadyLocalLlmStatus());
@@ -3081,7 +3112,7 @@ describe('App', () => {
     render(<App />);
 
     await openSettings(user);
-    expect(screen.getByRole('group', { name: 'System' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Advanced' })).toBeInTheDocument();
     expect(screen.queryByRole('group', { name: 'Setup' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Open Onboarding' })).not.toBeInTheDocument();
     expect(screen.queryByText('Restores window size and position, floating button position, model and listening sources, and starter prompt templates.')).not.toBeInTheDocument();
@@ -3211,12 +3242,13 @@ describe('App', () => {
     render(<App />);
 
     await openSettings(user);
+    await openSettingsSection(user, 'Updates');
 
     expect(screen.getByRole('group', { name: 'Updates' })).toBeInTheDocument();
     expect(screen.getByLabelText('Automatic checks')).toHaveTextContent('Weekly');
-    expect(screen.getByText('Running app: Caul Beta 0.1.8. Update channel: Beta.')).toBeInTheDocument();
+    expect(screen.getByText('Caul Beta 0.1.8 · Beta')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Check for Updates' }));
+    await user.click(screen.getByRole('button', { name: 'Check now' }));
 
     await waitFor(() => expect(bridge.updateChecks).toBe(1));
     expect(await screen.findByText(/Caul is up to date\./)).toBeInTheDocument();
@@ -3232,7 +3264,8 @@ describe('App', () => {
     installTestBridge();
     render(<App />);
     await openSettings(user);
-    expect(await screen.findByText('Running app: Caul Beta 0.1.8. Update channel: Beta.')).toBeInTheDocument();
+    await openSettingsSection(user, 'Updates');
+    expect(await screen.findByText('Caul Beta 0.1.8 · Beta')).toBeInTheDocument();
     cleanup();
 
     installTestBridge({
@@ -3243,7 +3276,8 @@ describe('App', () => {
     });
     render(<App />);
     await openSettings(user);
-    expect(await screen.findByText('Running app: Caul 0.1.8. Update channel: Stable.')).toBeInTheDocument();
+    await openSettingsSection(user, 'Updates');
+    expect(await screen.findByText('Caul 0.1.8 · Stable')).toBeInTheDocument();
     cleanup();
 
     installTestBridge({
@@ -3254,7 +3288,8 @@ describe('App', () => {
     });
     render(<App />);
     await openSettings(user);
-    expect(await screen.findByText('Running app: Caul Dev 0.1.8. Update channel: Dev.')).toBeInTheDocument();
+    await openSettingsSection(user, 'Updates');
+    expect(await screen.findByText('Caul Dev 0.1.8 · Dev')).toBeInTheDocument();
     cleanup();
 
     installTestBridge({
@@ -3265,7 +3300,8 @@ describe('App', () => {
     });
     render(<App />);
     await openSettings(user);
-    expect(await screen.findByText('Running app: Caul Dev-Private 0.1.8. Update channel: Dev-Private.')).toBeInTheDocument();
+    await openSettingsSection(user, 'Updates');
+    expect(await screen.findByText('Caul Dev-Private 0.1.8 · Dev-Private')).toBeInTheDocument();
   });
 
   it('shows update download progress outside the update action row', async () => {
@@ -3294,8 +3330,9 @@ describe('App', () => {
     render(<App />);
 
     await openSettings(user);
+    await openSettingsSection(user, 'Updates');
 
-    expect(screen.getByRole('button', { name: 'Download Update' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Download' })).toBeDisabled();
     expect(screen.getByText(/^Last checked: Never\.$/)).toBeInTheDocument();
     expect(screen.getByText('Downloading update 42%')).toBeInTheDocument();
     expect(screen.queryByText(/Last checked: Never\. Downloading update 42%/)).not.toBeInTheDocument();
@@ -3321,10 +3358,62 @@ describe('App', () => {
     render(<App />);
 
     await openSettings(user);
+    await openSettingsSection(user, 'Updates');
 
-    expect(screen.queryByRole('button', { name: 'Download Update' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Restart Now' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Restart to update' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Release Page' })).toBeInTheDocument();
+  });
+
+  it('shows restart progress immediately after clicking restart to update', async () => {
+    const user = userEvent.setup();
+    installTestBridge({
+      updateStatus: testUpdateStatus({
+        availableUpdate: {
+          prerelease: false,
+          releaseName: 'Caul 0.1.9',
+          version: '0.1.9'
+        },
+        lastResult: {
+          ok: true,
+          status: 'ready',
+          message: 'Update downloaded. Restart Caul to install it.'
+        }
+      })
+    });
+
+    render(<App />);
+
+    await openSettings(user);
+    await openSettingsSection(user, 'Updates');
+    await user.click(screen.getByRole('button', { name: 'Restart to update' }));
+
+    expect(await screen.findByRole('button', { name: 'Restarting...' })).toBeDisabled();
+  });
+
+  it('shows a quiet main notification for app updates and opens Updates', async () => {
+    const user = userEvent.setup();
+    installTestBridge({
+      updateStatus: testUpdateStatus({
+        availableUpdate: {
+          prerelease: false,
+          releaseName: 'Caul 0.1.9',
+          version: '0.1.9'
+        },
+        lastResult: {
+          ok: true,
+          status: 'available',
+          message: 'Caul 0.1.9 is available.'
+        }
+      })
+    });
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Caul notifications' }));
+    await user.click(await screen.findByRole('button', { name: 'App update available' }));
+
+    expect(await screen.findByRole('group', { name: 'Updates' })).toBeInTheDocument();
   });
 
   it('streams AI response deltas while the request is still running', async () => {
@@ -4320,7 +4409,7 @@ async function openSettings(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByRole('navigation', { name: 'Settings sections' });
 }
 
-async function openSettingsSection(user: ReturnType<typeof userEvent.setup>, section: 'AI' | 'General' | 'Models' | 'Permissions') {
+async function openSettingsSection(user: ReturnType<typeof userEvent.setup>, section: 'General' | 'Models' | 'Updates' | 'Storage' | 'Permissions') {
   await user.click(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: section }));
 }
 
@@ -4948,7 +5037,19 @@ function installTestBridge(overrides: {
           return updateStatus;
         },
         downloadAndInstall: async () => updateStatus,
-        installDownloaded: async () => ({ ok: true }),
+        installDownloaded: async () => {
+          updateStatus = {
+            ...updateStatus,
+            downloading: false,
+            lastResult: {
+              ok: true,
+              status: 'installing',
+              message: 'Restarting to install update.'
+            }
+          };
+          emitUpdateStatus?.(updateStatus);
+          return { ok: true };
+        },
         onStatus: (callback) => {
           emitUpdateStatus = callback;
 

@@ -396,6 +396,7 @@ function createLocalLlmService({
 
   async function downloadMlxModel(model, progressRange = { end: 100, start: 0 }, downloadState) {
     fs.mkdirSync(getMlxCacheRoot(), { recursive: true });
+    removeIncompleteHuggingFaceBlobs(getModelPath(model));
     const totalBytes = Math.round((model.downloadSizeGb ?? 0) * 1024 * 1024 * 1024) || null;
     setDownloadProgress(downloadState, {
       downloadedBytes: 0,
@@ -411,6 +412,14 @@ function createLocalLlmService({
         'download',
         model.providerModelId
       ], 'Failed to download MLX local AI model.', { env: getMlxEnv() });
+      setDownloadProgress(downloadState, {
+        downloadedBytes: totalBytes ?? downloadState.progress.downloadedBytes,
+        label: 'Finalising local AI model',
+        percent: Math.max(progressRange.start, progressRange.end - 1),
+        phase: 'model',
+        totalBytes: null
+      });
+      emitStatus(status(downloadState.modelId));
       await waitForMlxSnapshotComplete(model, Math.max(60_000, Number(process.env.CAUL_LOCAL_LLM_MODEL_DOWNLOAD_TIMEOUT_MS ?? 30 * 60_000)));
     } finally {
       stopProgressPolling();
@@ -443,15 +452,16 @@ function createLocalLlmService({
 
       const downloadedBytes = getDirectorySizeBytes(modelPath);
       const transferPercent = Math.min(99, Math.round((downloadedBytes / totalBytes) * 100));
+      const isFinalising = transferPercent >= 99;
       setDownloadProgress(downloadState, {
-        downloadedBytes,
-        label: 'Downloading local AI model',
+        downloadedBytes: isFinalising ? totalBytes : downloadedBytes,
+        label: isFinalising ? 'Finalising local AI model' : 'Downloading local AI model',
         percent: mapDownloadPercent(transferPercent, {
           overallEnd: progressRange.end,
           overallStart: progressRange.start
         }),
         phase: 'model',
-        totalBytes
+        totalBytes: isFinalising ? null : totalBytes
       });
       emitStatus(status(downloadState.modelId));
       timer = setTimeout(poll, 750);
@@ -483,6 +493,29 @@ function createLocalLlmService({
       ), 0);
     } catch {
       return 0;
+    }
+  }
+
+  function removeIncompleteHuggingFaceBlobs(directoryPath) {
+    try {
+      if (!directoryPath || !fs.existsSync(directoryPath)) {
+        return;
+      }
+
+      for (const entry of fs.readdirSync(directoryPath, { withFileTypes: true })) {
+        const entryPath = pathModule.join(directoryPath, entry.name);
+
+        if (entry.isDirectory()) {
+          removeIncompleteHuggingFaceBlobs(entryPath);
+          continue;
+        }
+
+        if (/\.incomplete$/i.test(entry.name)) {
+          fs.rmSync(entryPath, { force: true });
+        }
+      }
+    } catch {
+      // Retry downloads should not fail just because cache cleanup could not inspect a file.
     }
   }
 
