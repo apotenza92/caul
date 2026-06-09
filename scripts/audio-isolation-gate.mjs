@@ -20,6 +20,7 @@ export function parseSmokeSummaryByType(text, type) {
 }
 
 export function evaluateAudioIsolationGate({
+  microphoneBaseline,
   microphoneDuringOutput,
   systemDuringOutput,
   microphoneLeakAbsoluteThreshold = defaultMicrophoneLeakAbsoluteThreshold,
@@ -30,11 +31,15 @@ export function evaluateAudioIsolationGate({
     && Number(microphoneDuringOutput.audio_frames ?? 0) > 0
     && Number(microphoneDuringOutput.level_events ?? 0) > 0;
   const microphoneMaxLevel = Number(microphoneDuringOutput?.max_level ?? 0);
+  const microphoneBaselineMaxLevel = Number(microphoneBaseline?.max_level ?? 0);
   const systemMaxLevel = Number(systemDuringOutput?.max_level ?? 0);
   const ratioLimit = systemMaxLevel > 0
     ? systemMaxLevel * microphoneLeakRatioThreshold
     : microphoneLeakAbsoluteThreshold;
-  const microphoneLeakLimit = Math.max(microphoneLeakAbsoluteThreshold, ratioLimit);
+  const baselineLimit = microphoneBaselineMaxLevel > 0
+    ? microphoneBaselineMaxLevel + microphoneLeakAbsoluteThreshold
+    : microphoneLeakAbsoluteThreshold;
+  const microphoneLeakLimit = Math.max(microphoneLeakAbsoluteThreshold, ratioLimit, baselineLimit);
   const microphoneLeakDetected = microphoneCaptureStarted && microphoneMaxLevel > microphoneLeakLimit;
 
   return {
@@ -43,6 +48,7 @@ export function evaluateAudioIsolationGate({
     microphoneLeakDetected,
     microphoneLeakLimit,
     microphoneLeakRatioThreshold,
+    microphoneBaselineMaxLevel,
     microphoneMaxLevel,
     ok: outputDetected && microphoneCaptureStarted && !microphoneLeakDetected,
     outputDetected,

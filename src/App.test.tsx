@@ -167,7 +167,8 @@ describe('App', () => {
 
     expect(await screen.findByAltText('Caul')).toBeInTheDocument();
     expect(screen.getByText('Screen & System Audio Recording')).toBeInTheDocument();
-    expect(screen.getByText('Microphone & System Audio')).toBeInTheDocument();
+    expect(screen.getByText('System Audio')).toBeInTheDocument();
+    expect(screen.queryByText('Microphone & System Audio')).not.toBeInTheDocument();
     expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual([
       'Permissions',
       'Transcription',
@@ -243,9 +244,9 @@ describe('App', () => {
     expect(await screen.findAllByText('Not granted')).toHaveLength(2);
     expect(bridge.requestedPermissions).toEqual([]);
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Grant Microphone & System Audio' }));
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Grant System Audio' }));
 
-    expect(bridge.requestedPermissions).toEqual(['microphone', 'system-audio']);
+    expect(bridge.requestedPermissions).toEqual(['system-audio']);
   });
 
   it('only requests the missing audio permission from the combined onboarding row', async () => {
@@ -275,12 +276,12 @@ describe('App', () => {
 
     render(<App />);
 
-    await userEvent.setup().click(await screen.findByRole('button', { name: 'Grant Microphone & System Audio' }));
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Grant System Audio' }));
 
     expect(bridge.requestedPermissions).toEqual(['system-audio']);
   });
 
-  it('offers to restart onboarding after the denied audio permission path is retried', async () => {
+  it('offers to restart onboarding after the denied system audio permission path is retried', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
     const bridge = installTestBridge({
       permissions: [
@@ -294,13 +295,13 @@ describe('App', () => {
           description: 'Required when listening to audio from other apps.',
           id: 'system-audio',
           label: 'System Audio',
-          status: 'granted'
+          status: 'denied'
         },
         {
           description: 'Required when listening to your microphone.',
           id: 'microphone',
           label: 'Microphone',
-          status: 'denied'
+          status: 'granted'
         }
       ]
     });
@@ -310,9 +311,9 @@ describe('App', () => {
     const user = userEvent.setup();
 
     expect(screen.queryByText('Changed it in System Settings? Restart Caul to apply the permission.')).not.toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: 'Grant Microphone & System Audio' })).toHaveTextContent('Open Settings');
+    expect(await screen.findByRole('button', { name: 'Grant System Audio' })).toHaveTextContent('Open Settings');
 
-    await user.click(await screen.findByRole('button', { name: 'Grant Microphone & System Audio' }));
+    await user.click(await screen.findByRole('button', { name: 'Grant System Audio' }));
 
     expect(await screen.findByText('Changed it in System Settings? Restart Caul to apply the permission.')).toBeInTheDocument();
 
@@ -350,11 +351,11 @@ describe('App', () => {
 
     const user = userEvent.setup();
 
-    expect(await screen.findByRole('button', { name: 'Grant Microphone & System Audio' })).toHaveTextContent('Open Settings');
+    expect(await screen.findByRole('button', { name: 'Grant System Audio' })).toHaveTextContent('Open Settings');
 
-    await user.click(screen.getByRole('button', { name: 'Grant Microphone & System Audio' }));
+    await user.click(screen.getByRole('button', { name: 'Grant System Audio' }));
 
-    expect(bridge.requestedPermissions).toEqual(['microphone']);
+    expect(bridge.requestedPermissions).toEqual(['system-audio']);
     expect(await screen.findByText('Changed it in System Settings? Restart Caul to apply the permission.')).toBeInTheDocument();
   });
 
@@ -1451,9 +1452,9 @@ describe('App', () => {
 
     expect(screen.getByRole('group', { name: 'Permissions' })).toBeInTheDocument();
     expect(screen.getByText('Screen & System Audio Recording')).toBeInTheDocument();
-    expect(screen.getByText('Microphone & System Audio')).toBeInTheDocument();
+    expect(screen.getByText('Microphone')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Grant Screen & System Audio Recording' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Grant Microphone & System Audio' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Grant Microphone' })).not.toBeInTheDocument();
   });
 
   it('hides unsupported permission rows in Settings', async () => {
@@ -1488,7 +1489,7 @@ describe('App', () => {
 
     expect(screen.queryByText('Screen & System Audio Recording')).not.toBeInTheDocument();
     expect(screen.queryByText('System Audio')).not.toBeInTheDocument();
-    expect(screen.getByText('Microphone & System Audio')).toBeInTheDocument();
+    expect(screen.getByText('Microphone')).toBeInTheDocument();
     expect(screen.queryByText('Unsupported')).not.toBeInTheDocument();
   });
 
@@ -1593,7 +1594,7 @@ describe('App', () => {
     await openSettingsSection(user, 'Permissions');
 
     expect(screen.queryByRole('button', { name: 'Grant Screen & System Audio Recording' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Grant Microphone & System Audio' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Grant Microphone' })).toBeInTheDocument();
   });
 
   it('replaces Start Listening with Permissions when a selected source is missing permission', async () => {

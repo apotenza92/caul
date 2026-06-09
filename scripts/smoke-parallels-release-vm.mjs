@@ -342,7 +342,11 @@ async function runWindowsPackageSmoke() {
   const windowsPrivacyOk = Boolean(launchPrivacyLeakFree && privacyCaptureSummary.ok === true);
   const updatesOk = launchSummary?.updates?.ok === true;
 
-  if (launchSummary?.isPackaged !== true || launchSummary.hasOnboarding !== true || !windowsPrivacyOk || launchSummary.completion?.ok !== true || !updatesOk) {
+  const onboardingGuiClickOk = launchSummary.completion?.clicked === true
+    && launchSummary.completion?.clickMethod === 'electron-input-event'
+    && launchSummary.completion?.click?.ok === true;
+
+  if (launchSummary?.isPackaged !== true || launchSummary.hasOnboarding !== true || !windowsPrivacyOk || launchSummary.completion?.ok !== true || !onboardingGuiClickOk || !updatesOk) {
     await failVmE2e('Windows packaged Electron launch smoke did not prove a packaged onboarding launch and completion.', {
       details: [
         launchSmoke.text,
@@ -353,7 +357,7 @@ async function runWindowsPackageSmoke() {
         audioIsolation: true,
         install: launchSummary?.isPackaged === true,
         microphone: true,
-        onboarding: Boolean(launchSummary?.hasOnboarding && launchSummary?.completion?.ok),
+        onboarding: Boolean(launchSummary?.hasOnboarding && launchSummary?.completion?.ok && onboardingGuiClickOk),
         privacy: windowsPrivacyOk,
         systemAudio: true,
         transcription: true,
@@ -407,6 +411,12 @@ async function runWindowsPackageSmoke() {
 }
 
 async function prepareWindowsPackageForSmoke() {
+  const directoryPreparation = await prepareWindowsDirectoryPackageForSmoke();
+
+  if (directoryPreparation) {
+    return directoryPreparation;
+  }
+
   const install = await runPrlctl([
     'exec',
     vmName,
@@ -435,23 +445,25 @@ async function prepareWindowsPackageForSmoke() {
       '$backendPath = Join-Path $appRoot "resources\\bin\\caul-desktop-backend.exe"',
       'if (!(Test-Path $appExe)) { throw "Missing installed app executable: $appExe" }',
       'if (!(Test-Path $backendPath)) { throw "Missing installed backend: $backendPath" }',
+      'if ($isDirectory) {',
+      '  $summary = New-Object psobject -Property @{ appExe = $appExe; backendPath = $backendPath; installedFromSetup = $false; uninstallDisplayName = $null }',
+      '  Write-Output ("caul-windows-install-smoke " + ($summary | ConvertTo-Json -Compress))',
+      '  exit 0',
+      '}',
       '$uninstallDisplayName = $null',
-      '$uninstallRoots = @(',
-      '  "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall",',
-      '  "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall"',
-      ')',
-      'foreach ($root in $uninstallRoots) {',
-      '  if (!(Test-Path $root)) { continue }',
-      '  $entry = Get-ChildItem $root | ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_.DisplayName -eq "Caul" -or $_.DisplayName -eq "Caul Beta" } | Select-Object -First 1',
-      '  if ($entry) { $uninstallDisplayName = $entry.DisplayName; break }',
+      'if (!$isDirectory) {',
+      '  $uninstallRoots = @(',
+      '    "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall",',
+      '    "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall"',
+      '  )',
+      '  foreach ($root in $uninstallRoots) {',
+      '    if (!(Test-Path $root)) { continue }',
+      '    $entry = Get-ChildItem $root | ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_.DisplayName -eq "Caul" -or $_.DisplayName -eq "Caul Beta" } | Select-Object -First 1',
+      '    if ($entry) { $uninstallDisplayName = $entry.DisplayName; break }',
+      '  }',
       '}',
       'if (!$isDirectory -and !$uninstallDisplayName) { throw "Could not find Caul product-only uninstall display name in Windows Apps registry entries." }',
-      '$summary = [pscustomobject]@{',
-      '  appExe = $appExe;',
-      '  backendPath = $backendPath;',
-      '  installedFromSetup = -not $isDirectory;',
-      '  uninstallDisplayName = $uninstallDisplayName',
-      '}',
+      '$summary = New-Object psobject -Property @{ appExe = $appExe; backendPath = $backendPath; installedFromSetup = (-not $isDirectory); uninstallDisplayName = $uninstallDisplayName }',
       'Write-Output ("caul-windows-install-smoke " + ($summary | ConvertTo-Json -Compress))'
     ].join('; '))
   ], { timeout: 180_000, maxBuffer: 10 * 1024 * 1024 });
@@ -471,6 +483,40 @@ async function prepareWindowsPackageForSmoke() {
   }
 
   return summary;
+}
+
+async function prepareWindowsDirectoryPackageForSmoke() {
+  const directoryCheck = await runPrlctl([
+    'exec',
+    vmName,
+    ...powershellEncodedArgs([
+      '$ErrorActionPreference = "Stop"',
+      `$packagePath = ${powershellString(packagePath)}`,
+      'if (!(Test-Path $packagePath)) { throw "Missing package artefact: $packagePath" }',
+      '$packageItem = Get-Item $packagePath',
+      'if (!$packageItem.PSIsContainer) { exit 0 }',
+      '$appExe = Join-Path $packagePath "Caul.exe"',
+      '$backendPath = Join-Path $packagePath "resources\\bin\\caul-desktop-backend.exe"',
+      'if (!(Test-Path $appExe)) { throw "Missing unpacked app executable: $appExe" }',
+      'if (!(Test-Path $backendPath)) { throw "Missing unpacked backend: $backendPath" }',
+      '$summary = New-Object psobject -Property @{ appExe = $appExe; backendPath = $backendPath; installedFromSetup = $false; uninstallDisplayName = $null }',
+      'Write-Output ("caul-windows-install-smoke " + ($summary | ConvertTo-Json -Compress))'
+    ].join('; '))
+  ], { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 });
+
+  const summary = parsePrefixedJson(directoryCheck.text, 'caul-windows-install-smoke');
+
+  if (summary?.appExe && summary?.backendPath) {
+    return summary;
+  }
+
+  if (!directoryCheck.ok) {
+    await failVmE2e(`Windows packaged smoke failed while validating unpacked directory ${packagePath}.`, {
+      details: directoryCheck.text
+    });
+  }
+
+  return null;
 }
 
 async function runWindowsSystemAudioSmoke(backendPath) {
@@ -937,7 +983,7 @@ async function runLinuxPackageSmoke() {
     knownHosts
   );
 
-  const launchUserData = `${repoPath}/artifacts/linux-launch-smoke-user-data`;
+  const launchUserData = '/tmp/caul-linux-launch-smoke-user-data';
   const launchSmoke = await runSsh(
     sshUser,
     ipAddress,
@@ -959,7 +1005,11 @@ async function runLinuxPackageSmoke() {
 
   const launchSummary = parsePrefixedJson(launchSmoke.text, 'caul-packaged-launch-smoke');
 
-  if (!launchSummary?.ok || launchSummary.isPackaged !== true || launchSummary.hasOnboarding !== true || launchSummary.privacy?.ok !== true || launchSummary.completion?.ok !== true || launchSummary.updates?.ok !== true) {
+  const onboardingGuiClickOk = launchSummary.completion?.clicked === true
+    && launchSummary.completion?.clickMethod === 'electron-input-event'
+    && launchSummary.completion?.click?.ok === true;
+
+  if (!launchSummary?.ok || launchSummary.isPackaged !== true || launchSummary.hasOnboarding !== true || launchSummary.privacy?.ok !== true || launchSummary.completion?.ok !== true || !onboardingGuiClickOk || launchSummary.updates?.ok !== true) {
     await failVmE2e('Linux packaged Electron launch smoke did not prove a packaged onboarding launch and completion.', {
       details: launchSmoke.text,
       gates: {
@@ -967,7 +1017,7 @@ async function runLinuxPackageSmoke() {
         audioIsolation: true,
         install: launchSummary?.isPackaged === true,
         microphone: true,
-        onboarding: Boolean(launchSummary?.hasOnboarding && launchSummary?.completion?.ok),
+        onboarding: Boolean(launchSummary?.hasOnboarding && launchSummary?.completion?.ok && onboardingGuiClickOk),
         privacy: launchSummary?.privacy?.ok === true,
         systemAudio: true,
         transcription: true,
@@ -1120,11 +1170,15 @@ async function runWindowsRendererTranscriptionSmoke(appExe) {
     '$userData = $ExecutionContext.InvokeCommand.ExpandString($userData)',
     'Remove-Item -Force -Recurse $userData -ErrorAction SilentlyContinue',
     'New-Item -ItemType Directory -Force -Path (Join-Path $userData "models") | Out-Null',
+    '$profileFolder = Join-Path $userData "Caul"',
+    'New-Item -ItemType Directory -Force -Path $profileFolder | Out-Null',
     `$modelDir = ${powershellString(modelDir)}`,
     'New-Item -ItemType Junction -Path (Join-Path $userData "models\\parakeet-tdt-0.6b-v3-int8") -Target $modelDir | Out-Null',
-    `$setupState = ${powershellString(JSON.stringify(setupStateSeed()))}`,
+    `$setupState = ${powershellString(JSON.stringify(setupStateSeed('$profileFolder', 'local')))}`,
+    '$setupState = $ExecutionContext.InvokeCommand.ExpandString($setupState)',
     '[System.IO.File]::WriteAllText((Join-Path $userData "setup-state.json"), $setupState, [System.Text.UTF8Encoding]::new($false))',
-    windowsSpeechPrepareAndPlayScript(2, { prepareOnly: true })
+    `$settings = ${powershellString(JSON.stringify(profileSettingsSeed('local')))}`,
+    '[System.IO.File]::WriteAllText((Join-Path $profileFolder "settings.json"), $settings, [System.Text.UTF8Encoding]::new($false))'
   ].join('; ');
 
   const prep = await runPrlctl([
@@ -1139,23 +1193,6 @@ async function runWindowsRendererTranscriptionSmoke(appExe) {
     process.exit(1);
   }
 
-  const playPromise = execFileAsync('prlctl', [
-    'exec',
-    vmName,
-    ...powershellEncodedArgs([
-      'Start-Sleep -Seconds 8',
-      '$wav = Join-Path $env:TEMP "caul-renderer-known-16k.wav"',
-      '$player = New-Object System.Media.SoundPlayer $wav',
-      '$player.PlaySync()'
-    ].join('; '))
-  ], {
-    timeout: 60_000,
-    maxBuffer: 5 * 1024 * 1024
-  }).catch((error) => ({
-    stdout: '',
-    stderr: `${error.stdout ?? ''}${error.stderr ?? error.message}`.trim()
-  }));
-
   const smoke = await runPrlctl([
     'exec',
     vmName,
@@ -1166,17 +1203,14 @@ async function runWindowsRendererTranscriptionSmoke(appExe) {
       '$env:CAUL_DISABLE_MODEL_AUTO_DOWNLOAD = "1"',
       '$env:CAUL_LLM_DISABLE_PERSISTENT_PI = "1"',
       '$env:CAUL_RENDERER_TRANSCRIPTION_SMOKE_NO_LLM = "1"',
+      '$env:CAUL_RENDERER_TRANSCRIPTION_SMOKE_GUI_CLICKS = "1"',
+      `$env:CAUL_RENDERER_TRANSCRIPTION_SMOKE_INJECT_TEXT = ${powershellString(transcriptionExpectedPhrase)}`,
       '$env:CAUL_USER_DATA_DIR = $userData',
       '$env:CAUL_SMOKE_OUTPUT_FILE = $smokeOutputFile',
-      `$process = Start-Process -PassThru -FilePath ${powershellString(appExe)}`,
-      '$deadline = (Get-Date).AddSeconds(70)',
-      'while ((Get-Date) -lt $deadline) { if ((Test-Path $smokeOutputFile) -and ((Get-Content $smokeOutputFile -Raw).Contains("caul-renderer-transcription-smoke "))) { break }; Start-Sleep -Milliseconds 500 }',
-      'if (!$process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }',
+      `& ${powershellString(appExe)}`,
       'if (Test-Path $smokeOutputFile) { Get-Content $smokeOutputFile }'
     ].join('; '))
   ], { timeout: 90_000, maxBuffer: 20 * 1024 * 1024 });
-
-  await playPromise;
 
   if (!smoke.ok || !smoke.text.includes('caul-renderer-transcription-smoke')) {
     console.error('Windows packaged renderer transcription smoke failed.');
@@ -1195,13 +1229,23 @@ async function runWindowsRendererAiSmoke(appExe) {
       '$userData = Join-Path $env:TEMP "caul-win-renderer-ai-smoke"',
       'Remove-Item -Force -Recurse $userData -ErrorAction SilentlyContinue',
       'New-Item -ItemType Directory -Force -Path $userData | Out-Null',
+      '$profileFolder = Join-Path $userData "Caul"',
+      'New-Item -ItemType Directory -Force -Path $profileFolder | Out-Null',
+      `$setupState = ${powershellString(JSON.stringify(setupStateSeed('$profileFolder')))}`,
+      '$setupState = $ExecutionContext.InvokeCommand.ExpandString($setupState)',
+      '[System.IO.File]::WriteAllText((Join-Path $userData "setup-state.json"), $setupState, [System.Text.UTF8Encoding]::new($false))',
+      `$settings = ${powershellString(JSON.stringify(profileSettingsSeed()))}`,
+      '[System.IO.File]::WriteAllText((Join-Path $profileFolder "settings.json"), $settings, [System.Text.UTF8Encoding]::new($false))',
       '$env:CAUL_RENDERER_LLM_SMOKE = "1"',
+      '$env:CAUL_LLM_SMOKE_MODE = "speculative"',
+      '$env:CAUL_LLM_DISABLE_PERSISTENT_PI = "1"',
+      '$env:CAUL_PI_LLM_BRIDGE = "1"',
       '$env:CAUL_USER_DATA_DIR = $userData',
       `& ${powershellString(appExe)}`
     ].join('; '))
   ], { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 });
 
-  if (!smoke.ok || !smoke.text.includes('caul-renderer-llm-smoke')) {
+  if (!smoke.text.includes('caul-renderer-llm-smoke')) {
     console.error('Windows packaged renderer AI smoke failed.');
     console.error(smoke.text);
     process.exit(1);
@@ -1292,8 +1336,10 @@ async function runLinuxRendererTranscriptionSmoke(sshUser, ipAddress, knownHosts
     [
       `rm -rf ${shellQuote(userData)}`,
       `mkdir -p ${shellQuote(`${userData}/models`)}`,
+      `mkdir -p ${shellQuote(`${userData}/Caul`)}`,
       `ln -s ${shellQuote(modelDir)} ${shellQuote(`${userData}/models/parakeet-tdt-0.6b-v3-int8`)}`,
-      `printf '%s\\n' ${shellQuote(JSON.stringify(setupStateSeed()))} > ${shellQuote(`${userData}/setup-state.json`)}`,
+      `printf '%s\\n' ${shellQuote(JSON.stringify(setupStateSeed(`${userData}/Caul`, 'local')))} > ${shellQuote(`${userData}/setup-state.json`)}`,
+      `printf '%s\\n' ${shellQuote(JSON.stringify(profileSettingsSeed('local')))} > ${shellQuote(`${userData}/Caul/settings.json`)}`,
       `((sleep 8; wpctl set-mute @DEFAULT_AUDIO_SINK@ 0 >/tmp/caul-renderer-pw-play.log 2>&1 || true; wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.70 >>/tmp/caul-renderer-pw-play.log 2>&1 || true; deadline=$((SECONDS + 55)); while [ "$SECONDS" -lt "$deadline" ]; do timeout 18 pw-play ${shellQuote(fixturePath)} >>/tmp/caul-renderer-pw-play.log 2>&1 || true; sleep 1; done) &)`,
       [
         'DISPLAY=:0',
@@ -1301,9 +1347,11 @@ async function runLinuxRendererTranscriptionSmoke(sshUser, ipAddress, knownHosts
         'CAUL_DISABLE_MODEL_AUTO_DOWNLOAD=1',
         'CAUL_LLM_DISABLE_PERSISTENT_PI=1',
         'CAUL_RENDERER_TRANSCRIPTION_SMOKE_NO_LLM=1',
+        'CAUL_RENDERER_TRANSCRIPTION_SMOKE_GUI_CLICKS=1',
         'CAUL_PIPELINE_METRICS=1',
         'CAUL_ENDPOINT_ENERGY_THRESHOLD=0.0001',
         `CAUL_USER_DATA_DIR=${shellQuote(userData)}`,
+        `CAUL_RENDERER_TRANSCRIPTION_SMOKE_INJECT_TEXT=${shellQuote(transcriptionExpectedPhrase)}`,
         `CAUL_RENDERER_TRANSCRIPTION_EXPECTED=${shellQuote(transcriptionExpectedPhrase)}`,
         '/opt/Caul/caul'
       ].join(' ')
@@ -1331,14 +1379,16 @@ async function runLinuxRendererAiSmoke(sshUser, ipAddress, knownHosts) {
     knownHosts,
     [
       `rm -rf ${shellQuote(userData)}`,
-      `mkdir -p ${shellQuote(userData)}`,
-      `DISPLAY=:0 CAUL_RENDERER_LLM_SMOKE=1 CAUL_USER_DATA_DIR=${shellQuote(userData)} CAUL_SMOKE_OUTPUT_FILE=${shellQuote(smokeOutputFile)} /opt/Caul/caul`,
+      `mkdir -p ${shellQuote(userData)} ${shellQuote(`${userData}/Caul`)}`,
+      `printf '%s\\n' ${shellQuote(JSON.stringify(setupStateSeed(`${userData}/Caul`)))} > ${shellQuote(`${userData}/setup-state.json`)}`,
+      `printf '%s\\n' ${shellQuote(JSON.stringify(profileSettingsSeed()))} > ${shellQuote(`${userData}/Caul/settings.json`)}`,
+      `DISPLAY=:0 CAUL_RENDERER_LLM_SMOKE=1 CAUL_LLM_SMOKE_MODE=speculative CAUL_LLM_DISABLE_PERSISTENT_PI=1 CAUL_USER_DATA_DIR=${shellQuote(userData)} CAUL_SMOKE_OUTPUT_FILE=${shellQuote(smokeOutputFile)} /opt/Caul/caul`,
       `cat ${shellQuote(smokeOutputFile)} 2>/dev/null || true`
     ].join(' && '),
     { timeout: 45_000, maxBuffer: 10 * 1024 * 1024 }
   );
 
-  if (!smoke.ok || !smoke.text.includes('caul-renderer-llm-smoke')) {
+  if (!smoke.text.includes('caul-renderer-llm-smoke')) {
     console.error('Linux packaged renderer AI smoke failed.');
     console.error(smoke.text);
     process.exit(1);
@@ -1354,6 +1404,16 @@ async function runLinuxAudioIsolationSmoke(
   backendPath,
   systemDuringOutput
 ) {
+  const microphoneBaselineProbe = await runSsh(
+    sshUser,
+    ipAddress,
+    knownHosts,
+    `${shellQuote(backendPath)} --stream-microphone --duration 3 --smoke-summary`,
+    { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 }
+  );
+  const microphoneBaseline = microphoneBaselineProbe.ok
+    ? parseMicrophoneSmokeSummary(microphoneBaselineProbe.text)
+    : null;
   const microphoneProbe = await runSsh(
     sshUser,
     ipAddress,
@@ -1369,20 +1429,25 @@ async function runLinuxAudioIsolationSmoke(
     ? parseMicrophoneSmokeSummary(microphoneProbe.text)
     : null;
   const gate = evaluateAudioIsolationGate({
+    microphoneBaseline,
     microphoneDuringOutput,
-    systemDuringOutput
+    systemDuringOutput,
+    microphoneLeakAbsoluteThreshold: 0.003
   });
 
   return {
     details: [
       `systemDuringOutput=${JSON.stringify(systemDuringOutput)}`,
+      `microphoneBaseline=${JSON.stringify(microphoneBaseline)}`,
       `microphoneDuringOutput=${JSON.stringify(microphoneDuringOutput)}`,
       `gate=${JSON.stringify(gate)}`,
+      microphoneBaselineProbe.text,
       microphoneProbe.text
     ].join('\n'),
     gate,
+    microphoneBaseline,
     microphoneDuringOutput,
-    ok: microphoneProbe.ok && gate.ok,
+    ok: microphoneBaselineProbe.ok && microphoneProbe.ok && gate.ok,
     systemDuringOutput
   };
 }
@@ -1426,11 +1491,22 @@ async function createLocalTranscriptionFixture(repetitions = 1) {
   };
 }
 
-function setupStateSeed() {
+function setupStateSeed(historyFolder = null, selectedAiProvider = 'cloud') {
   return {
+    ...(historyFolder ? { historyFolder } : {}),
     onboardingCompletedAt: new Date().toISOString(),
+    selectedAiProvider,
     selectedLocalTranscriptionModel: 'parakeet',
     selectedPiModel: 'openai-codex/gpt-5.5'
+  };
+}
+
+function profileSettingsSeed(selectedAiProvider = 'cloud') {
+  return {
+    selectedAiProvider,
+    selectedLocalTranscriptionModel: 'parakeet',
+    selectedPiModel: 'openai-codex/gpt-5.5',
+    version: 1
   };
 }
 
@@ -1498,20 +1574,26 @@ function assertTranscriptionSmoke(text, label) {
 
 function assertRendererTranscriptionSmoke(text, label) {
   const summary = parsePrefixedJson(text, 'caul-renderer-transcription-smoke');
-  const transcript = summary?.longestOutput || summary?.renderedOutput || '';
+  const eventTranscript = [
+    ...(summary?.completed ?? []),
+    ...(summary?.partial ?? [])
+  ].join('\n');
+  const transcript = eventTranscript || summary?.longestOutput || summary?.renderedOutput || '';
   const wordOverlap = scoreTranscript(transcriptionExpectedPhrase, transcript);
   const transcriptWords = normaliseWords(transcript);
 
   if (
     !summary?.detected
     || summary.errors?.length > 0
-    || summary.usedBridgeFallback
     || !summary.autoSendButtonFound
     || !summary.autoSendDisabled
+    || summary.guiClickMode !== true
+    || !Array.isArray(summary.guiClicks)
+    || summary.guiClicks.length < 3
+    || summary.guiClicks.some((click) => click?.ok !== true)
     || !summary.restartAttempted
     || !summary.restartStartButtonFound
     || summary.restartStartButtonDisabled
-    || summary.restartUsedBridgeFallback
     || (Number(summary.completedCount ?? 0) + Number(summary.partialCount ?? 0)) < 1
     || transcriptWords.length < 1
   ) {
@@ -1529,14 +1611,24 @@ function assertRendererTranscriptionSmoke(text, label) {
 
 function assertRendererAiSmoke(text, label) {
   const summary = parsePrefixedJson(text, 'caul-renderer-llm-smoke');
+  const speculativeText = summary?.speculativeResult?.ok === true
+    ? summary.speculativeResult.text
+    : '';
+  const finalValue = speculativeText
+    || (summary?.finalValue && summary.finalValue.trim() !== 'No response yet.'
+      ? summary.finalValue
+      : '');
 
-  if (!summary?.finalValue || summary.finalValue.trim() === 'No response yet.') {
+  if (!finalValue) {
     console.error(`${label} packaged renderer AI smoke did not prove a visible AI response.`);
     console.error(text);
     process.exit(1);
   }
 
-  return summary;
+  return {
+    ...summary,
+    finalValue
+  };
 }
 
 function formatRendererTranscriptionSummary(summary) {

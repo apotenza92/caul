@@ -1,6 +1,6 @@
 {
   "name": "caul",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "private": true,
   "description": "A private AI overlay for live calls and screen work.",
   "main": "electron/main.cjs",

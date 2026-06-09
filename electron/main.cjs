@@ -37,6 +37,7 @@ const localParakeetSmokeMs = Number(process.env.CAUL_LOCAL_PARAKEET_SMOKE_MS ?? 
 const rendererTranscriptionSmokeMs = Number(process.env.CAUL_RENDERER_TRANSCRIPTION_SMOKE_MS ?? 0);
 const rendererTranscriptionSmokeNoLlm = process.env.CAUL_RENDERER_TRANSCRIPTION_SMOKE_NO_LLM === '1';
 const rendererTranscriptionSmokeBridgeStart = process.env.CAUL_RENDERER_TRANSCRIPTION_SMOKE_BRIDGE_START === '1';
+const rendererTranscriptionSmokeGuiClicks = process.env.CAUL_RENDERER_TRANSCRIPTION_SMOKE_GUI_CLICKS === '1';
 const rendererLlmSmoke = process.env.CAUL_RENDERER_LLM_SMOKE === '1';
 const rendererRealLlmSmoke = process.env.CAUL_RENDERER_REAL_LLM_SMOKE === '1';
 const onboardingSmokeDir = process.env.CAUL_ONBOARDING_SMOKE_DIR;
@@ -1180,7 +1181,11 @@ function writeSetupState(update) {
 }
 
 function getDefaultCaulFolder() {
-  return path.join(app.getPath('documents'), 'Caul');
+  try {
+    return path.join(app.getPath('documents'), 'Caul');
+  } catch {
+    return path.join(app.getPath('userData'), 'Caul');
+  }
 }
 
 function getProfileService() {
@@ -1356,7 +1361,12 @@ function seedPackagedOnboardingCompletionSmokeState() {
 
   writeSetupState({
     selectedLocalTranscriptionModel: 'moonshine-tiny',
+    selectedAiProvider: 'cloud',
     selectedPiModel: defaultPiChatGptModel
+  });
+  updateProfileSettings({
+    selectedAiProvider: 'cloud',
+    selectedLocalTranscriptionModel: 'moonshine-tiny'
   });
 
   const modelDir = getMoonshineTinyModelPath();
@@ -3136,6 +3146,10 @@ async function ensureLiveModelCatalogueForOnboarding() {
     });
   } catch (error) {
     console.error('Onboarding model catalogue refresh failed; using bundled fallback:', error);
+    loadBestModelCatalogue({
+      allowLive: false,
+      userDataPath: app.getPath('userData')
+    });
   }
 }
 
@@ -4117,9 +4131,11 @@ async function getOnboardingStatus({ refreshCatalogue = true } = {}) {
   }
 
   const permissions = await getPermissionsStatus();
-  const permissionsComplete = permissions.permissions.every((permission) => (
-    permission.status === 'granted' || permission.status === 'unsupported'
-  ));
+  const permissionsComplete = permissions.permissions
+    .filter((permission) => permission.id !== 'microphone')
+    .every((permission) => (
+      permission.status === 'granted' || permission.status === 'unsupported'
+    ));
   const parakeet = getParakeetStatus();
   const pi = getPiStatus();
   const ai = getAiRecommendation();
@@ -4307,7 +4323,7 @@ function sendLocalParakeetDaemonCommand(type) {
     throw new Error('Local Parakeet helper is unavailable.');
   }
 
-  localParakeetDaemonProcess.stdin.write(`${JSON.stringify({ type })}\n`);
+  writeChildStdin(localParakeetDaemonProcess, { type }, 'local-parakeet-command');
 }
 
 function stopLocalParakeetCapture() {
@@ -4322,6 +4338,24 @@ function stopLocalParakeetCapture() {
   sendLocalParakeetDaemonCommand('stop');
 }
 
+function writeChildStdin(child, payload, stage) {
+  if (!child?.stdin?.writable || child.stdin.destroyed) {
+    writeTranscriptDebugLog('child_stdin_unavailable', { stage });
+    return false;
+  }
+
+  try {
+    child.stdin.write(`${JSON.stringify(payload)}\n`);
+    return true;
+  } catch (error) {
+    writeTranscriptDebugLog('child_stdin_write_failed', {
+      message: error instanceof Error ? error.message : String(error),
+      stage
+    });
+    return false;
+  }
+}
+
 function stopLocalParakeetDaemon({ force = false } = {}) {
   if (!localParakeetDaemonProcess) {
     return;
@@ -4330,7 +4364,7 @@ function stopLocalParakeetDaemon({ force = false } = {}) {
   const child = localParakeetDaemonProcess;
 
   if (localParakeetDaemonProcess.stdin?.writable) {
-    localParakeetDaemonProcess.stdin.write(`${JSON.stringify({ type: 'quit' })}\n`);
+    writeChildStdin(localParakeetDaemonProcess, { type: 'quit' }, 'local-parakeet-quit');
     localParakeetDaemonProcess.stdin.end();
   } else {
     localParakeetDaemonProcess.kill('SIGTERM');
@@ -4367,7 +4401,7 @@ function stopLocalTranscriptionWarmDaemon(force = false) {
   const child = localTranscriptionProcess;
 
   if (child.stdin?.writable) {
-    child.stdin.write(`${JSON.stringify({ type: 'quit' })}\n`);
+    writeChildStdin(child, { type: 'quit' }, 'local-transcription-quit');
     child.stdin.end();
   } else {
     child.kill('SIGTERM');
@@ -4473,10 +4507,10 @@ function prepareLocalTranscriptionCapture(options) {
     selectedSources
   });
 
-  localTranscriptionProcess.stdin.write(`${JSON.stringify({
+  writeChildStdin(localTranscriptionProcess, {
     type: 'prepare',
     sources: selectedSources
-  })}\n`);
+  }, 'local-transcription-prepare');
 
   return { ok: true, provider: getPreferredLocalModelId() };
 }
@@ -4554,10 +4588,10 @@ function startLocalTranscriptionCapture(options) {
     selectedSources
   });
 
-  localTranscriptionProcess.stdin.write(`${JSON.stringify({
+  writeChildStdin(localTranscriptionProcess, {
     type: 'start',
     sources: selectedSources
-  })}\n`);
+  }, 'local-transcription-start');
   emitTranscriptionEvent({ type: 'connected' });
 
   return { ok: true, provider: getPreferredLocalModelId() };
@@ -4570,7 +4604,7 @@ function stopLocalTranscriptionCapture() {
 
   if (localTranscriptionProcess.stdin?.writable) {
     const waitForFlush = localTranscriptionStopFlush.wait();
-    localTranscriptionProcess.stdin.write(`${JSON.stringify({ type: 'stop' })}\n`);
+    writeChildStdin(localTranscriptionProcess, { type: 'stop' }, 'local-transcription-stop');
 
     return waitForFlush.then(() => ({ ok: true }));
   }
@@ -6025,6 +6059,133 @@ function createOnboardingWindow() {
   return onboardingWindow;
 }
 
+async function clickVisibleButtonInWindow(window, buttonText, options = {}) {
+  if (!window || window.isDestroyed()) {
+    return { ok: false, error: 'Window is not available.' };
+  }
+
+  const timeoutMs = Number(options.timeoutMs ?? 8_000);
+  const target = await window.webContents.executeJavaScript(`
+    (async () => {
+      const deadline = Date.now() + ${JSON.stringify(timeoutMs)};
+      const wanted = ${JSON.stringify(String(buttonText).toLowerCase())};
+      const textOf = (element) => [element?.textContent || '', element?.getAttribute?.('aria-label') || ''].join(' ')
+        .replace(/\\s+/g, ' ')
+        .trim();
+      const getButton = () => Array.from(document.querySelectorAll('button'))
+        .find((candidate) => textOf(candidate).toLowerCase().includes(wanted)) ?? null;
+      let button = null;
+      let lastDisabled = false;
+      let lastRect = null;
+
+      while (Date.now() <= deadline) {
+        button = getButton();
+
+        if (button) {
+          button.scrollIntoView({ block: 'center', inline: 'center' });
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          const rect = button.getBoundingClientRect();
+          lastDisabled = Boolean(button.disabled);
+          lastRect = {
+            height: rect.height,
+            width: rect.width
+          };
+
+          if (!button.disabled && rect.width > 0 && rect.height > 0) {
+            break;
+          }
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+
+      if (!button) {
+        return {
+          ok: false,
+          error: 'Button was not found.',
+          wanted,
+          body: document.body.textContent?.slice(0, 500)
+        };
+      }
+
+      const rect = button.getBoundingClientRect();
+
+      if (button.disabled || rect.width <= 0 || rect.height <= 0) {
+        return {
+          ok: false,
+          disabled: lastDisabled,
+          error: 'Button is not clickable.',
+          height: lastRect?.height ?? rect.height,
+          text: textOf(button),
+          width: lastRect?.width ?? rect.width
+        };
+      }
+
+      return {
+        ok: true,
+        height: rect.height,
+        text: textOf(button),
+        width: rect.width,
+        x: Math.round(rect.left + rect.width / 2),
+        y: Math.round(rect.top + rect.height / 2)
+      };
+    })()
+  `);
+
+  if (!target?.ok) {
+    return target;
+  }
+
+  window.show();
+  window.focus();
+  window.webContents.focus();
+  window.webContents.sendInputEvent({
+    type: 'mouseMove',
+    x: target.x,
+    y: target.y
+  });
+  await wait(50);
+  window.webContents.sendInputEvent({
+    button: 'left',
+    clickCount: 1,
+    type: 'mouseDown',
+    x: target.x,
+    y: target.y
+  });
+  await wait(50);
+  window.webContents.sendInputEvent({
+    button: 'left',
+    clickCount: 1,
+    type: 'mouseUp',
+    x: target.x,
+    y: target.y
+  });
+
+  return {
+    ...target,
+    ok: true,
+    method: 'electron-input-event'
+  };
+}
+
+async function clickPackagedOnboardingPermissionButtons(window) {
+  const clicks = [];
+
+  for (const buttonText of ['grant screen & system audio recording', 'grant system audio']) {
+    const click = await clickVisibleButtonInWindow(window, buttonText, { timeoutMs: 2_000 });
+    clicks.push({
+      buttonText,
+      click
+    });
+
+    if (click.ok) {
+      await wait(1500);
+    }
+  }
+
+  return clicks;
+}
+
 function runPackagedLaunchSmokeIfRequested(window, surface) {
   if (packagedLaunchSmokeMs <= 0 || packagedLaunchSmokeStarted || packagedLaunchSmokeCompleted || window.isDestroyed()) {
     return;
@@ -6039,8 +6200,18 @@ function runPackagedLaunchSmokeIfRequested(window, surface) {
 
     try {
       const result = await getPackagedLaunchSmokeRendererResult(window);
+      let onboardingClick = null;
+      let onboardingPermissionClicks = [];
       if (packagedOnboardingCompletionSmoke && result.hasOnboarding) {
-        await completeOnboarding();
+        onboardingPermissionClicks = await clickPackagedOnboardingPermissionButtons(window);
+        onboardingClick = await clickVisibleButtonInWindow(window, 'start using caul', { timeoutMs: 15_000 });
+        result.completion = {
+          ...(result.completion ?? {}),
+          clicked: onboardingClick.ok === true,
+          click: onboardingClick,
+          clickMethod: onboardingClick.ok === true ? 'electron-input-event' : 'failed',
+          permissionClicks: onboardingPermissionClicks
+        };
       }
       const completion = packagedOnboardingCompletionSmoke
         ? await getPackagedOnboardingCompletionSmokeSummary()
@@ -6059,6 +6230,12 @@ function runPackagedLaunchSmokeIfRequested(window, surface) {
       };
 
       if (completion) {
+        if (onboardingClick) {
+          completion.click = onboardingClick;
+          completion.clicked = onboardingClick.ok === true;
+          completion.clickMethod = onboardingClick.ok === true ? 'electron-input-event' : 'failed';
+          completion.permissionClicks = onboardingPermissionClicks;
+        }
         summary.completion = completion;
         summary.ok = summary.ok && completion.ok;
       }
@@ -6131,13 +6308,9 @@ function getPackagedLaunchSmokeRendererResult(window) {
         completion = {
           attempted: true,
           buttonEnabled: Boolean(startButton && !startButton.disabled),
-          clicked: false
+          clicked: false,
+          clickMethod: 'pending-electron-input-event'
         };
-
-        if (startButton && !startButton.disabled) {
-          startButton.click();
-          completion.clicked = true;
-        }
       }
 
       const runtime = await window.caul.getRuntimeContext();
@@ -6182,7 +6355,7 @@ function getPackagedLaunchSmokeRendererResult(window) {
 }
 
 async function getPackagedOnboardingCompletionSmokeSummary() {
-  await wait(1500);
+  await wait(5000);
 
   const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
   const windowSurfaces = [];
@@ -6252,8 +6425,17 @@ function startPackagedLaunchSmokeFallback() {
     const hasHomeLayout = rendererResults.some((result) => result.hasHomeLayout);
     const hasHandle = rendererResults.some((result) => result.hasHandle);
 
+    let onboardingClick = null;
+    let onboardingPermissionClicks = [];
+
     if (packagedOnboardingCompletionSmoke && hasOnboarding) {
-      await completeOnboarding();
+      const onboardingSmokeWindow = windows.find((candidate, index) => rendererResults[index]?.hasOnboarding);
+      if (onboardingSmokeWindow) {
+        onboardingPermissionClicks = await clickPackagedOnboardingPermissionButtons(onboardingSmokeWindow);
+        onboardingClick = await clickVisibleButtonInWindow(onboardingSmokeWindow, 'start using caul', { timeoutMs: 15_000 });
+      } else {
+        onboardingClick = { ok: false, error: 'No onboarding window was available for GUI input.' };
+      }
     }
 
     const completion = packagedOnboardingCompletionSmoke
@@ -6290,6 +6472,12 @@ function startPackagedLaunchSmokeFallback() {
     };
 
     if (completion) {
+      if (onboardingClick) {
+        completion.click = onboardingClick;
+        completion.clicked = onboardingClick.ok === true;
+        completion.clickMethod = onboardingClick.ok === true ? 'electron-input-event' : 'failed';
+        completion.permissionClicks = onboardingPermissionClicks;
+      }
       summary.completion = completion;
       summary.ok = summary.ok && completion.ok;
     }
@@ -7825,7 +8013,35 @@ function createWindow() {
     })}`);
 
     const runRendererTranscriptionSmoke = async () => {
+      const guiClickResults = [];
+      const scheduleGuiClick = (delayMs, buttonText, phase) => {
+        setTimeout(async () => {
+          try {
+            const click = await clickVisibleButtonInWindow(mainWindow, buttonText);
+            guiClickResults.push({
+              ...click,
+              phase,
+              scheduledAtMs: delayMs
+            });
+          } catch (error) {
+            guiClickResults.push({
+              error: error.message,
+              ok: false,
+              phase,
+              scheduledAtMs: delayMs
+            });
+          }
+        }, delayMs).unref();
+      };
+
       try {
+        if (rendererTranscriptionSmokeGuiClicks) {
+          scheduleGuiClick(700, 'start listening', 'start');
+          scheduleGuiClick(rendererTranscriptionSmokeMs + 1_000, 'stop listening', 'stop');
+          scheduleGuiClick(rendererTranscriptionSmokeMs + 3_500, 'start listening', 'restart');
+          scheduleGuiClick(rendererTranscriptionSmokeMs + 6_000, 'stop listening', 'final-stop');
+        }
+
         const result = await mainWindow.webContents.executeJavaScript(`
           (async () => {
             const events = [];
@@ -7842,6 +8058,7 @@ function createWindow() {
             let restartUsedBridgeFallback = false;
             let autoSendButtonFound = false;
             let autoSendDisabled = false;
+            const guiClickMode = ${JSON.stringify(rendererTranscriptionSmokeGuiClicks)};
             const unsubscribe = window.caul.transcription.onEvent((event) => {
               events.push({
                 ...event,
@@ -7910,7 +8127,9 @@ function createWindow() {
             };
 
             sample();
-            if (${JSON.stringify(rendererTranscriptionSmokeBridgeStart)}) {
+            if (guiClickMode) {
+              await new Promise((resolve) => setTimeout(resolve, 1_200));
+            } else if (${JSON.stringify(rendererTranscriptionSmokeBridgeStart)}) {
               usedBridgeFallback = true;
               await window.caul.transcription.start({ sources: ['system'] });
             } else if (startButton && !startButton.disabled) {
@@ -7920,6 +8139,16 @@ function createWindow() {
               await window.caul.transcription.start({ sources: ['system'] });
             }
 
+            const injectedText = ${JSON.stringify(process.env.CAUL_RENDERER_TRANSCRIPTION_SMOKE_INJECT_TEXT ?? '')};
+            if (injectedText && window.caul?.smokeEmitTranscriptionEvent) {
+              await new Promise((resolve) => setTimeout(resolve, 300));
+              await window.caul.smokeEmitTranscriptionEvent({
+                type: 'completed',
+                utteranceId: 1001,
+                text: injectedText
+              });
+            }
+
             const interval = setInterval(sample, 500);
             await new Promise((resolve) => setTimeout(resolve, ${JSON.stringify(rendererTranscriptionSmokeMs)}));
             clearInterval(interval);
@@ -7927,7 +8156,10 @@ function createWindow() {
 
             const stopButton = findButton(/stop listening/i);
 
-            if (stopButton) {
+            if (guiClickMode) {
+              await new Promise((resolve) => setTimeout(resolve, 1_800));
+              sample();
+            } else if (stopButton) {
               stopButton.click();
               await new Promise((resolve) => setTimeout(resolve, 1_500));
               sample();
@@ -7942,7 +8174,9 @@ function createWindow() {
             restartStartButtonFound = Boolean(restartStartButton);
             restartStartButtonDisabled = restartStartButton ? Boolean(restartStartButton.disabled) : null;
 
-            if (${JSON.stringify(rendererTranscriptionSmokeBridgeStart)}) {
+            if (guiClickMode) {
+              await new Promise((resolve) => setTimeout(resolve, 3_500));
+            } else if (${JSON.stringify(rendererTranscriptionSmokeBridgeStart)}) {
               restartUsedBridgeFallback = true;
               await window.caul.transcription.start({ sources: ['system'] });
               await new Promise((resolve) => setTimeout(resolve, 2_000));
@@ -7958,7 +8192,9 @@ function createWindow() {
             sample();
 
             const restartStopButton = findButton(/stop listening/i);
-            if (restartStopButton) {
+            if (guiClickMode) {
+              await new Promise((resolve) => setTimeout(resolve, 1_000));
+            } else if (restartStopButton) {
               restartStopButton.click();
             } else {
               await window.caul.transcription.stop();
@@ -8013,6 +8249,7 @@ function createWindow() {
               snapshotCount: snapshots.length,
               startButtonFound: Boolean(startButton),
               startButtonDisabled: Boolean(startButton?.disabled),
+              guiClickMode,
               usedBridgeFallback,
               autoSendButtonFound,
               autoSendDisabled,
@@ -8035,6 +8272,7 @@ function createWindow() {
           })()
         `);
 
+        result.guiClicks = guiClickResults;
         emitSmokeLine(`caul-renderer-transcription-smoke ${JSON.stringify(result)}`);
 
         if (!result.detected || result.errors.length > 0) {
@@ -8360,7 +8598,7 @@ app.on('before-quit', () => {
   }
 
   if (localTranscriptionProcess?.stdin?.writable) {
-    localTranscriptionProcess.stdin.write(`${JSON.stringify({ type: 'quit' })}\n`);
+    writeChildStdin(localTranscriptionProcess, { type: 'quit' }, 'before-quit-local-transcription');
     localTranscriptionProcess.stdin.end();
   }
   stopSystemAudioCapture();
@@ -8709,7 +8947,7 @@ ipcMain.handle('caul:llm-status', () => ({
 }));
 
 ipcMain.handle('caul:smoke-emit-transcription-event', (_event, event) => {
-  if (!rendererLlmSmoke && !rendererRealLlmSmoke) {
+  if (!rendererLlmSmoke && !rendererRealLlmSmoke && rendererTranscriptionSmokeMs <= 0) {
     throw new Error('Smoke event injection is disabled.');
   }
 

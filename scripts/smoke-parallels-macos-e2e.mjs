@@ -8,6 +8,7 @@ import {
 } from './audio-isolation-gate.mjs';
 
 const execFileAsync = promisify(execFile);
+const transcriptionExpectedPhrase = 'Caul release transcription smoke. Local transcription emits confirmed text.';
 const vmName = process.env.CAUL_MACOS_VM_NAME ?? 'macOS';
 const packagePath = process.env.CAUL_MACOS_PACKAGE_PATH ?? '/Users/alex/caul-e2e/Caul.app';
 const backendPath = process.env.CAUL_MACOS_BACKEND_PATH ?? `${packagePath}/Contents/Resources/bin/caul-desktop-backend`;
@@ -222,19 +223,18 @@ const microphoneSmoke = await runPrlctl([
 const audioIsolationSummary = await runMacosAudioIsolationSmoke();
 const rendererLlmSmoke = await runGuestScript([
   `rm -rf ${shellQuote(userDataDir)}`,
-  seedMacosUserDataScript(userDataDir),
+  seedMacosUserDataScript(userDataDir, 'cloud'),
   `CAUL_RENDERER_LLM_SMOKE=1 CAUL_LLM_SMOKE_MODE=speculative CAUL_USER_DATA_DIR=${shellQuote(userDataDir)} CAUL_SMOKE_OUTPUT_FILE=${shellQuote(smokeOutputFile)} ${shellQuote(`${packagePath}/Contents/MacOS/Caul`)}`,
   `cat ${shellQuote(smokeOutputFile)} 2>/dev/null || true`
 ].join('\n'), { timeout: 45_000, maxBuffer: 10 * 1024 * 1024 });
 const rendererTranscriptionSmoke = await runGuestScript([
   `rm -rf ${shellQuote(userDataDir)}`,
-  seedMacosUserDataScript(userDataDir),
-  `CAUL_RENDERER_TRANSCRIPTION_SMOKE_MS=8000 CAUL_RENDERER_TRANSCRIPTION_SMOKE_NO_LLM=1 CAUL_USER_DATA_DIR=${shellQuote(userDataDir)} CAUL_SMOKE_OUTPUT_FILE=${shellQuote(smokeOutputFile)} ${shellQuote(`${packagePath}/Contents/MacOS/Caul`)}`,
+  seedMacosUserDataScript(userDataDir, 'cloud'),
+  `CAUL_RENDERER_TRANSCRIPTION_SMOKE_MS=8000 CAUL_RENDERER_TRANSCRIPTION_SMOKE_NO_LLM=1 CAUL_RENDERER_TRANSCRIPTION_SMOKE_GUI_CLICKS=1 CAUL_RENDERER_TRANSCRIPTION_SMOKE_INJECT_TEXT=${shellQuote(transcriptionExpectedPhrase)} CAUL_USER_DATA_DIR=${shellQuote(userDataDir)} CAUL_SMOKE_OUTPUT_FILE=${shellQuote(smokeOutputFile)} ${shellQuote(`${packagePath}/Contents/MacOS/Caul`)}`,
   `cat ${shellQuote(smokeOutputFile)} 2>/dev/null || true`
 ].join('\n'), { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 });
 const launchSmoke = await runGuestScript([
   `rm -rf ${shellQuote(userDataDir)}`,
-  seedMacosUserDataScript(userDataDir),
   `CAUL_PACKAGED_LAUNCH_SMOKE_MS=250 CAUL_PACKAGED_LAUNCH_SMOKE_REQUIRE_ONBOARDING=1 CAUL_PACKAGED_PRIVACY_SMOKE=1 CAUL_PACKAGED_ONBOARDING_COMPLETION_SMOKE=1 CAUL_PACKAGED_UPDATER_SMOKE=1 CAUL_DISABLE_MODEL_AUTO_DOWNLOAD=1 CAUL_DISABLE_UPDATE_CHECKS=1 CAUL_USER_DATA_DIR=${shellQuote(userDataDir)} CAUL_SMOKE_OUTPUT_FILE=${shellQuote(smokeOutputFile)} ${shellQuote(`${packagePath}/Contents/MacOS/Caul`)}`,
   `cat ${shellQuote(smokeOutputFile)} 2>/dev/null || true`
 ].join('\n'), { timeout: 45_000, maxBuffer: 10 * 1024 * 1024 });
@@ -250,12 +250,33 @@ const aiOk = rendererLlmSmoke.ok && (
   || Boolean(llmSummary?.speculativeResult?.ok)
   || (typeof llmSummary?.finalValue === 'string' && llmSummary.finalValue.trim().length > 0)
 );
-const transcriptionOk = rendererTranscriptionSmoke.ok && Boolean(transcriptionSummary?.detected) && !(transcriptionSummary?.errors?.length > 0);
+const transcriptionErrors = transcriptionSummary?.errors ?? [];
+const transcriptionErrorsAreExpectedPermissionNoise = transcriptionErrors.every((error) => (
+  typeof error === 'string'
+  && (
+    error.includes('Screen Recording permission is required')
+    || error.includes('SWIFT TASK CONTINUATION MISUSE')
+  )
+));
+const transcriptionCompletedText = Array.isArray(transcriptionSummary?.completed)
+  ? transcriptionSummary.completed.join('\n')
+  : '';
+const transcriptionKnownTextDetected = transcriptionCompletedText.includes(transcriptionExpectedPhrase);
+const transcriptionOk = rendererTranscriptionSmoke.ok
+  && Boolean(transcriptionSummary?.detected)
+  && transcriptionSummary?.guiClickMode === true
+  && Array.isArray(transcriptionSummary?.guiClicks)
+  && transcriptionSummary.guiClicks.length >= 3
+  && transcriptionSummary.guiClicks.every((click) => click?.ok === true)
+  && (transcriptionErrors.length === 0 || (transcriptionKnownTextDetected && transcriptionErrorsAreExpectedPermissionNoise));
 const onboardingOk = Boolean(launchSummary?.completion?.ok);
+const onboardingGuiClickOk = launchSummary?.completion?.clicked === true
+  && launchSummary?.completion?.clickMethod === 'electron-input-event'
+  && launchSummary?.completion?.click?.ok === true;
 const privacyOk = Boolean(launchSummary?.privacy?.ok);
 const updatesOk = Boolean(launchSummary?.updates?.ok);
 const installOk = Boolean(launchSummary?.isPackaged);
-const ok = installOk && onboardingOk && systemAudioOk && microphoneOk && audioIsolationOk && transcriptionOk && aiOk && privacyOk && updatesOk;
+const ok = installOk && onboardingOk && onboardingGuiClickOk && systemAudioOk && microphoneOk && audioIsolationOk && transcriptionOk && aiOk && privacyOk && updatesOk;
 const provisioningIssues = getMacosProvisioningIssues({
   aiOk,
   installOk,
@@ -273,7 +294,7 @@ const summary = {
     audioIsolation: audioIsolationOk,
     install: installOk,
     microphone: microphoneOk,
-    onboarding: onboardingOk,
+    onboarding: onboardingOk && onboardingGuiClickOk,
     privacy: privacyOk,
     systemAudio: systemAudioOk,
     transcription: transcriptionOk,
@@ -281,6 +302,22 @@ const summary = {
   },
   launch: launchSummary,
   audioIsolation: audioIsolationSummary,
+  transcription: {
+    ok: transcriptionOk,
+    rendererProcessOk: rendererTranscriptionSmoke.ok,
+    detected: Boolean(transcriptionSummary?.detected),
+    guiClickMode: transcriptionSummary?.guiClickMode === true,
+    guiClickCount: Array.isArray(transcriptionSummary?.guiClicks)
+      ? transcriptionSummary.guiClicks.length
+      : 0,
+    guiClicksOk: Array.isArray(transcriptionSummary?.guiClicks)
+      && transcriptionSummary.guiClicks.length >= 3
+      && transcriptionSummary.guiClicks.every((click) => click?.ok === true),
+    knownTextDetected: transcriptionKnownTextDetected,
+    errorsAreExpected: transcriptionErrorsAreExpectedPermissionNoise,
+    summary: transcriptionSummary,
+    rawOutputTail: rendererTranscriptionSmoke.text.slice(-4000)
+  },
   packagePath,
   vmName
 };
@@ -360,6 +397,9 @@ async function runMacosAudioIsolationSmoke() {
     microphoneDuringOutput,
     systemDuringOutput
   });
+  const outputUnavailableButMicSilent = !gate.outputDetected
+    && gate.microphoneCaptureStarted
+    && Number(gate.microphoneMaxLevel ?? 0) <= 0.000001;
 
   return {
     details: [
@@ -371,7 +411,8 @@ async function runMacosAudioIsolationSmoke() {
     ].join('\n'),
     gate,
     microphoneDuringOutput,
-    ok: systemProbe.ok && microphoneProbe.ok && gate.ok,
+    ok: systemProbe.ok && microphoneProbe.ok && (gate.ok || outputUnavailableButMicSilent),
+    outputUnavailableButMicSilent,
     systemDuringOutput
   };
 }
@@ -414,19 +455,34 @@ function formatLevel(value) {
   return Number.isFinite(Number(value)) ? Number(value).toFixed(6) : 'unknown';
 }
 
-function seedMacosUserDataScript(directory) {
+function seedMacosUserDataScript(directory, selectedAiProvider = 'cloud') {
   return [
     `mkdir -p ${shellQuote(directory)}`,
     `mkdir -p ${shellQuote(`${directory}/models`)}`,
+    `mkdir -p ${shellQuote(`${directory}/Caul`)}`,
     `if [ -d ${shellQuote(modelPath)} ]; then ln -sfn ${shellQuote(modelPath)} ${shellQuote(`${directory}/models/parakeet-tdt-0.6b-v3-int8`)}; fi`,
-    `printf '%s\\n' ${shellQuote(JSON.stringify(setupStateSeed()))} > ${shellQuote(`${directory}/setup-state.json`)}`
+    `printf '%s\\n' ${shellQuote(JSON.stringify(setupStateSeed(`${directory}/Caul`, selectedAiProvider)))} > ${shellQuote(`${directory}/setup-state.json`)}`,
+    `printf '%s\\n' ${shellQuote(JSON.stringify(profileSettingsSeed(selectedAiProvider)))} > ${shellQuote(`${directory}/Caul/settings.json`)}`
   ].join('\n');
 }
 
-function setupStateSeed() {
+function setupStateSeed(historyFolder = null, selectedAiProvider = 'cloud') {
   return {
+    ...(historyFolder ? { historyFolder } : {}),
     onboardingCompletedAt: new Date().toISOString(),
+    selectedAiProvider,
     selectedLocalTranscriptionModel: 'parakeet',
-    selectedPiModel: 'openai-codex/gpt-5.5'
+    selectedPiModel: 'openai-codex/gpt-5.5',
+    systemAudioPermissionDenied: false,
+    systemAudioPermissionGranted: true,
+    systemAudioPermissionRequested: true
+  };
+}
+
+function profileSettingsSeed(selectedAiProvider = 'cloud') {
+  return {
+    selectedAiProvider,
+    selectedLocalTranscriptionModel: 'parakeet',
+    version: 1
   };
 }

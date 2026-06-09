@@ -1239,7 +1239,7 @@ function OnboardingSurface() {
   }
 
   const missingItems = getMissingOnboardingItems(status);
-  const visiblePermissions = getVisiblePermissionItems(status?.permissions);
+  const visiblePermissions = getOnboardingVisiblePermissionItems(status?.permissions);
   const onboardingPermissionRows = getOnboardingPermissionRows(visiblePermissions);
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -1427,7 +1427,7 @@ function getMissingOnboardingItems(status: OnboardingStatus | null) {
   }
 
   const missing = [];
-  const missingPermissions = getVisiblePermissionItems(status.permissions).filter((permission) => (
+  const missingPermissions = getOnboardingVisiblePermissionItems(status.permissions).filter((permission) => (
     permission.status !== 'granted' && permission.status !== 'unsupported'
   ));
 
@@ -1959,6 +1959,14 @@ function AudioPermissionSetupRow({
 }) {
   const [restartHintVisible, setRestartHintVisible] = useState(false);
   const permissions = [microphone, systemAudio].filter((permission): permission is PermissionItem => Boolean(permission));
+  const label = microphone && systemAudio
+    ? 'Microphone & System Audio'
+    : microphone?.label ?? systemAudio?.label ?? 'Audio';
+  const description = microphone && systemAudio
+    ? 'Required for microphone input and audio from other apps. macOS may show these prompts one after the other.'
+    : systemAudio
+      ? 'Required for audio from other apps.'
+      : 'Required when listening to your microphone.';
   const ready = permissions.every((permission) => permission.status === 'granted' || permission.status === 'unsupported');
   const needsRestart = permissions.some((permission) => permission.status === 'denied' || permission.status === 'restricted');
   const showRestart = needsRestart && restartHintVisible;
@@ -1985,11 +1993,11 @@ function AudioPermissionSetupRow({
     <div className={`${showDivider ? 'border-b border-border/70 last:border-b-0' : ''} text-sm`.trim()}>
       <div className="grid min-h-10 grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
         <div className="flex min-w-0 items-center gap-1.5">
-          <h3 className="truncate text-sm font-medium">Microphone & System Audio</h3>
+          <h3 className="truncate text-sm font-medium">{label}</h3>
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                aria-label="Microphone & System Audio permission info"
+                aria-label={`${label} permission info`}
                 className="inline-flex size-6 shrink-0 cursor-default items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
                 type="button"
               >
@@ -1998,7 +2006,7 @@ function AudioPermissionSetupRow({
             </TooltipTrigger>
             <TooltipContent>
               <span className="block max-w-72">
-                Required for microphone input and audio from other apps. macOS may show these prompts one after the other.
+                {description}
               </span>
             </TooltipContent>
           </Tooltip>
@@ -2009,7 +2017,7 @@ function AudioPermissionSetupRow({
           </span>
           {!ready ? (
             <Button
-              aria-label="Grant Microphone & System Audio"
+              aria-label={`Grant ${label}`}
               onClick={() => {
                 onChange(actionPermissionIds);
                 if (needsRestart) {
@@ -6534,6 +6542,16 @@ function getMissingSelectedAudioPermissionItems(
 
 function getVisiblePermissionItems(permissionsStatus: PermissionsStatus | null | undefined) {
   return permissionsStatus?.permissions.filter((permission) => permission.status !== 'unsupported') ?? [];
+}
+
+function getOnboardingVisiblePermissionItems(permissionsStatus: PermissionsStatus | null | undefined) {
+  return getVisiblePermissionItems(permissionsStatus).filter((permission) => {
+    if (permission.id === 'microphone' && !defaultListenToMicrophone) {
+      return false;
+    }
+
+    return true;
+  });
 }
 
 function getMissingSelectedPermissionItems({

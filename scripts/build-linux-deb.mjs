@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync, chmodSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync, chmodSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import process from 'node:process';
@@ -55,6 +55,7 @@ if (appImageSourcePath !== appImageOutputPath && existsSync(appImageSourcePath))
 rmSync(packageDir, { recursive: true, force: true });
 mkdirSync(installDir, { recursive: true });
 mkdirSync(controlDir, { recursive: true });
+chmodSync(controlDir, 0o755);
 
 cpSync(appDir, installDir, { recursive: true });
 chmodSync(path.join(installDir, executableName), 0o755);
@@ -120,12 +121,24 @@ execFileSync('dpkg-deb', ['--root-owner-group', '--build', packageDir, outputPat
 console.log(`Built Debian package: ${outputPath}`);
 
 function directorySize(directory) {
-  const entries = execFileSync('find', [directory, '-type', 'f', '-printf', '%s\\n'], {
-    encoding: 'utf8'
-  });
+  let total = 0;
+  const entries = [directory];
 
-  return entries
-    .split('\n')
-    .filter(Boolean)
-    .reduce((sum, value) => sum + Number(value), 0);
+  while (entries.length > 0) {
+    const current = entries.pop();
+    const currentStat = lstatSync(current);
+
+    if (currentStat.isDirectory()) {
+      for (const entry of readdirSync(current)) {
+        entries.push(path.join(current, entry));
+      }
+      continue;
+    }
+
+    if (currentStat.isFile() || currentStat.isSymbolicLink()) {
+      total += currentStat.size;
+    }
+  }
+
+  return total;
 }
