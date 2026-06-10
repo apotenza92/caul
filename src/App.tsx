@@ -38,7 +38,7 @@ import {
   TooltipTrigger
 } from '@/components/ui/tooltip';
 import { Textarea } from '@/components/ui/textarea';
-import { ArrowUpIcon, CheckCircle2Icon, ChevronDownIcon, ChevronRightIcon, CircleAlertIcon, CopyIcon, DownloadIcon, FastForwardIcon, FileIcon, FileInputIcon, FileTextIcon, FolderOpenIcon, HistoryIcon, ImageIcon, InfoIcon, ListChecksIcon, LoaderCircleIcon, LogOutIcon, MicIcon, MicOffIcon, PaperclipIcon, PencilIcon, PlayIcon, PowerIcon, SearchIcon, SendIcon, SettingsIcon, SquareIcon, Trash2Icon, Volume2Icon, VolumeXIcon, XCircleIcon, XIcon } from 'lucide-react';
+import { ArrowUpIcon, BellIcon, CheckCircle2Icon, ChevronDownIcon, ChevronRightIcon, CircleAlertIcon, CopyIcon, DownloadIcon, FastForwardIcon, FileIcon, FileInputIcon, FileTextIcon, FolderOpenIcon, HistoryIcon, ImageIcon, InfoIcon, ListChecksIcon, LoaderCircleIcon, LogOutIcon, MicIcon, MicOffIcon, PaperclipIcon, PencilIcon, PlayIcon, PowerIcon, SearchIcon, SendIcon, SettingsIcon, SquareIcon, Trash2Icon, Volume2Icon, VolumeXIcon, XCircleIcon, XIcon } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import caulAppIconUrl from '../assets/icons/icon-rounded.png?url';
 import caulBetaAppIconUrl from '../assets/icons/beta/icon-rounded.png?url';
@@ -98,8 +98,8 @@ const layout = {
   windowTitleBarSettingsButtonDesktop: 'left-1.5',
   windowTitleBarHistoryButtonMac: 'right-9',
   windowTitleBarHistoryButtonDesktop: 'left-9',
-  windowTitleBarNotificationButtonMac: 'right-[4.625rem]',
-  windowTitleBarNotificationButtonDesktop: 'left-[4.625rem]',
+  windowTitleBarNotificationButtonMac: 'right-[4.125rem]',
+  windowTitleBarNotificationButtonDesktop: 'left-[4.125rem]',
   windowTitleBarMacCloseButton: 'caul-mac-close-button absolute left-3 top-1/2 z-10 size-[14px] -translate-y-1/2 cursor-default rounded-full border-[0.5px] border-[#FB1626] bg-[#FF5C60] p-0 shadow-none hover:bg-[#FF5C60] active:bg-[#D94D4F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF5C60]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
   windowTitleBarMacQuitButton: 'caul-mac-quit-button absolute left-8 top-1/2 z-10 flex size-[14px] -translate-y-1/2 cursor-default items-center justify-center rounded-full border-[0.5px] border-[#9B48D6] bg-[#BF5AF2] p-0 text-[#4F167D] shadow-none hover:bg-[#BF5AF2] active:bg-[#9B48D6] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#BF5AF2]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background [&_svg]:size-2.5 [&_svg]:stroke-[3]',
   page: 'h-full min-h-0 overflow-hidden',
@@ -2729,7 +2729,7 @@ function MainNotificationButton({
           className={className}
           type="button"
         >
-          <CircleAlertIcon className="mx-auto size-4" />
+          <BellIcon className="mx-auto size-4" />
           <span className="absolute right-1 top-1 size-1.5 rounded-full bg-primary" />
         </button>
       </PopoverTrigger>

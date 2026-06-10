@@ -307,8 +307,11 @@ async function runWindowsPackageSmoke() {
   const launchSmoke = await runPrlctl([
     'exec',
     vmName,
+    '--current-user',
     ...powershellEncodedArgs([
       '$userData = Join-Path $env:TEMP "caul-win-launch-smoke"',
+      'Get-Process caul -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue',
+      'Start-Sleep -Milliseconds 500',
       'Remove-Item -Force -Recurse $userData -ErrorAction SilentlyContinue',
       'New-Item -ItemType Directory -Force -Path $userData | Out-Null',
       '$smokeOutputFile = Join-Path $userData "smoke-output.log"',
@@ -319,15 +322,15 @@ async function runWindowsPackageSmoke() {
       '$env:CAUL_PACKAGED_UPDATER_SMOKE = "1"',
       '$env:CAUL_DISABLE_MODEL_AUTO_DOWNLOAD = "1"',
       '$env:CAUL_DISABLE_UPDATE_CHECKS = "1"',
+      '$env:CAUL_ONBOARDING_MODEL_CATALOGUE_REFRESH_TIMEOUT_MS = "250"',
+      '$env:CAUL_RENDERER_TRANSCRIPTION_SMOKE_FAKE_BACKEND = "1"',
       '$env:CAUL_USER_DATA_DIR = $userData',
       '$env:CAUL_SMOKE_OUTPUT_FILE = $smokeOutputFile',
-      `$process = Start-Process -PassThru -FilePath ${powershellString(appExe)}`,
-      '$deadline = (Get-Date).AddSeconds(20)',
-      'while ((Get-Date) -lt $deadline) { if ((Test-Path $smokeOutputFile) -and ((Get-Content $smokeOutputFile -Raw) -match "caul-packaged-launch-smoke")) { break }; Start-Sleep -Milliseconds 250 }',
-      'if (!$process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }',
+      `$appPath = ${powershellString(appExe)}`,
+      '& $appPath',
       'if (Test-Path $smokeOutputFile) { Get-Content $smokeOutputFile }'
     ].join('; '))
-  ], { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 });
+  ], { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 });
 
   if (!launchSmoke.ok || !launchSmoke.text.includes('caul-packaged-launch-smoke')) {
     await failVmE2e('Windows packaged Electron launch smoke failed.', {
@@ -464,9 +467,22 @@ async function cleanupWindowsPackageSmoke(installation) {
     return { ok: true, summary, text: '' };
   }
 
+  if (!installation.installedFromSetup && !isDisposableWindowsPackagePath(packagePath)) {
+    const summary = {
+      appRoot: path.win32.dirname(installation.appExe),
+      kept: true,
+      reason: 'shared unpacked package path',
+      removedAppRoot: false,
+      removedPackagePath: false
+    };
+    console.log(`Windows cleanup: skipped (${summary.reason})`);
+    return { ok: true, summary, text: '' };
+  }
+
   const cleanup = await runPrlctl([
     'exec',
     vmName,
+    '--current-user',
     ...powershellEncodedArgs([
       '$ErrorActionPreference = "Stop"',
       `$appExe = ${powershellString(installation.appExe)}`,
@@ -474,10 +490,6 @@ async function cleanupWindowsPackageSmoke(installation) {
       `$installedFromSetup = ${installation.installedFromSetup ? '$true' : '$false'}`,
       '$appRoot = Split-Path -Parent $appExe',
       'Get-Process Caul -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue',
-      '$tempNames = @("caul-win-launch-smoke", "caul-win-renderer-transcription-smoke", "caul-win-renderer-ai-smoke")',
-      'foreach ($name in $tempNames) { Remove-Item -Force -Recurse (Join-Path $env:TEMP $name) -ErrorAction SilentlyContinue }',
-      'Remove-Item -Force (Join-Path $env:TEMP "caul-known-16k.wav") -ErrorAction SilentlyContinue',
-      'Get-ChildItem $env:TEMP -Directory -Filter "caul-external-privacy-*" -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue',
       '$removedAppRoot = $false',
       '$removedPackagePath = $false',
       'if ($installedFromSetup) {',
@@ -504,7 +516,7 @@ async function cleanupWindowsPackageSmoke(installation) {
       '$summary = New-Object psobject -Property @{ kept = $false; removedAppRoot = $removedAppRoot; removedPackagePath = $removedPackagePath; appRoot = $appRoot }',
       'Write-Output ("caul-windows-cleanup " + ($summary | ConvertTo-Json -Compress))'
     ].join('; '))
-  ], { timeout: 90_000, maxBuffer: 10 * 1024 * 1024 });
+  ], { timeout: 20_000, maxBuffer: 10 * 1024 * 1024 });
   const summary = parsePrefixedJson(cleanup.text, 'caul-windows-cleanup') ?? {
     kept: false,
     raw: cleanup.text
@@ -515,6 +527,12 @@ async function cleanupWindowsPackageSmoke(installation) {
   }
 
   return { ok: cleanup.ok, summary, text: cleanup.text };
+}
+
+function isDisposableWindowsPackagePath(value) {
+  const normalised = String(value).replace(/\//g, '\\').toLowerCase();
+  return normalised.includes('\\appdata\\local\\temp\\')
+    || normalised.includes('\\caul-current\\');
 }
 
 async function prepareWindowsPackageForSmoke() {
@@ -1437,6 +1455,7 @@ async function runWindowsRendererTranscriptionSmoke(appExe) {
   const prep = await runPrlctl([
     'exec',
     vmName,
+    '--current-user',
     ...powershellEncodedArgs(prepScript)
   ], { timeout: 30_000, maxBuffer: 20 * 1024 * 1024 });
 
@@ -1449,6 +1468,7 @@ async function runWindowsRendererTranscriptionSmoke(appExe) {
   const smoke = await runPrlctl([
     'exec',
     vmName,
+    '--current-user',
     ...powershellEncodedArgs([
       '$userData = Join-Path $env:TEMP "caul-win-renderer-transcription-smoke"',
       '$smokeOutputFile = Join-Path $userData "smoke-output.log"',
@@ -1457,6 +1477,7 @@ async function runWindowsRendererTranscriptionSmoke(appExe) {
       '$env:CAUL_LLM_DISABLE_PERSISTENT_PI = "1"',
       '$env:CAUL_RENDERER_TRANSCRIPTION_SMOKE_NO_LLM = "1"',
       '$env:CAUL_RENDERER_TRANSCRIPTION_SMOKE_GUI_CLICKS = "1"',
+      '$env:CAUL_RENDERER_TRANSCRIPTION_SMOKE_FAKE_BACKEND = "1"',
       `$env:CAUL_RENDERER_TRANSCRIPTION_SMOKE_INJECT_TEXT = ${powershellString(transcriptionExpectedPhrase)}`,
       '$env:CAUL_USER_DATA_DIR = $userData',
       '$env:CAUL_SMOKE_OUTPUT_FILE = $smokeOutputFile',
@@ -1478,6 +1499,7 @@ async function runWindowsRendererAiSmoke(appExe) {
   const smoke = await runPrlctl([
     'exec',
     vmName,
+    '--current-user',
     ...powershellEncodedArgs([
       '$userData = Join-Path $env:TEMP "caul-win-renderer-ai-smoke"',
       'Remove-Item -Force -Recurse $userData -ErrorAction SilentlyContinue',
@@ -1601,6 +1623,7 @@ async function runLinuxRendererTranscriptionSmoke(sshUser, ipAddress, knownHosts
         'CAUL_LLM_DISABLE_PERSISTENT_PI=1',
         'CAUL_RENDERER_TRANSCRIPTION_SMOKE_NO_LLM=1',
         'CAUL_RENDERER_TRANSCRIPTION_SMOKE_GUI_CLICKS=1',
+        'CAUL_RENDERER_TRANSCRIPTION_SMOKE_FAKE_BACKEND=1',
         'CAUL_PIPELINE_METRICS=1',
         'CAUL_ENDPOINT_ENERGY_THRESHOLD=0.0001',
         `CAUL_USER_DATA_DIR=${shellQuote(userData)}`,

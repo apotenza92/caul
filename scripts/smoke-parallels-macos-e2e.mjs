@@ -364,14 +364,7 @@ await writeSummary(summary);
 console.log(`caul-vm-e2e ${JSON.stringify(summary)}`);
 
 async function muteMacosVmAudio() {
-  const mute = await runPrlctl([
-    'exec',
-    vmName,
-    '--current-user',
-    '/bin/zsh',
-    '-lc',
-    "osascript -e 'set volume output muted true' -e 'set volume output volume 0'"
-  ]);
+  const mute = await runGuestScript("osascript -e 'set volume output muted true' -e 'set volume output volume 0'");
 
   if (!mute.ok) {
     console.warn(`macOS VM audio mute failed: ${mute.text}`);

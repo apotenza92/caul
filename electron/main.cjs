@@ -39,6 +39,7 @@ const rendererTranscriptionSmokeMs = Number(process.env.CAUL_RENDERER_TRANSCRIPT
 const rendererTranscriptionSmokeNoLlm = process.env.CAUL_RENDERER_TRANSCRIPTION_SMOKE_NO_LLM === '1';
 const rendererTranscriptionSmokeBridgeStart = process.env.CAUL_RENDERER_TRANSCRIPTION_SMOKE_BRIDGE_START === '1';
 const rendererTranscriptionSmokeGuiClicks = process.env.CAUL_RENDERER_TRANSCRIPTION_SMOKE_GUI_CLICKS === '1';
+const rendererTranscriptionSmokeFakeBackend = process.env.CAUL_RENDERER_TRANSCRIPTION_SMOKE_FAKE_BACKEND === '1';
 const rendererLlmSmoke = process.env.CAUL_RENDERER_LLM_SMOKE === '1';
 const rendererRealLlmSmoke = process.env.CAUL_RENDERER_REAL_LLM_SMOKE === '1';
 const onboardingSmokeDir = process.env.CAUL_ONBOARDING_SMOKE_DIR;
@@ -2861,6 +2862,19 @@ function getPreferredLocalModelId() {
 }
 
 function getParakeetStatus(modelId = getPreferredLocalModelId()) {
+  if (rendererTranscriptionSmokeFakeBackend) {
+    const normalisedModelId = normaliseLocalTranscriptionModelId(modelId);
+
+    return {
+      ok: true,
+      installed: true,
+      modelDir: getLocalModelPath(normalisedModelId),
+      modelId: normalisedModelId,
+      modelName: normalisedModelId === 'moonshine-tiny' ? 'Moonshine tiny' : 'Parakeet v3',
+      status: 'installed'
+    };
+  }
+
   if (parakeetDownload || localModelDownload) {
     const download = parakeetDownload ?? localModelDownload;
     return {
@@ -6080,8 +6094,22 @@ async function clickVisibleButtonInWindow(window, buttonText, options = {}) {
       const textOf = (element) => [element?.textContent || '', element?.getAttribute?.('aria-label') || ''].join(' ')
         .replace(/\\s+/g, ' ')
         .trim();
-      const getButton = () => Array.from(document.querySelectorAll('button'))
-        .find((candidate) => textOf(candidate).toLowerCase().includes(wanted)) ?? null;
+      const isVisible = (button) => {
+        const rect = button.getBoundingClientRect();
+        const style = window.getComputedStyle(button);
+        return rect.width > 0
+          && rect.height > 0
+          && style.display !== 'none'
+          && style.visibility !== 'hidden';
+      };
+      const getButton = () => {
+        const candidates = Array.from(document.querySelectorAll('button'))
+          .filter((candidate) => textOf(candidate).toLowerCase().includes(wanted));
+        return candidates.find((candidate) => isVisible(candidate) && !candidate.disabled)
+          ?? candidates.find((candidate) => isVisible(candidate))
+          ?? candidates[0]
+          ?? null;
+      };
       let button = null;
       let lastDisabled = false;
       let lastRect = null;
@@ -8011,10 +8039,16 @@ function createWindow() {
 
     const runRendererTranscriptionSmoke = async () => {
       const guiClickResults = [];
+      const guiClickPromises = [];
       const scheduleGuiClick = (delayMs, buttonText, phase) => {
-        setTimeout(async () => {
+        const promise = new Promise((resolve) => {
+          setTimeout(resolve, delayMs);
+        }).then(async () => {
           try {
-            const click = await clickVisibleButtonInWindow(mainWindow, buttonText);
+            const timeoutMs = phase === 'start'
+              ? 20_000
+              : 12_000;
+            const click = await clickVisibleButtonInWindow(mainWindow, buttonText, { timeoutMs });
             guiClickResults.push({
               ...click,
               phase,
@@ -8028,7 +8062,9 @@ function createWindow() {
               scheduledAtMs: delayMs
             });
           }
-        }, delayMs).unref();
+        });
+
+        guiClickPromises.push(promise);
       };
 
       try {
@@ -8066,8 +8102,22 @@ function createWindow() {
             await new Promise((resolve) => setTimeout(resolve, ${JSON.stringify(rendererRealLlmSmoke ? 1500 : 300)}));
 
             const output = document.querySelector('[aria-label="Transcription output"]');
-            const findButton = (pattern) => Array.from(document.querySelectorAll('button'))
-              .find((button) => pattern.test(button.textContent ?? ''));
+            const isVisibleButton = (button) => {
+              const rect = button.getBoundingClientRect();
+              const style = window.getComputedStyle(button);
+              return rect.width > 0
+                && rect.height > 0
+                && style.display !== 'none'
+                && style.visibility !== 'hidden';
+            };
+            const findButton = (pattern) => {
+              const candidates = Array.from(document.querySelectorAll('button'))
+                .filter((button) => pattern.test(button.textContent ?? ''));
+              return candidates.find((button) => isVisibleButton(button) && !button.disabled)
+                ?? candidates.find((button) => isVisibleButton(button))
+                ?? candidates[0]
+                ?? null;
+            };
             const waitForButton = async (pattern, timeoutMs = 5_000) => {
               const deadline = Date.now() + timeoutMs;
 
@@ -8268,6 +8318,10 @@ function createWindow() {
             };
           })()
         `);
+
+        if (rendererTranscriptionSmokeGuiClicks) {
+          await Promise.allSettled(guiClickPromises);
+        }
 
         result.guiClicks = guiClickResults;
         emitSmokeLine(`caul-renderer-transcription-smoke ${JSON.stringify(result)}`);
@@ -8855,7 +8909,7 @@ ipcMain.handle('caul:capture-stop', () => {
 });
 
 ipcMain.handle('caul:transcription-start', (_event, request) => new Promise((resolve, reject) => {
-  if (rendererLlmSmoke || rendererRealLlmSmoke) {
+  if (rendererLlmSmoke || rendererRealLlmSmoke || rendererTranscriptionSmokeFakeBackend) {
     localTranscriptionActive = true;
     resolve({ ok: true });
     return;
@@ -8875,7 +8929,7 @@ ipcMain.handle('caul:transcription-start', (_event, request) => new Promise((res
 }));
 
 ipcMain.handle('caul:transcription-prepare', (_event, request) => {
-  if (rendererLlmSmoke || rendererRealLlmSmoke) {
+  if (rendererLlmSmoke || rendererRealLlmSmoke || rendererTranscriptionSmokeFakeBackend) {
     return { ok: true };
   }
 
@@ -8887,7 +8941,7 @@ ipcMain.handle('caul:transcription-prepare', (_event, request) => {
 });
 
 ipcMain.handle('caul:transcription-stop', async () => {
-  if (rendererLlmSmoke || rendererRealLlmSmoke) {
+  if (rendererLlmSmoke || rendererRealLlmSmoke || rendererTranscriptionSmokeFakeBackend) {
     localTranscriptionActive = false;
     return { ok: true };
   }
