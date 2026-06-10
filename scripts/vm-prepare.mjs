@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 import { resolveVmProfile, listVmProfiles } from './vm/profiles.mjs';
 import { createPowerShellEncodedArgs, getSshArgs, macGuestShellArgs, runCommand, runPrlctl, shellQuote } from './vm/commands.mjs';
+import {
+  linuxSilentAudioSetupCommand,
+  linuxSilentAudioStatusCommand,
+  linuxSilentAudioVerificationCommand
+} from './vm/linux-audio.mjs';
 
 const profileName = process.argv[2];
 
@@ -50,12 +55,16 @@ async function muteVm(profile) {
   }
 
   if (profile.platform === 'linux') {
-    await runCommand('ssh', getSshArgs(profile, [
-      'wpctl set-mute @DEFAULT_AUDIO_SINK@ 1 2>/dev/null || true',
-      'wpctl set-volume @DEFAULT_AUDIO_SINK@ 0% 2>/dev/null || true',
-      'pactl set-sink-mute @DEFAULT_SINK@ 1 2>/dev/null || true',
-      'pactl set-sink-volume @DEFAULT_SINK@ 0% 2>/dev/null || true'
-    ].join('; ')), { timeout: 15_000 });
+    const mute = await runCommand('ssh', getSshArgs(profile, [
+      linuxSilentAudioSetupCommand(),
+      linuxSilentAudioVerificationCommand(),
+      linuxSilentAudioStatusCommand()
+    ].join('\n')), { timeout: 15_000 });
+
+    if (!mute.ok) {
+      throw new Error(`Could not route Linux VM audio to the silent test sink: ${mute.text}`);
+    }
+
     return;
   }
 

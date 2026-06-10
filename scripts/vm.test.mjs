@@ -18,6 +18,11 @@ import {
   validateVmE2eSummary
 } from './vm/summary.mjs';
 import {
+  linuxSilentAudioSetupCommand,
+  linuxSilentAudioVerificationCommand,
+  linuxSilentSinkName
+} from './vm/linux-audio.mjs';
+import {
   assertDisposableVmPath,
   shouldRemoveVmReleaseArtefact
 } from './vm/cleanup.mjs';
@@ -107,6 +112,31 @@ describe('VM command helpers', () => {
     ].join('\n');
 
     expect(parseDebPackageVersion(control)).toBe('0.1.20');
+  });
+
+  it('routes Linux VM playback through a silent null sink', () => {
+    const command = linuxSilentAudioSetupCommand();
+
+    expect(command).toContain(`module-null-sink sink_name=${linuxSilentSinkName}`);
+    expect(command).toContain(`pactl set-default-sink ${linuxSilentSinkName}`);
+    expect(command).toContain('factory.name=support.null-audio-sink');
+    expect(command).toContain(`node.name=${linuxSilentSinkName}`);
+    expect(command).toContain('wpctl set-default "$silent_id"');
+    expect(command).toContain('pactl set-sink-mute "$sink" 1');
+    expect(command).toContain('pactl set-sink-volume "$sink" 0%');
+    expect(command).toContain('wpctl set-mute "$sink" 1');
+    expect(command).toContain('wpctl set-volume "$sink" 0');
+  });
+
+  it('verifies non-silent Linux sinks remain muted', () => {
+    const command = linuxSilentAudioVerificationCommand();
+
+    expect(command).toContain(`pactl get-default-sink | grep -qx ${linuxSilentSinkName}`);
+    expect(command).toContain(`node.name = "${linuxSilentSinkName}"`);
+    expect(command).toContain('awk -v id="$silent_id"');
+    expect(command).toContain(`$2 != "${linuxSilentSinkName}"`);
+    expect(command).toContain('pactl get-sink-mute "$sink" | grep -qi "yes"');
+    expect(command).toContain('wpctl get-volume "$sink" | grep -qi "MUTED"');
   });
 });
 

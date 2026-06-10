@@ -9,6 +9,11 @@ import {
   evaluateAudioIsolationGate,
   parseSmokeSummaryByType
 } from './audio-isolation-gate.mjs';
+import {
+  linuxSilentAudioSetupCommand,
+  linuxSilentAudioStatusCommand,
+  linuxSilentAudioVerificationCommand
+} from './vm/linux-audio.mjs';
 
 const execFileAsync = promisify(execFile);
 const transcriptionExpectedPhrase = 'Caul release transcription smoke. Local transcription emits confirmed text.';
@@ -1332,17 +1337,17 @@ async function runLinuxPackageSmoke() {
 async function muteLinuxVmAudio(sshUser, ipAddress, knownHosts) {
   const mute = await runLinuxCommand(
     [
-      'wpctl set-volume @DEFAULT_AUDIO_SINK@ 0 2>/dev/null || pactl set-sink-volume @DEFAULT_SINK@ 0% 2>/dev/null || true',
-      'wpctl set-mute @DEFAULT_AUDIO_SINK@ 1 2>/dev/null || pactl set-sink-mute @DEFAULT_SINK@ 1 2>/dev/null || true',
-      'wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null || pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null || true'
-    ].join(' && '),
+      linuxSilentAudioSetupCommand(),
+      linuxSilentAudioVerificationCommand(),
+      linuxSilentAudioStatusCommand()
+    ].join('\n'),
     sshUser,
     ipAddress,
     knownHosts
   );
 
   if (!mute.ok) {
-    console.warn(`Linux VM audio mute failed: ${mute.text}`);
+    throw new Error(`Linux VM audio could not be routed to the silent test sink: ${mute.text}`);
   }
 }
 
@@ -1693,7 +1698,7 @@ async function runLinuxRendererTranscriptionSmoke(sshUser, ipAddress, knownHosts
       `ln -s ${shellQuote(modelDir)} ${shellQuote(`${userData}/models/parakeet-tdt-0.6b-v3-int8`)}`,
       `printf '%s\\n' ${shellQuote(JSON.stringify(setupStateSeed(`${userData}/Caul`, 'local')))} > ${shellQuote(`${userData}/setup-state.json`)}`,
       `printf '%s\\n' ${shellQuote(JSON.stringify(profileSettingsSeed('local')))} > ${shellQuote(`${userData}/Caul/settings.json`)}`,
-      `((sleep 8; wpctl set-mute @DEFAULT_AUDIO_SINK@ 0 >/tmp/caul-renderer-pw-play.log 2>&1 || true; wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.70 >>/tmp/caul-renderer-pw-play.log 2>&1 || true; deadline=$((SECONDS + 55)); while [ "$SECONDS" -lt "$deadline" ]; do timeout 18 pw-play ${shellQuote(fixturePath)} >>/tmp/caul-renderer-pw-play.log 2>&1 || true; sleep 1; done) &)`,
+      `((sleep 8; { ${linuxSilentAudioSetupCommand()} ; } >>/tmp/caul-renderer-pw-play.log 2>&1 || true; deadline=$((SECONDS + 55)); while [ "$SECONDS" -lt "$deadline" ]; do timeout 18 pw-play ${shellQuote(fixturePath)} >>/tmp/caul-renderer-pw-play.log 2>&1 || true; sleep 1; done) &)`,
       [
         'DISPLAY=:0',
         'CAUL_RENDERER_TRANSCRIPTION_SMOKE_MS=65000',
@@ -2090,6 +2095,7 @@ function linuxToneStimulusCommand(logPath) {
 
   return [
     `python3 -c ${shellQuote(script)}`,
+    linuxSilentAudioSetupCommand(),
     `(timeout 7 pw-play /tmp/caul-audio-stimulus.wav >${shellQuote(logPath)} 2>&1 &)`
   ].join(' && ');
 }
