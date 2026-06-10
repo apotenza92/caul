@@ -36,9 +36,14 @@ Make Caul release-ready on Windows ARM64 and Linux ARM64 first, using the local 
 
 ## VM E2E Release Gates
 
-Add Parallels-driven checks for the macOS, Windows and Ubuntu VMs:
+Add Parallels-driven checks for the macOS, Windows and Ubuntu VMs. Release validation is split into explicit lifecycle phases:
 
-- `vm:e2e:macos`: inspect `macOS Tahoe`, validate a packaged `.app`, run packaged launch/onboarding/privacy checks, and exercise packaged audio, automated source-isolation, transcription and renderer AI smoke paths.
+- `vm:prepare:<platform>` starts or verifies the VM, mutes guest audio, stops stale Caul processes and checks fixture paths.
+- `vm:package:<platform>` builds the package for that platform. macOS builds on the host; Windows and Linux build inside disposable VM repos under `caul-e2e`.
+- `vm:stage:<platform>` copies the already-built package to the disposable VM release path and verifies its version against `package.json`.
+- `vm:e2e:<platform>` consumes the staged package and runs only packaged release gates.
+
+- `vm:e2e:macos`: inspect `macOS`, validate the staged packaged `.app`, run packaged launch/onboarding/privacy checks, and exercise packaged audio, automated source-isolation, transcription and renderer AI smoke paths.
 - `vm:status:win`: inspect `Windows 11 ARM`, Parallels Tools state and guest reachability.
 - `vm:status:linux`: inspect `Ubuntu 24.04.3 ARM64`, Parallels Tools state and guest reachability.
 - `vm:backend-smoke:win`: run the backend system-audio smoke inside the Windows VM checkout and require capture start, audio frames and level events.
@@ -59,7 +64,7 @@ For each platform, packaged E2E must verify:
 - Raw audio is not written by default.
 - No provider call or hidden telemetry happens before explicit setup. Privacy smokes disable update checks with `CAUL_DISABLE_UPDATE_CHECKS=1`; normal packaged builds still default to weekly GitHub-backed update checks.
 
-The unified `vm:e2e` command runs macOS, Windows and Ubuntu Linux gates. Each gate emits a machine-parseable `caul-vm-e2e` summary and writes `artifacts/vm-e2e/<profile>.json` for passing, failing and VM-provisioning-blocked runs. `scripts/release.sh` warns when those summaries are missing or failing, and `CAUL_REQUIRE_VM_E2E=1` turns the warning into a hard release block. Linux RPM is currently published for x64 only.
+The unified `vm:e2e` command runs macOS, Windows and Ubuntu Linux gates after packages have been explicitly staged. Each gate emits a machine-parseable `caul-vm-e2e` summary and writes `artifacts/vm-e2e/<profile>.json` for passing, failing and VM-provisioning-blocked runs. Summaries include `packageVersion`, named gates, evidence paths and cleanup state. `scripts/release.sh` warns when those summaries are missing or failing, and `CAUL_REQUIRE_VM_E2E=1` turns the warning into a hard release block. Linux RPM is currently published for x64 only.
 
 The backend also has bounded `smoke:desktop-system-audio`, `vm:backend-smoke:win` and `vm:backend-smoke:linux` commands for native system-audio smoke checks before the full packaged Electron E2E is automated. The Ubuntu VM backend smoke uses PipeWire capture and a bounded audio stimulus. The Windows VM backend smoke uses WASAPI loopback for the default render endpoint and includes `--windows-audio-diagnostics` output so missing or unusable VM audio endpoints fail with actionable context.
 
@@ -73,11 +78,13 @@ The packaged stop/restart smoke has backend and renderer layers. The backend lay
 
 The packaged local transcription smoke has two layers. The direct-backend layer uses the packaged backend binary, a generated 16 kHz mono speech WAV, and the real Parakeet model directories already present in the Windows and Ubuntu VMs. Windows generates the speech fixture inside the guest with `System.Speech`; Linux uses a temporary Mac-generated 16 kHz mono WAV copied over SSH for the smoke. It requires a non-empty transcript with word overlap against the expected phrase. The renderer layer drives the packaged Electron listening control with a fresh setup-complete user data directory, disables persistent Pi for the smoke, starts through the real Start listening button, plays bounded guest audio, and requires visible local transcript text in the renderer from either final completed chunks or live partial chunks. The direct-backend layer remains the confirmed known-text proof; the renderer layer proves packaged UI wiring, button enablement, capture startup and transcript rendering.
 
+Normal macOS release E2E is not the fresh permission prompt test. It first proves the packaged backend can access native system audio and microphone paths, then enables a packaged smoke-only permission assumption for the onboarding completion check. Fresh TCC prompt and denial-recovery testing should use a separate macOS permission-flow command so release E2E is not blocked by System Settings timing.
+
 Current VM setup state:
 
-- Ubuntu is reachable through Parallels Tools and SSH, has a synced checkout at `/home/parallels/caul-cross-platform`, and can build latest ARM64 Linux artefacts for E2E.
-- Windows is reachable through Parallels Tools and has a synced checkout at `C:\Users\alex\caul-cross-platform`; Windows audio remains a hard E2E gate and failures should include `--windows-audio-diagnostics` output.
-- The macOS VM gate requires Parallels Tools, a visible guest IP and a synced packaged `.app`; release automation must report this as a provisioning blocker when those requirements are not met.
+- Ubuntu is reachable through Parallels Tools and SSH, stages source under `/home/parallels/caul-e2e/repo`, and stages the `.deb` under `/home/parallels/caul-e2e/release`.
+- Windows is reachable through Parallels Tools, stages source under `C:\Users\alex\caul-e2e\repo`, and stages the installer under `C:\Users\alex\caul-e2e\release`; Windows audio remains a hard E2E gate and failures should include `--windows-audio-diagnostics` output.
+- The macOS VM gate requires Parallels Tools, a visible guest IP and a staged packaged `.app` at `/Users/alex/caul-e2e/Caul.app`; release automation must report this as a provisioning blocker when those requirements are not met.
 
 ## Release Criteria
 

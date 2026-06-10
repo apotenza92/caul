@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
-const vmName = process.env.CAUL_MACOS_VM_NAME ?? 'macOS Tahoe';
+const vmName = process.env.CAUL_MACOS_VM_NAME ?? 'macOS';
 
 async function runPrlctl(args) {
   try {

@@ -90,7 +90,7 @@ contextBridge.exposeInMainWorld('caul', {
       complete: () => ipcRenderer.invoke('caul:onboarding-complete'),
       fitContent: (size) => ipcRenderer.invoke('caul:onboarding-fit-content', size),
       open: () => ipcRenderer.invoke('caul:onboarding-open'),
-      status: () => ipcRenderer.invoke('caul:onboarding-status')
+      status: (options) => ipcRenderer.invoke('caul:onboarding-status', options)
     },
     history: {
       chooseFolder: () => ipcRenderer.invoke('caul:history-choose-folder'),

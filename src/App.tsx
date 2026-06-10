@@ -13,9 +13,7 @@ import {
 import {
   Field,
   FieldGroup,
-  FieldLabel,
-  FieldLegend,
-  FieldSet
+  FieldLabel
 } from '@/components/ui/field';
 import {
   Select,
@@ -148,8 +146,8 @@ const layout = {
   modalCloseButtonDesktop: 'right-3 size-8 rounded-md',
   modalCloseButtonMac: 'caul-mac-close-button left-3 size-[14px] cursor-default rounded-full border-[0.5px] border-[#FB1626] bg-[#FF5C60] p-0 text-[#802F31] shadow-none hover:bg-[#FF5C60] active:bg-[#D94D4F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF5C60]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-popover',
   settingsInlineGroup: 'flex-row flex-wrap items-start gap-3',
-  settingsPageStack: 'gap-0',
-  settingsSection: 'gap-2 border-t border-border/70 pt-4 first:border-t-0 first:pt-0',
+  settingsPageStack: 'gap-6',
+  settingsSection: 'gap-2',
   settingsSectionBody: 'gap-3',
   settingsDescription: 'text-sm leading-5 text-muted-foreground',
   settingsPermissionActions: 'flex flex-wrap items-center gap-2',
@@ -253,8 +251,12 @@ const autoCollapsePreferenceKey = 'caul.auto-collapse';
 const generalInstructionsPreferenceKey = 'caul.general-instructions';
 const defaultGeneralInstructions = '';
 const generalInstructionsPlaceholder = 'e.g. Always answer in British English.';
-const recommendedPillClassName = 'pointer-events-none shrink-0 rounded-full border border-primary/35 bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary shadow-sm dark:border-primary/45 dark:bg-primary/15 dark:text-primary';
-const selectedRecommendedPillClassName = 'pointer-events-none shrink-0 rounded-full border border-primary-foreground/40 bg-primary-foreground/15 px-2 py-0.5 text-xs font-medium text-primary-foreground shadow-sm';
+const recommendedPillClassName = 'shrink-0 rounded-full border border-primary/35 bg-primary/10 px-2 py-0.5 text-sm font-medium text-primary shadow-sm dark:border-primary/45 dark:bg-primary/15 dark:text-primary';
+const selectedRecommendedPillClassName = 'shrink-0 rounded-full border border-primary-foreground/40 bg-primary-foreground/15 px-2 py-0.5 text-sm font-medium text-primary-foreground shadow-sm';
+const recommendedPillTitle = 'Recommended based on this computer’s power, memory and supported local AI runtimes.';
+const recommendedLocalAiPillMessage = 'Based on this computer’s power, Caul recommends Local because you should still get acceptable private AI results on this machine.';
+const recommendedCloudAiPillMessage = 'Based on this computer’s power, Caul recommends Cloud because local AI probably will not give acceptable results on this machine.';
+const recommendedPillLabel = 'Recommended';
 const handleDragThresholdPx = 6;
 const handleSnapVisualDurationMs = 280;
 const overlayOpenTooltipSuppressionMs = 700;
@@ -1023,6 +1025,7 @@ export function App() {
                 isBusy={isBusy}
                 isListening={isListening}
                 initialSection={settingsSection}
+                listenToMicrophone={listenToMicrophone}
                 llmModel={llmModel}
                 llmReasoning={llmReasoning}
                 onSelectedAiProviderChange={setSelectedAiProvider}
@@ -1085,7 +1088,7 @@ type OnboardingStep = 'permissions' | 'parakeet' | 'ai';
 function OnboardingSurface() {
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [localLlmStatus, setLocalLlmStatus] = useState<LocalLlmStatus | null>(null);
-  const [localAiSetupPhase, setLocalAiSetupPhase] = useState<'downloading' | 'idle'>('idle');
+  const [localAiSetupPhase, setLocalAiSetupPhase] = useState<'requesting' | 'downloading' | 'idle'>('idle');
   const [selectedAiProvider, setSelectedAiProviderState] = useState<AiProvider>('local');
   const [isChatGptSigningIn, setIsChatGptSigningIn] = useState(false);
   const [isCompleting, setIsCompleting] = useState(false);
@@ -1093,6 +1096,8 @@ function OnboardingSurface() {
   const parakeetRef = useRef<HTMLElement | null>(null);
   const aiRef = useRef<HTMLElement | null>(null);
   const hasAutoStartedParakeetDownloadRef = useRef(false);
+  const hasInitialisedAiProviderRef = useRef(false);
+  const hasUserSelectedAiProviderRef = useRef(false);
   const autoSelectingReadyModelRef = useRef<LocalTranscriptionModelId | null>(null);
   const runtimeContext = useRuntimeContext();
   const appName = runtimeContext?.appName ?? 'Caul';
@@ -1101,7 +1106,7 @@ function OnboardingSurface() {
     : caulAppIconUrl;
 
   useEffect(() => {
-    void refresh();
+    void refresh({ refreshCatalogue: false });
 
     const unsubscribe = getSettingsBridge()?.parakeet?.onStatus?.((nextStatus) => {
       setStatus((current) => current ? {
@@ -1115,7 +1120,7 @@ function OnboardingSurface() {
         if (nextStatus.status === 'downloading') {
           return 'downloading';
         }
-        return current === 'downloading' ? 'idle' : current;
+        return current === 'downloading' || current === 'requesting' ? 'idle' : current;
       });
     });
 
@@ -1159,12 +1164,30 @@ function OnboardingSurface() {
     };
   }, []);
 
-  async function refresh() {
-    const nextStatus = await getSettingsBridge()?.onboarding?.status();
+  async function refresh(options?: { refreshCatalogue?: boolean }) {
+    const nextStatus = await getSettingsBridge()?.onboarding?.status(options);
 
     if (nextStatus) {
       setStatus(nextStatus);
-      setSelectedAiProviderState(nextStatus.ai?.provider ?? 'local');
+      if (!hasInitialisedAiProviderRef.current) {
+        hasInitialisedAiProviderRef.current = true;
+        const recommendedProvider = getOnboardingDefaultAiProvider(nextStatus);
+        setSelectedAiProviderState(recommendedProvider);
+
+        if (recommendedProvider !== nextStatus.ai?.provider) {
+          void getSettingsBridge()?.ai?.setProvider?.(recommendedProvider)
+            .then((updatedStatus) => {
+              if (updatedStatus && !hasUserSelectedAiProviderRef.current) {
+                setStatus(updatedStatus);
+              }
+            })
+            .catch((error) => {
+              console.error('Failed to apply recommended onboarding AI provider:', error);
+            });
+        }
+      } else if (!hasUserSelectedAiProviderRef.current) {
+        setSelectedAiProviderState(nextStatus.ai?.provider ?? getOnboardingDefaultAiProvider(nextStatus));
+      }
       setLocalLlmStatus(getCaulLocalLlmStatus(nextStatus));
     }
   }
@@ -1205,6 +1228,7 @@ function OnboardingSurface() {
   }
 
   async function selectAiProvider(provider: AiProvider) {
+    hasUserSelectedAiProviderRef.current = true;
     setSelectedAiProviderState(provider);
 
     try {
@@ -1219,8 +1243,7 @@ function OnboardingSurface() {
 
   async function downloadLocalAi(modelId?: string) {
     try {
-      setLocalAiSetupPhase('downloading');
-      setLocalLlmStatus((current) => getPreparingLocalAiStatus(current ?? getCaulLocalLlmStatus(status)));
+      setLocalAiSetupPhase('requesting');
       const nextStatus = await getSettingsBridge()?.ai?.downloadLocal?.(modelId);
       if (nextStatus) {
         setLocalLlmStatus(nextStatus);
@@ -1373,7 +1396,8 @@ function OnboardingSurface() {
           <h1 className="text-lg font-semibold">Welcome to {appName}</h1>
         </header>
 
-        <OnboardingPanel sectionRef={parakeetRef} title="Transcription">
+        <OnboardingPanel sectionRef={parakeetRef} title="Local transcription">
+          <p className="text-sm text-muted-foreground">Local and private. Audio is transcribed on this computer. Nothing is sent to the internet.</p>
           <OnboardingTranscriptionStatus status={status} />
         </OnboardingPanel>
 
@@ -1394,21 +1418,12 @@ function OnboardingSurface() {
         {onboardingPermissionRows.length > 0 ? (
           <OnboardingPanel sectionRef={permissionsRef} title="Permissions">
             <div className="grid">
-              {onboardingPermissionRows.map((row) => (
-                row.kind === 'audio' ? (
-                  <AudioPermissionSetupRow
-                    key="audio"
-                    microphone={row.microphone}
-                    onChange={(permissions) => void requestOnboardingPermissions(permissions)}
-                    systemAudio={row.systemAudio}
-                  />
-                ) : (
-                  <PermissionSetupRow
-                    key={row.permission.id}
-                    onChange={() => void requestOnboardingPermission(row.permission.id)}
-                    permission={row.permission}
-                  />
-                )
+              {onboardingPermissionRows.map((permission) => (
+                <PermissionSetupRow
+                  key={permission.id}
+                  onChange={() => void requestOnboardingPermission(permission.id)}
+                  permission={permission}
+                />
               ))}
             </div>
           </OnboardingPanel>
@@ -1472,7 +1487,7 @@ function getMissingOnboardingItems(status: OnboardingStatus | null) {
   }
 
   const missing = [];
-  const missingPermissions = getOnboardingVisiblePermissionItems(status.permissions).filter((permission) => (
+  const missingPermissions = getOnboardingRequiredPermissionItems(status.permissions).filter((permission) => (
     permission.status !== 'granted' && permission.status !== 'unsupported'
   ));
 
@@ -1485,6 +1500,14 @@ function getMissingOnboardingItems(status: OnboardingStatus | null) {
   }
 
   return missing;
+}
+
+function getOnboardingDefaultAiProvider(status: OnboardingStatus): AiProvider {
+  if (status.ai?.recommended === 'local' || status.ai?.recommended === 'cloud') {
+    return status.ai.recommended;
+  }
+
+  return status.ai?.provider ?? 'local';
 }
 
 function isOnboardingTranscriptionModelReady(status: OnboardingStatus) {
@@ -1551,7 +1574,7 @@ function OnboardingAiModelSetup({
   status
 }: {
   isChatGptSigningIn: boolean;
-  localAiSetupPhase: 'downloading' | 'idle';
+  localAiSetupPhase: 'requesting' | 'downloading' | 'idle';
   localLlmStatus: LocalLlmStatus | null;
   onCancelLocalDownload: () => void;
   onDownloadLocalAi: (modelId?: string) => void;
@@ -1564,7 +1587,6 @@ function OnboardingAiModelSetup({
   const piReady = Boolean(status?.pi.connected);
   const localRecommendedModel = ai?.recommended === 'local' ? ai.recommendedModel : null;
   const caulLocalStatus = localLlmStatus ?? getCaulLocalLlmStatus(status);
-  const isLocalDownloading = caulLocalStatus?.status === 'downloading' || localAiSetupPhase === 'downloading';
   const localModelInstalled = Boolean(
     caulLocalStatus?.runtime.installed
     && caulLocalStatus.model?.installed
@@ -1572,7 +1594,7 @@ function OnboardingAiModelSetup({
     && caulLocalStatus.model.id === localRecommendedModel.id
   );
   return (
-    <div className="grid gap-2">
+    <div className="grid gap-1.5">
       <div className="inline-flex w-full rounded-md border border-border bg-muted/30 p-0.5" role="tablist" aria-label="AI provider">
         {(['local', 'cloud'] as AiProvider[]).map((provider) => (
           <button
@@ -1585,59 +1607,218 @@ function OnboardingAiModelSetup({
             type="button"
           >
             <span>{provider === 'local' ? 'Local' : 'Cloud'}</span>
-            {ai?.recommended === provider ? <RecommendedPill selected={selectedProvider === provider} /> : null}
+            {ai?.recommended === provider ? (
+              <RecommendedPill
+                message={getAiProviderRecommendationMessage(provider)}
+                selected={selectedProvider === provider}
+              />
+            ) : null}
           </button>
         ))}
       </div>
 
       {selectedProvider === 'local' ? (
-        <div role="tabpanel" className="grid h-20 grid-rows-[1fr_2.25rem] justify-items-center gap-1.5 text-center">
-          <div className="flex min-w-0 items-center gap-1 text-xs leading-5 text-muted-foreground">
-            <p>Local and private. Slower and less intelligent than ChatGPT.</p>
-            {localRecommendedModel ? <LocalAiRecommendationInfoButton recommendation={ai} /> : null}
-          </div>
-          <div className="flex min-h-9 flex-wrap items-center justify-center gap-2">
-            {localModelInstalled ? (
-              <StatusPill ready>Ready</StatusPill>
-            ) : caulLocalStatus?.runtime.supported === false ? (
-              <StatusPill ready={false}>Unavailable</StatusPill>
-            ) : isLocalDownloading ? (
-              <>
-                <Button onClick={onCancelLocalDownload} size="sm" type="button" variant="outline">Cancel</Button>
-                {caulLocalStatus?.progress ? (
-                  <span aria-live="polite" className="max-w-52 truncate text-xs tabular-nums text-muted-foreground" title={getLocalAiDownloadProgressLabel(caulLocalStatus.progress).accessibleLabel}>
-                    {getLocalAiDownloadProgressLabel(caulLocalStatus.progress).label}
-                  </span>
-                ) : (
-                  <span aria-live="polite" className="max-w-52 truncate text-xs tabular-nums text-muted-foreground">
-                    Downloading local AI...
-                  </span>
-                )}
-              </>
-            ) : (
-              <Button disabled={!caulLocalStatus?.runtime.supported && Boolean(caulLocalStatus)} onClick={() => onDownloadLocalAi(localRecommendedModel?.id)} size="sm" type="button">
-                Download local AI
-              </Button>
-            )}
-          </div>
+        <div role="tabpanel" className="grid gap-1.5 text-left">
+          <p className="text-xs leading-5 text-muted-foreground">
+            Data stays local and private. Slower and less intelligent than Cloud.
+          </p>
+          <LocalAiDownloadControl
+            align="start"
+            info={localRecommendedModel ? <LocalAiRecommendationInfoButton recommendation={ai} /> : null}
+            isInstalled={localModelInstalled}
+            localAiSetupPhase={localAiSetupPhase}
+            onCancel={onCancelLocalDownload}
+            onDownload={() => onDownloadLocalAi(localRecommendedModel?.id)}
+            setupLabel="Local AI setup"
+            statusPlacement="inline"
+            status={caulLocalStatus}
+          />
         </div>
       ) : (
-        <div role="tabpanel" className="grid h-20 grid-rows-[1fr_2.25rem] justify-items-center gap-1.5 text-center">
-          <p className="flex items-center text-xs leading-5 text-muted-foreground">
-            Sends to ChatGPT. Faster and smarter than Local.
+        <div role="tabpanel" className="grid gap-1.5 text-left">
+          <p className="text-xs leading-5 text-muted-foreground">
+            Sends to a cloud model like ChatGPT. Faster and smarter than Local.
           </p>
-          <div className="flex min-h-9 items-center justify-center gap-1.5">
-            {!piReady ? (
-              <Button disabled={isChatGptSigningIn} onClick={onSignInWithChatGpt} size="sm" type="button">
-                {isChatGptSigningIn ? <LoaderCircleIcon className="mr-1.5 size-3.5 animate-spin" /> : null}
-                {isChatGptSigningIn ? 'Opening' : 'Sign in with ChatGPT'}
-              </Button>
-            ) : (
-              <StatusPill ready>Ready</StatusPill>
-            )}
-          </div>
+          <CloudSignInControl
+            align="start"
+            isReady={piReady}
+            isSigningIn={isChatGptSigningIn}
+            onSignIn={onSignInWithChatGpt}
+            setupLabel="Cloud AI setup"
+            statusPlacement="inline"
+          />
         </div>
       )}
+    </div>
+  );
+}
+
+function LocalAiDownloadControl({
+  align = 'center',
+  info,
+  isInstalled,
+  localAiSetupPhase,
+  onCancel,
+  onDownload,
+  setupLabel,
+  statusPlacement = 'below',
+  status
+}: {
+  align?: 'center' | 'start';
+  info?: ReactNode;
+  isInstalled: boolean;
+  localAiSetupPhase: 'requesting' | 'downloading' | 'idle';
+  onCancel: () => void;
+  onDownload: () => void;
+  setupLabel?: string;
+  statusPlacement?: 'below' | 'inline';
+  status: LocalLlmStatus | null;
+}) {
+  const isDownloading = status?.status === 'downloading' || localAiSetupPhase === 'requesting' || localAiSetupPhase === 'downloading';
+  const lastDetailedProgressRef = useRef<{ accessibleLabel: string; label: string } | null>(null);
+  const progress = getLocalAiDownloadProgressLabel(status?.progress, localAiSetupPhase);
+  if (isDownloading && status?.progress && typeof status.progress.percent === 'number') {
+    lastDetailedProgressRef.current = progress;
+  } else if (!isDownloading) {
+    lastDetailedProgressRef.current = null;
+  }
+  const displayProgress = isDownloading && !status?.progress && lastDetailedProgressRef.current
+    ? lastDetailedProgressRef.current
+    : progress;
+  const alignmentClassName = align === 'start' ? 'justify-items-start text-left' : 'justify-items-center text-center';
+  const progressClassName = align === 'start'
+    ? 'max-w-sm text-xs leading-5 text-muted-foreground'
+    : 'max-w-sm text-center text-xs leading-5 text-muted-foreground';
+  const actionClassName = `inline-flex items-center gap-1.5 ${align === 'start' ? '' : 'justify-center'}`;
+  const rootClassName = statusPlacement === 'inline'
+    ? 'flex min-h-9 w-full items-center justify-between gap-3'
+    : `grid min-h-9 gap-1 ${alignmentClassName}`;
+  const inlineProgressClassName = 'ml-auto min-w-0 text-right text-xs leading-5 text-muted-foreground';
+
+  if (isInstalled) {
+    return (
+      <div aria-label={setupLabel} className={rootClassName} role={setupLabel ? 'group' : undefined}>
+        <div className={actionClassName}>
+          <Button disabled size="sm" type="button">
+            Download local AI
+          </Button>
+          {info}
+        </div>
+        <p aria-live="polite" className={statusPlacement === 'inline' ? inlineProgressClassName : progressClassName}>
+          Ready
+        </p>
+      </div>
+    );
+  }
+
+  if (status?.runtime.supported === false) {
+    return (
+      <div aria-label={setupLabel} className={rootClassName} role={setupLabel ? 'group' : undefined}>
+        <div className={actionClassName}>
+          <Button disabled size="sm" type="button">
+            Download local AI
+          </Button>
+          {info}
+        </div>
+        <p aria-live="polite" className={statusPlacement === 'inline' ? inlineProgressClassName : progressClassName}>
+          Unavailable on this computer
+        </p>
+      </div>
+    );
+  }
+
+  if (isDownloading) {
+    return (
+      <div aria-label={setupLabel} className={rootClassName} role={setupLabel ? 'group' : undefined}>
+        <div className={actionClassName}>
+          <Button onClick={onCancel} size="sm" type="button" variant="outline">
+            Cancel
+          </Button>
+          {info}
+        </div>
+        <p
+          aria-live="polite"
+          className={statusPlacement === 'inline' ? inlineProgressClassName : progressClassName}
+          title={displayProgress.accessibleLabel}
+        >
+          {displayProgress.label}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div aria-label={setupLabel} className={rootClassName} role={setupLabel ? 'group' : undefined}>
+      <div className={actionClassName}>
+        <Button disabled={!status?.runtime.supported && Boolean(status)} onClick={onDownload} size="sm" type="button">
+          Download local AI
+        </Button>
+        {info}
+      </div>
+      <p aria-live="polite" className={statusPlacement === 'inline' ? inlineProgressClassName : progressClassName}>
+        Not downloaded yet
+      </p>
+    </div>
+  );
+}
+
+function CloudSignInControl({
+  align = 'center',
+  disabled = false,
+  info,
+  isReady,
+  isSigningIn,
+  onSignIn,
+  setupLabel,
+  statusPlacement = 'below'
+}: {
+  align?: 'center' | 'start';
+  disabled?: boolean;
+  info?: ReactNode;
+  isReady: boolean;
+  isSigningIn: boolean;
+  onSignIn: () => void;
+  setupLabel?: string;
+  statusPlacement?: 'below' | 'inline';
+}) {
+  const alignmentClassName = align === 'start' ? 'justify-items-start text-left' : 'justify-items-center text-center';
+  const statusClassName = align === 'start'
+    ? 'max-w-sm text-xs leading-5 text-muted-foreground'
+    : 'max-w-sm text-center text-xs leading-5 text-muted-foreground';
+  const actionClassName = `inline-flex items-center gap-1.5 ${align === 'start' ? '' : 'justify-center'}`;
+  const rootClassName = statusPlacement === 'inline'
+    ? 'flex min-h-9 w-full items-center justify-between gap-3'
+    : `grid min-h-9 gap-1 ${alignmentClassName}`;
+  const inlineStatusClassName = 'ml-auto min-w-0 text-right text-xs leading-5 text-muted-foreground';
+
+  if (isReady) {
+    return (
+      <div aria-label={setupLabel} className={rootClassName} role={setupLabel ? 'group' : undefined}>
+        <div className={actionClassName}>
+          <Button disabled size="sm" type="button">
+            Sign in with ChatGPT
+          </Button>
+          {info}
+        </div>
+        <p aria-live="polite" className={statusPlacement === 'inline' ? inlineStatusClassName : statusClassName}>
+          Ready
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div aria-label={setupLabel} className={rootClassName} role={setupLabel ? 'group' : undefined}>
+      <div className={actionClassName}>
+        <Button disabled={disabled || isSigningIn} onClick={onSignIn} size="sm" type="button">
+          {isSigningIn ? <LoaderCircleIcon className="mr-1.5 size-3.5 animate-spin" /> : null}
+          {isSigningIn ? 'Opening' : 'Sign in with ChatGPT'}
+        </Button>
+        {info}
+      </div>
+      <p aria-live="polite" className={statusPlacement === 'inline' ? inlineStatusClassName : statusClassName}>
+        {isSigningIn ? 'Opening ChatGPT sign in...' : 'Not signed in'}
+      </p>
     </div>
   );
 }
@@ -1670,15 +1851,46 @@ function ModelAutoUpdateCheckbox({
   );
 }
 
-function RecommendedPill({ selected = false }: { selected?: boolean }) {
+function RecommendedPill({
+  message = recommendedPillTitle,
+  selected = false
+}: {
+  message?: string;
+  selected?: boolean;
+}) {
   return (
     <span
-      aria-hidden="true"
-      className={selected ? selectedRecommendedPillClassName : recommendedPillClassName}
+      className={`${selected ? selectedRecommendedPillClassName : recommendedPillClassName} relative inline-flex items-center gap-1`}
     >
-      Recommended
+      <span>{recommendedPillLabel}</span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            aria-label="Why this is recommended"
+            className={`inline-flex size-3.5 shrink-0 items-center justify-center rounded-full ${selected ? 'text-primary-foreground hover:bg-primary-foreground/15' : 'text-primary hover:bg-primary/10'}`}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onKeyDown={(event) => {
+              event.stopPropagation();
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+            role="button"
+            tabIndex={0}
+          >
+            <InfoIcon className="size-3" />
+          </span>
+        </TooltipTrigger>
+        <TooltipContent className="w-64 bg-popover px-3 py-2 text-left font-normal leading-5 text-popover-foreground" side="bottom">
+          {message}
+        </TooltipContent>
+      </Tooltip>
     </span>
   );
+}
+function getAiProviderRecommendationMessage(provider: AiProvider) {
+  return provider === 'local' ? recommendedLocalAiPillMessage : recommendedCloudAiPillMessage;
 }
 
 function LocalAiRecommendationInfoButton({
@@ -1688,12 +1900,11 @@ function LocalAiRecommendationInfoButton({
 }) {
   const model = recommendation?.recommended === 'local' ? recommendation.recommendedModel : null;
   const runtime = recommendation?.resources.localRuntimes?.caulLlamaCpp ?? recommendation?.localRuntime;
-  const sizeGb = runtime?.model?.sizeGb;
-  const source = recommendation?.selectionReason ? 'live recommendations' : 'fallback catalogue';
+  const sizeGb = model?.downloadSizeGb ?? runtime?.model?.sizeGb;
 
   return (
-    <Popover>
-      <PopoverTrigger asChild>
+    <Tooltip>
+      <TooltipTrigger asChild>
         <Button
           aria-label="Local AI recommendation details"
           size="icon"
@@ -1702,38 +1913,20 @@ function LocalAiRecommendationInfoButton({
         >
           <InfoIcon />
         </Button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-80 gap-3">
-        <div className="space-y-1">
-          <h2 className="text-sm font-medium text-foreground">Local AI details</h2>
-          <p className="text-xs leading-5 text-muted-foreground">
-            Caul picked this for private replies on this computer.
-          </p>
-        </div>
+      </TooltipTrigger>
+      <TooltipContent align="end" className="w-72 bg-popover p-3 text-popover-foreground" side="top">
         <dl className="grid gap-2 text-xs">
           <div className="grid gap-0.5">
             <dt className="font-medium text-foreground">Model</dt>
             <dd className="text-muted-foreground">{model?.name ?? runtime?.model?.name ?? 'Recommended local AI'}</dd>
           </div>
           <div className="grid gap-0.5">
-            <dt className="font-medium text-foreground">Runtime</dt>
-            <dd className="text-muted-foreground">{model?.runtime ?? runtime?.provider ?? 'Caul local runtime'}</dd>
-          </div>
-          <div className="grid gap-0.5">
             <dt className="font-medium text-foreground">Download size</dt>
             <dd className="text-muted-foreground">{typeof sizeGb === 'number' ? `About ${sizeGb.toFixed(1)} GB` : 'Shown when available'}</dd>
           </div>
-          <div className="grid gap-0.5">
-            <dt className="font-medium text-foreground">Why this one</dt>
-            <dd className="text-muted-foreground">{recommendation?.selectionReason ?? model?.reason ?? 'Best fit for this computer.'}</dd>
-          </div>
-          <div className="grid gap-0.5">
-            <dt className="font-medium text-foreground">Source</dt>
-            <dd className="text-muted-foreground">{source}</dd>
-          </div>
         </dl>
-      </PopoverContent>
-    </Popover>
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -1770,24 +1963,6 @@ function getCaulLocalLlmStatus(status: OnboardingStatus | null): LocalLlmStatus 
   const runtime = status?.ai.resources.localRuntimes?.caulLlamaCpp;
 
   return runtime?.provider === 'caul-llama.cpp' || runtime?.provider === 'caul-mlx' ? runtime : null;
-}
-
-function getPreparingLocalAiStatus(status: LocalLlmStatus | null): LocalLlmStatus | null {
-  if (!status) {
-    return null;
-  }
-
-  return {
-    ...status,
-    progress: {
-      downloadedBytes: 0,
-      label: 'Preparing local AI',
-      percent: 0,
-      phase: 'runtime',
-      totalBytes: null
-    },
-    status: 'downloading'
-  };
 }
 
 function getLocalAiPlaceholderStatusText(status: LocalLlmStatus | null) {
@@ -1909,12 +2084,26 @@ function TranscriptionModelRow({
   const canUse = canDownload && !isSelectedModelReady && !isSelectedModelInUse;
   const recommendedModelId = status?.transcription.recommendedModel?.id;
   const showRecommendedBadge = selectedModelId === recommendedModelId;
-  const recommendedTooltip = getRecommendedTranscriptionModelTooltip(status);
   const selectedModelTitle = getLocalTranscriptionModelTitle(selectedModelId);
   const downloadProgress = getLocalModelDownloadProgressLabel(status?.parakeet.progress);
   const renderRecommendedBadge = () => (
-    <span className={recommendedPillClassName} title={recommendedTooltip}>
-      Recommended
+    <span className={`${recommendedPillClassName} inline-flex items-center gap-1`}>
+      <span>{recommendedPillLabel}</span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            aria-label="Why this transcription model is recommended"
+            className="inline-flex size-3.5 shrink-0 items-center justify-center rounded-full text-primary hover:bg-primary/10"
+            role="button"
+            tabIndex={0}
+          >
+            <InfoIcon className="size-3" />
+          </span>
+        </TooltipTrigger>
+        <TooltipContent className="w-64 bg-popover px-3 py-2 text-left font-normal leading-5 text-popover-foreground">
+          {recommendedPillTitle}
+        </TooltipContent>
+      </Tooltip>
     </span>
   );
 
@@ -1988,41 +2177,51 @@ function getLocalModelDownloadProgressLabel(progress: ParakeetStatus['progress']
   };
 }
 
-function getLocalAiDownloadProgressLabel(progress: LocalLlmStatus['progress']) {
+function getLocalAiDownloadProgressLabel(
+  progress: LocalLlmStatus['progress'],
+  phase: 'requesting' | 'downloading' | 'idle' = 'idle'
+) {
   if (!progress) {
+    if (phase === 'requesting') {
+      return {
+        accessibleLabel: 'Requesting local AI download',
+        label: 'Requesting local AI download...'
+      };
+    }
+
     return {
-      accessibleLabel: 'Downloading local AI',
-      label: 'Downloading local AI...'
+      accessibleLabel: 'Downloading local AI model · 0%',
+      label: 'Downloading local AI model · 0%'
     };
   }
+
+  const phaseLabel = progress.phase === 'runtime'
+    ? 'Downloading local AI runtime'
+    : 'Downloading local AI model';
 
   if (progress.totalBytes === null) {
+    const downloaded = formatBytes(progress.downloadedBytes);
+
+    if (progress.downloadedBytes > 0) {
+      return {
+        accessibleLabel: `${phaseLabel} · ${downloaded} downloaded`,
+        label: `${phaseLabel} · ${downloaded} downloaded`
+      };
+    }
+
     return {
-      accessibleLabel: progress.label,
-      label: progress.label
+      accessibleLabel: phaseLabel,
+      label: phaseLabel
     };
   }
 
+  const downloaded = formatBytes(progress.downloadedBytes);
+  const total = formatBytes(progress.totalBytes);
+
   return {
-    accessibleLabel: `${progress.label} ${progress.percent}%`,
-    label: `${progress.label} · ${progress.percent}%`
+    accessibleLabel: `${phaseLabel} · ${progress.percent}% · ${downloaded} of ${total}`,
+    label: `${phaseLabel} · ${progress.percent}% · ${downloaded} of ${total}`
   };
-}
-
-function getRecommendedTranscriptionModelTooltip(status: OnboardingStatus | null) {
-  if (!status?.transcription.recommendedModel) {
-    return 'Recommended from local setup checks.';
-  }
-
-  const model = status.transcription.recommendedModel;
-  const scores = [
-    `Parakeet score ${status.transcription.score.parakeet}`,
-    typeof status.transcription.score.moonshineTiny === 'number'
-      ? `Moonshine score ${status.transcription.score.moonshineTiny}`
-      : null
-  ].filter(Boolean).join(', ');
-
-  return `${model.reason} Based on a short local machine probe: ${scores}.`;
 }
 
 function StatusPill({
@@ -2039,140 +2238,25 @@ function StatusPill({
   );
 }
 
-type OnboardingPermissionRow =
-  | { kind: 'permission'; permission: PermissionItem }
-  | { kind: 'audio'; microphone: PermissionItem | null; systemAudio: PermissionItem | null };
-
-function getOnboardingPermissionRows(permissions: PermissionItem[]): OnboardingPermissionRow[] {
-  const microphone = permissions.find((permission) => permission.id === 'microphone') ?? null;
-  const systemAudio = permissions.find((permission) => permission.id === 'system-audio') ?? null;
-  const rows: OnboardingPermissionRow[] = permissions
-    .filter((permission) => permission.id !== 'microphone' && permission.id !== 'system-audio')
-    .map((permission) => ({ kind: 'permission', permission }));
-
-  if (microphone || systemAudio) {
-    rows.push({ kind: 'audio', microphone, systemAudio });
-  }
-
-  return rows;
-}
-
-function AudioPermissionSetupRow({
-  microphone,
-  onChange,
-  showDivider = true,
-  systemAudio
-}: {
-  microphone: PermissionItem | null;
-  onChange: (permissions: Array<PermissionItem['id']>) => void;
-  showDivider?: boolean;
-  systemAudio: PermissionItem | null;
-}) {
-  const [restartHintVisible, setRestartHintVisible] = useState(false);
-  const permissions = [microphone, systemAudio].filter((permission): permission is PermissionItem => Boolean(permission));
-  const label = microphone && systemAudio
-    ? 'Microphone & System Audio'
-    : microphone?.label ?? systemAudio?.label ?? 'Audio';
-  const description = microphone && systemAudio
-    ? 'Required for microphone input and audio from other apps. macOS may show these prompts one after the other.'
-    : systemAudio
-      ? 'Required for audio from other apps.'
-      : 'Required when listening to your microphone.';
-  const ready = permissions.every((permission) => permission.status === 'granted' || permission.status === 'unsupported');
-  const needsRestart = permissions.some((permission) => permission.status === 'denied' || permission.status === 'restricted');
-  const showRestart = needsRestart && restartHintVisible;
-  const actionLabel = needsRestart ? 'Open Settings' : 'Grant';
-  const missingPermissionIds = permissions
-    .filter((permission) => permission.status !== 'granted' && permission.status !== 'unsupported')
-    .map((permission) => permission.id)
-    .sort((a, b) => {
-      const order = ['microphone', 'system-audio'];
-      return order.indexOf(a) - order.indexOf(b);
-    });
-  const deniedPermissionIds = permissions
-    .filter((permission) => permission.status === 'denied' || permission.status === 'restricted')
-    .map((permission) => permission.id)
-    .sort((a, b) => {
-      const order = ['microphone', 'system-audio'];
-      return order.indexOf(a) - order.indexOf(b);
-    });
-  const actionPermissionIds = needsRestart
-    ? deniedPermissionIds.slice(0, 1)
-    : missingPermissionIds;
-
-  return (
-    <div className={`${showDivider ? 'border-b border-border/70 last:border-b-0' : ''} text-sm`.trim()}>
-      <div className="grid min-h-10 grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <h3 className="truncate text-sm font-medium">{label}</h3>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                aria-label={`${label} permission info`}
-                className="inline-flex size-6 shrink-0 cursor-default items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
-                type="button"
-              >
-                <InfoIcon className="size-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <span className="block max-w-72">
-                {description}
-              </span>
-            </TooltipContent>
-          </Tooltip>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className={`rounded-full border px-2 py-1 text-xs font-medium ${ready ? 'border-[#34424A]/35 text-[#34424A] dark:text-[#8EA6AD]' : 'border-destructive/35 text-destructive'}`}>
-            {ready ? 'Granted' : 'Not granted'}
-          </span>
-          {!ready ? (
-            <Button
-              aria-label={`Grant ${label}`}
-              onClick={() => {
-                onChange(actionPermissionIds);
-                if (needsRestart) {
-                  setRestartHintVisible(true);
-                }
-              }}
-              size="sm"
-              type="button"
-            >
-              {actionLabel}
-            </Button>
-          ) : null}
-          {showRestart ? (
-            <Button
-              aria-label="Restart Caul"
-              onClick={() => void getSettingsBridge()?.relaunch?.()}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              Restart
-            </Button>
-          ) : null}
-        </div>
-      </div>
-      {showRestart ? (
-        <p className="pb-2 text-xs text-muted-foreground">
-          Changed it in System Settings? Restart Caul to apply the permission.
-        </p>
-      ) : null}
-    </div>
-  );
+function getOnboardingPermissionRows(permissions: PermissionItem[]) {
+  return permissions;
 }
 
 function PermissionSetupRow({
+  contextLabel,
   onChange,
   permission,
   showDivider = true
 }: {
+  contextLabel?: string;
   onChange: () => void;
   permission: PermissionItem;
   showDivider?: boolean;
 }) {
+  const [restartHintVisible, setRestartHintVisible] = useState(false);
   const ready = permission.status === 'granted' || permission.status === 'unsupported';
+  const needsRestart = permission.status === 'denied' || permission.status === 'restricted';
+  const showRestart = needsRestart && restartHintVisible;
   const statusLabel = getPermissionStatusLabel(permission.status);
   const macosPermissionName = getMacosPermissionName(permission.id);
 
@@ -2181,6 +2265,11 @@ function PermissionSetupRow({
       <div className="grid min-h-10 grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
         <div className="flex min-w-0 items-center gap-1.5">
           <h3 className="truncate text-sm font-medium">{permission.label}</h3>
+          {contextLabel ? (
+            <span className="rounded-full border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
+              {contextLabel}
+            </span>
+          ) : null}
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -2203,8 +2292,22 @@ function PermissionSetupRow({
             {statusLabel}
           </span>
           {!ready ? (
-            <Button aria-label={`Grant ${permission.label}`} onClick={onChange} size="sm" type="button">
-              Grant
+            <Button
+              aria-label={`${showRestart ? 'Restart' : 'Grant'} ${permission.label}`}
+              onClick={() => {
+                if (showRestart) {
+                  void getSettingsBridge()?.relaunch?.();
+                  return;
+                }
+                onChange();
+                if (needsRestart) {
+                  setRestartHintVisible(true);
+                }
+              }}
+              size="sm"
+              type="button"
+            >
+              {showRestart ? 'Restart' : 'Grant'}
             </Button>
           ) : null}
         </div>
@@ -5951,12 +6054,32 @@ function parseTranscriptStartedAt(transcript: string) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function SettingsSectionBlock({
+  children,
+  title
+}: {
+  children: ReactNode;
+  title: string;
+}) {
+  const titleId = useId();
+
+  return (
+    <section aria-labelledby={titleId} className={layout.settingsSection} role="group">
+      <h3 id={titleId} className="text-base font-medium text-foreground">
+        {title}
+      </h3>
+      {children}
+    </section>
+  );
+}
+
 function SettingsPage({
   autoCollapse,
   initialSection,
   isMac,
   isBusy,
   isListening,
+  listenToMicrophone,
   llmModel,
   llmReasoning,
   onClose,
@@ -5976,6 +6099,7 @@ function SettingsPage({
   isMac: boolean;
   isBusy: boolean;
   isListening: boolean;
+  listenToMicrophone: boolean;
   llmModel: LlmModel;
   llmReasoning: LlmReasoning;
   onClose: () => void;
@@ -5994,9 +6118,10 @@ function SettingsPage({
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection);
   const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatus | null>(null);
   const [localLlmStatus, setLocalLlmStatus] = useState<LocalLlmStatus | null>(null);
-  const [localAiSetupPhase, setLocalAiSetupPhase] = useState<'downloading' | 'idle'>('idle');
+  const [localAiSetupPhase, setLocalAiSetupPhase] = useState<'requesting' | 'downloading' | 'idle'>('idle');
   const [catalogueRefreshResult, setCatalogueRefreshResult] = useState<ModelCatalogueRefreshResult | null>(null);
   const [isRefreshingCatalogue, setIsRefreshingCatalogue] = useState(false);
+  const [isChatGptSigningIn, setIsChatGptSigningIn] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [isInstallingUpdate, setIsInstallingUpdate] = useState(false);
   const [historyStatus, setHistoryStatus] = useState<HistoryStatus | null>(null);
@@ -6049,7 +6174,7 @@ function SettingsPage({
         if (nextStatus.status === 'downloading') {
           return 'downloading';
         }
-        return current === 'downloading' ? 'idle' : current;
+        return current === 'downloading' || current === 'requesting' ? 'idle' : current;
       });
     });
 
@@ -6151,8 +6276,7 @@ function SettingsPage({
 
   async function downloadLocalAi(modelId?: string) {
     try {
-      setLocalAiSetupPhase('downloading');
-      setLocalLlmStatus((current) => getPreparingLocalAiStatus(current ?? getCaulLocalLlmStatus(onboardingStatus)));
+      setLocalAiSetupPhase('requesting');
       const nextStatus = await getSettingsBridge()?.ai?.downloadLocal?.(modelId);
       if (nextStatus) {
         setLocalLlmStatus(nextStatus);
@@ -6212,11 +6336,14 @@ function SettingsPage({
   }
 
   async function signInWithChatGptFromSettings() {
+    setIsChatGptSigningIn(true);
     try {
       await getSettingsBridge()?.ai?.openChatGptLogin?.();
       await refreshOnboardingStatus();
     } catch (error) {
       console.error('Failed to open ChatGPT sign in:', error);
+    } finally {
+      setIsChatGptSigningIn(false);
     }
   }
 
@@ -6318,8 +6445,7 @@ function SettingsPage({
           <div className={layout.settingsPanel}>
             {activeSection === 'general' ? (
               <FieldGroup className={layout.settingsPageStack}>
-                <FieldSet className={layout.settingsSection}>
-                  <FieldLegend>Floating button</FieldLegend>
+                <SettingsSectionBlock title="Floating button">
                   <FieldGroup className={layout.settingsInlineGroup}>
                     <Field className="w-auto">
                       <FieldLabel htmlFor="floating-button-size">Size</FieldLabel>
@@ -6345,10 +6471,9 @@ function SettingsPage({
                       </Select>
                     </Field>
                   </FieldGroup>
-                </FieldSet>
+                </SettingsSectionBlock>
 
-                <FieldSet className={layout.settingsSection}>
-                  <FieldLegend>Auto-collapse</FieldLegend>
+                <SettingsSectionBlock title="Auto-collapse">
                   <FieldGroup className={layout.settingsSectionBody}>
                     <p className={layout.settingsDescription}>
                       Collapses older AI replies when a new answer starts, so the latest response stays easy to read during a call.
@@ -6362,10 +6487,9 @@ function SettingsPage({
                       <FieldLabel htmlFor="auto-collapse">Auto-collapse</FieldLabel>
                     </Field>
                   </FieldGroup>
-                </FieldSet>
+                </SettingsSectionBlock>
 
-                <FieldSet className={layout.settingsSection}>
-                  <FieldLegend>Advanced</FieldLegend>
+                <SettingsSectionBlock title="Advanced">
                   <FieldGroup className={layout.settingsSectionBody}>
                     <div className="flex max-w-2xl flex-wrap items-center gap-2">
                       <div className="flex">
@@ -6394,13 +6518,12 @@ function SettingsPage({
                       </div>
                     </div>
                   </FieldGroup>
-                </FieldSet>
+                </SettingsSectionBlock>
               </FieldGroup>
             ) : null}
 
             {activeSection === 'storage' ? (
-              <FieldSet className={layout.settingsSection}>
-                <FieldLegend>History and storage</FieldLegend>
+              <SettingsSectionBlock title="History and storage">
                 <FieldGroup className={layout.settingsSectionBody}>
                   <Field className="w-auto self-start" orientation="horizontal">
                     <Checkbox
@@ -6440,12 +6563,11 @@ function SettingsPage({
                     </div>
                   </div>
                 </FieldGroup>
-              </FieldSet>
+              </SettingsSectionBlock>
             ) : null}
 
             {activeSection === 'updates' ? (
-              <FieldSet className={layout.settingsSection}>
-                <FieldLegend>Updates</FieldLegend>
+              <SettingsSectionBlock title="Updates">
                 <FieldGroup className={layout.settingsSectionBody}>
                   <div className="flex max-w-2xl flex-col items-start gap-3">
                     <div className="grid gap-1 text-sm">
@@ -6532,13 +6654,12 @@ function SettingsPage({
                     ) : null}
                   </div>
                 </FieldGroup>
-              </FieldSet>
+              </SettingsSectionBlock>
             ) : null}
 
             {activeSection === 'models' ? (
               <FieldGroup className={layout.settingsPageStack}>
-                <FieldSet className={layout.settingsSection}>
-                  <FieldLegend>AI recommendations</FieldLegend>
+                <SettingsSectionBlock title="AI recommendations">
                   <FieldGroup className={layout.settingsSectionBody}>
                     <div className="flex max-w-2xl flex-col items-start gap-2">
                       <p className={layout.settingsDescription} aria-live="polite">
@@ -6557,13 +6678,12 @@ function SettingsPage({
                       </TooltipButton>
                     </div>
                   </FieldGroup>
-                </FieldSet>
+                </SettingsSectionBlock>
 
-                <FieldSet className={layout.settingsSection}>
-                  <FieldLegend>Transcription</FieldLegend>
+                <SettingsSectionBlock title="Local transcription">
                   <FieldGroup className={layout.settingsSectionBody}>
                     <p className={layout.settingsDescription}>
-                      Controls the model Caul uses to turn call audio into text.
+                      Local and private. Audio is transcribed on this computer. Nothing is sent to the internet.
                     </p>
                     <TranscriptionModelRow
                       onCancel={() => void getSettingsBridge()?.parakeet?.cancelDownload()}
@@ -6579,10 +6699,9 @@ function SettingsPage({
                       onCheckedChange={(enabled) => void setAutoUpdateModel('transcription', enabled)}
                     />
                   </FieldGroup>
-                </FieldSet>
+                </SettingsSectionBlock>
 
-                <FieldSet className={layout.settingsSection}>
-                  <FieldLegend>AI responses</FieldLegend>
+                <SettingsSectionBlock title="AI responses">
                   <FieldGroup className={layout.settingsSectionBody}>
                     <p className={layout.settingsDescription}>
                       Controls how Caul writes answers after it has a transcript.
@@ -6591,42 +6710,39 @@ function SettingsPage({
                       {(['local', 'cloud'] as AiProvider[]).map((provider) => (
                         <button
                           key={provider}
+                          aria-label={`${provider === 'local' ? 'Local' : 'Cloud'}${onboardingStatus?.ai?.recommended === provider ? ` ${recommendedPillLabel}` : ''}`}
                           aria-selected={selectedAiProvider === provider}
-                          className={`h-8 flex-1 rounded-[6px] px-3 text-sm font-medium transition-colors ${selectedAiProvider === provider ? '!bg-primary !text-primary-foreground shadow-sm hover:!bg-primary/90 dark:!bg-primary dark:!text-primary-foreground dark:hover:!bg-primary/90' : 'text-muted-foreground hover:text-foreground'}`}
+                          className={`inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-[6px] px-3 text-sm font-medium transition-colors ${selectedAiProvider === provider ? '!bg-primary !text-primary-foreground shadow-sm hover:!bg-primary/90 dark:!bg-primary dark:!text-primary-foreground dark:hover:!bg-primary/90' : 'text-muted-foreground hover:text-foreground'}`}
                           disabled={isListening || isBusy}
                           onClick={() => void selectAiProvider(provider)}
                           role="tab"
                           type="button"
                         >
-                          {provider === 'local' ? 'Local' : 'Cloud'}
+                          <span>{provider === 'local' ? 'Local' : 'Cloud'}</span>
+                          {onboardingStatus?.ai?.recommended === provider ? (
+                            <RecommendedPill
+                              message={getAiProviderRecommendationMessage(provider)}
+                              selected={selectedAiProvider === provider}
+                            />
+                          ) : null}
                         </button>
                       ))}
                     </div>
 
                     {selectedAiProvider === 'local' ? (
-                      <div className="grid max-w-2xl gap-2 text-sm">
+                      <div className="grid max-w-2xl gap-1.5 text-sm">
                         <div className="flex items-center gap-1">
-                          <p className={layout.settingsDescription}>Local and private. Slower and less intelligent than ChatGPT.</p>
+                          <p className={layout.settingsDescription}>Data stays local and private. Slower and less intelligent than Cloud.</p>
                           {recommendedLocalAiModel ? <LocalAiRecommendationInfoButton recommendation={onboardingStatus?.ai} /> : null}
                         </div>
-                        {(localLlmStatus?.status === 'downloading' || localAiSetupPhase === 'downloading') && localLlmStatus?.progress ? (
-                          <p className={layout.settingsDescription} aria-live="polite">
-                            {getLocalAiDownloadProgressLabel(localLlmStatus.progress).label}
-                          </p>
-                        ) : null}
-                        <div className="flex flex-wrap items-center gap-2">
-                          {localLlmStatus?.status === 'downloading' || localAiSetupPhase === 'downloading' ? (
-                            <Button onClick={() => void cancelLocalAiDownload()} size="sm" type="button" variant="outline">Cancel</Button>
-                          ) : localLlmStatus?.runtime.supported === false ? (
-                            <StatusPill ready={false}>Unavailable</StatusPill>
-                          ) : !recommendedLocalAiModelReady ? (
-                            <Button onClick={() => void downloadLocalAi(recommendedLocalAiModel?.id)} size="sm" type="button">
-                              Download local AI
-                            </Button>
-                          ) : (
-                            <StatusPill ready>Ready</StatusPill>
-                          )}
-                        </div>
+                        <LocalAiDownloadControl
+                          align="start"
+                          isInstalled={recommendedLocalAiModelReady}
+                          localAiSetupPhase={localAiSetupPhase}
+                          onCancel={() => void cancelLocalAiDownload()}
+                          onDownload={() => void downloadLocalAi(recommendedLocalAiModel?.id)}
+                          status={localLlmStatus}
+                        />
                         <ModelAutoUpdateCheckbox
                           checked={onboardingStatus?.autoUpdate?.ai ?? true}
                           description="Caul can suggest better supported models on your update schedule."
@@ -6635,15 +6751,17 @@ function SettingsPage({
                         />
                       </div>
                     ) : (
-                      <div className="grid max-w-2xl gap-2 text-sm">
-                        <p className={layout.settingsDescription}>Sends to ChatGPT. Faster and smarter than Local.</p>
-                        {!isCloudAiReady ? (
-                          <Button disabled={isListening || isBusy} onClick={() => void signInWithChatGptFromSettings()} size="sm" type="button">
-                            Sign in with ChatGPT
-                          </Button>
-                        ) : (
+                      <div className="grid max-w-2xl gap-1.5 text-sm">
+                        <p className={layout.settingsDescription}>Sends to a cloud model like ChatGPT. Faster and smarter than Local.</p>
+                        <CloudSignInControl
+                          align="start"
+                          disabled={isListening || isBusy}
+                          isReady={isCloudAiReady}
+                          isSigningIn={isChatGptSigningIn}
+                          onSignIn={() => void signInWithChatGptFromSettings()}
+                        />
+                        {isCloudAiReady ? (
                           <>
-                            <StatusPill ready>Ready</StatusPill>
                             <FieldGroup className={layout.settingsInlineGroup}>
                               <Field className="w-auto">
                                 <FieldLabel htmlFor="llm-model">Model</FieldLabel>
@@ -6696,36 +6814,26 @@ function SettingsPage({
                               </Field>
                             </FieldGroup>
                           </>
-                        )}
+                        ) : null}
                       </div>
                     )}
                   </FieldGroup>
-                </FieldSet>
+                </SettingsSectionBlock>
               </FieldGroup>
             ) : null}
 
             {activeSection === 'permissions' ? (
-              <FieldSet className={layout.settingsSection}>
-                <FieldLegend>Permissions</FieldLegend>
+              <SettingsSectionBlock title="Permissions">
                 <FieldGroup className={layout.settingsSectionBody}>
                   <div className="grid w-full">
-                    {permissionsStatus ? getOnboardingPermissionRows(getVisiblePermissionItems(permissionsStatus)).map((row) => (
-                      row.kind === 'audio' ? (
-                        <AudioPermissionSetupRow
-                          key="audio"
-                          microphone={row.microphone}
-                          onChange={(permissions) => permissions.forEach((permission) => onRequestPermission(permission))}
-                          showDivider={false}
-                          systemAudio={row.systemAudio}
-                        />
-                      ) : (
-                        <PermissionSetupRow
-                          key={row.permission.id}
-                          onChange={() => onRequestPermission(row.permission.id)}
-                          permission={row.permission}
-                          showDivider={false}
-                        />
-                      )
+                    {permissionsStatus ? getOnboardingPermissionRows(getVisiblePermissionItems(permissionsStatus)).map((permission) => (
+                      <PermissionSetupRow
+                        key={permission.id}
+                        contextLabel={permission.id === 'microphone' ? (listenToMicrophone ? 'Required now' : 'Required for setup') : undefined}
+                        onChange={() => onRequestPermission(permission.id)}
+                        permission={permission}
+                        showDivider={false}
+                      />
                     )) : (
                       <StatusRow
                         label="Permissions"
@@ -6735,7 +6843,7 @@ function SettingsPage({
                     )}
                   </div>
                 </FieldGroup>
-              </FieldSet>
+              </SettingsSectionBlock>
             ) : null}
           </div>
       </div>
@@ -6811,13 +6919,11 @@ function getVisiblePermissionItems(permissionsStatus: PermissionsStatus | null |
 }
 
 function getOnboardingVisiblePermissionItems(permissionsStatus: PermissionsStatus | null | undefined) {
-  return getVisiblePermissionItems(permissionsStatus).filter((permission) => {
-    if (permission.id === 'microphone' && !defaultListenToMicrophone) {
-      return false;
-    }
+  return getVisiblePermissionItems(permissionsStatus);
+}
 
-    return true;
-  });
+function getOnboardingRequiredPermissionItems(permissionsStatus: PermissionsStatus | null | undefined) {
+  return getOnboardingVisiblePermissionItems(permissionsStatus);
 }
 
 function getMissingSelectedPermissionItems({

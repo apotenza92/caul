@@ -409,6 +409,39 @@ describe('local LLM service', () => {
     }
   });
 
+  it('does not use coding-specialised models as eligible local AI defaults', () => {
+    const root = mkdtempSync(join(tmpdir(), 'caul-local-llm-test-'));
+
+    try {
+      const generalCatalogue = createTwoModelCatalogue();
+      const generalModel = generalCatalogue.aiResponse.find((model) => model.id === 'first-local-model');
+      const catalogueWithCoder = {
+        ...generalCatalogue,
+        aiResponse: [
+          {
+            ...generalModel,
+            defaultPriority: 999,
+            fileName: 'qwen2.5-coder-14b-instruct-q4_k_m.gguf',
+            id: 'qwen2.5-coder-14b-instruct-q4_k_m',
+            name: 'Qwen2.5 Coder 14B Instruct',
+            providerModelId: 'Qwen/Qwen2.5-Coder-14B-Instruct-GGUF',
+            provenanceUrl: 'https://huggingface.co/Qwen/Qwen2.5-Coder-14B-Instruct-GGUF'
+          },
+          generalModel
+        ]
+      };
+      const service = createLocalLlmService({
+        app: { getPath: () => root },
+        catalogue: catalogueWithCoder
+      });
+
+      expect(service.getModelById('qwen2.5-coder-14b-instruct-q4_k_m')).toBeNull();
+      expect(service.getRecommendedModel().id).toBe('first-local-model');
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
   it('downloads the Caul-managed runtime and model into app data', async () => {
     const root = mkdtempSync(join(tmpdir(), 'caul-local-llm-test-'));
     const server = createDownloadServer();

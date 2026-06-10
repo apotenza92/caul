@@ -162,20 +162,23 @@ describe('App', () => {
 
   it('renders guided onboarding setup rows', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
-    installTestBridge();
+    const bridge = installTestBridge();
 
     render(<App />);
 
     expect(await screen.findByAltText('Caul')).toBeInTheDocument();
     expect(screen.getByText('Screen & System Audio Recording')).toBeInTheDocument();
     expect(screen.getByText('System Audio')).toBeInTheDocument();
+    expect(screen.getByText('Microphone')).toBeInTheDocument();
+    expect(screen.queryByText('Optional')).not.toBeInTheDocument();
     expect(screen.queryByText('Microphone & System Audio')).not.toBeInTheDocument();
     expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual([
-      'Transcription',
+      'Local transcription',
       'AI responses',
       'Permissions'
     ]);
     expect(screen.queryByText('Permission setup')).not.toBeInTheDocument();
+    expect(bridge.onboardingStatusOptions[0]).toEqual({ refreshCatalogue: false });
   });
 
   it('shows targeted onboarding permission status and actions', async () => {
@@ -207,8 +210,10 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByText('Not granted')).toBeInTheDocument();
-    expect(screen.getAllByText('Granted')).toHaveLength(1);
+    expect(screen.getAllByText('Granted')).toHaveLength(2);
+    expect(screen.queryByText('Optional')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Request Permissions' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Grant Screen & System Audio Recording' })).toHaveTextContent('Grant');
 
     await userEvent.setup().click(screen.getByRole('button', { name: 'Grant Screen & System Audio Recording' }));
 
@@ -242,7 +247,8 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findAllByText('Not granted')).toHaveLength(2);
+    expect(await screen.findAllByText('Not granted')).toHaveLength(3);
+    expect(screen.queryByText('Optional')).not.toBeInTheDocument();
     expect(bridge.requestedPermissions).toEqual([]);
 
     await userEvent.setup().click(screen.getByRole('button', { name: 'Grant System Audio' }));
@@ -250,7 +256,7 @@ describe('App', () => {
     expect(bridge.requestedPermissions).toEqual(['system-audio']);
   });
 
-  it('only requests the missing audio permission from the combined onboarding row', async () => {
+  it('only requests the missing system audio permission from onboarding', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
     const bridge = installTestBridge({
       permissions: [
@@ -312,18 +318,19 @@ describe('App', () => {
     const user = userEvent.setup();
 
     expect(screen.queryByText('Changed it in System Settings? Restart Caul to apply the permission.')).not.toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: 'Grant System Audio' })).toHaveTextContent('Open Settings');
+    expect(await screen.findByRole('button', { name: 'Grant System Audio' })).toHaveTextContent('Grant');
 
     await user.click(await screen.findByRole('button', { name: 'Grant System Audio' }));
 
-    expect(await screen.findByText('Changed it in System Settings? Restart Caul to apply the permission.')).toBeInTheDocument();
+    expect(screen.queryByText('Changed it in System Settings? Restart Caul to apply the permission.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Grant System Audio' })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Restart Caul' }));
+    await user.click(await screen.findByRole('button', { name: 'Restart System Audio' }));
 
     expect(bridge.relaunches).toBe(1);
   });
 
-  it('opens only one denied audio permission at a time during onboarding recovery', async () => {
+  it('requests each onboarding audio permission separately during recovery', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
     const bridge = installTestBridge({
       permissions: [
@@ -352,12 +359,15 @@ describe('App', () => {
 
     const user = userEvent.setup();
 
-    expect(await screen.findByRole('button', { name: 'Grant System Audio' })).toHaveTextContent('Open Settings');
+    expect(await screen.findByRole('button', { name: 'Grant System Audio' })).toHaveTextContent('Grant');
+    expect(screen.getByRole('button', { name: 'Grant Microphone' })).toHaveTextContent('Grant');
+    expect(screen.queryByText('Optional')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Grant System Audio' }));
 
     expect(bridge.requestedPermissions).toEqual(['system-audio']);
-    expect(await screen.findByText('Changed it in System Settings? Restart Caul to apply the permission.')).toBeInTheDocument();
+    expect(screen.queryByText('Changed it in System Settings? Restart Caul to apply the permission.')).not.toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Restart System Audio' })).toHaveTextContent('Restart');
   });
 
   it('hides the permissions step during onboarding when no platform permissions are relevant', async () => {
@@ -574,7 +584,7 @@ describe('App', () => {
     await openSettingsSection(user, 'Models');
 
     expect(await screen.findByLabelText('Transcription model')).toHaveValue('parakeet');
-    expect(screen.getByText('Recommended')).toBeInTheDocument();
+    expect(screen.getAllByText('Recommended').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Ready')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Use' })).not.toBeInTheDocument();
 
@@ -606,9 +616,12 @@ describe('App', () => {
     expect(screen.getByLabelText('Automatic checks')).toHaveTextContent('Weekly');
 
     await openSettingsSection(user, 'Models');
-    expect(screen.getByRole('group', { name: 'Transcription' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Local transcription' })).not.toHaveClass('border-t');
     expect(screen.getByRole('group', { name: 'AI responses' })).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'AI recommendations' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Local Recommended', selected: true })).toBeInTheDocument();
+    await user.hover(screen.getByRole('button', { name: 'Why this is recommended' }));
+    expect((await screen.findAllByText('Based on this computer’s power, Caul recommends Local because you should still get acceptable private AI results on this machine.')).length).toBeGreaterThan(0);
     expect(screen.queryByRole('group', { name: 'Model list' })).not.toBeInTheDocument();
   });
 
@@ -627,6 +640,7 @@ describe('App', () => {
 
   it('defaults onboarding AI setup to a simple local recommendation', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const user = userEvent.setup();
     installTestBridge({
       onboardingStatus: testOnboardingStatus({
         ai: testAiRecommendation({
@@ -647,11 +661,66 @@ describe('App', () => {
 
     expect(await screen.findByRole('tab', { name: 'Local', selected: true })).toBeInTheDocument();
     expect(screen.getByText('Recommended')).toBeInTheDocument();
-    expect(screen.getByText('Local and private. Slower and less intelligent than ChatGPT.')).toBeInTheDocument();
+    await user.hover(screen.getByRole('button', { name: 'Why this is recommended' }));
+    expect((await screen.findAllByText('Based on this computer’s power, Caul recommends Local because you should still get acceptable private AI results on this machine.')).length).toBeGreaterThan(0);
+    expect(screen.getByText('Data stays local and private. Slower and less intelligent than Cloud.')).toBeInTheDocument();
+    expect(screen.getByText('Not downloaded yet')).toBeInTheDocument();
+    const localSetup = screen.getByRole('group', { name: 'Local AI setup' });
+    expect(within(localSetup).getByRole('button', { name: 'Download local AI' })).toBeInTheDocument();
+    expect(within(localSetup).getByRole('button', { name: 'Local AI recommendation details' })).toBeInTheDocument();
+    expect(within(localSetup).getByText('Not downloaded yet')).toBeInTheDocument();
     expect(screen.queryByText('Qwen 2.5 3B Instruct Q4')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Local AI recommendation details' })).toBeInTheDocument();
+    await user.hover(screen.getByRole('button', { name: 'Local AI recommendation details' }));
+    expect(screen.getAllByText('Qwen 2.5 3B Instruct Q4').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('About 2.2 GB').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Local AI details')).not.toBeInTheDocument();
+    expect(screen.queryByText('Recommended for this computer based on power, memory and local AI support.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Runtime')).not.toBeInTheDocument();
+    expect(screen.queryByText('Why this one')).not.toBeInTheDocument();
+    expect(screen.queryByText('Source')).not.toBeInTheDocument();
     expect(screen.queryByText(/Artificial Analysis LLM Leaderboard/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Sign in with ChatGPT' })).not.toBeInTheDocument();
+  });
+
+  it('shows the recommended local AI model download size in onboarding details', async () => {
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const user = userEvent.setup();
+    installTestBridge({
+      onboardingStatus: testOnboardingStatus({
+        ai: testAiRecommendation({
+          recommended: 'local',
+          recommendedModel: {
+            downloadSizeGb: 6.5,
+            id: 'gemma-4-12b-it-q4_0',
+            name: 'Gemma 4 12B IT Q4_0',
+            reason: 'Gemma 4 12B IT Q4_0 is the best local AI response fit for this machine.',
+            runtime: 'llama.cpp'
+          } as OnboardingStatus['ai']['recommendedModel'] & { downloadSizeGb: number },
+          resources: {
+            ...testAiRecommendation().resources,
+            localRuntimes: {
+              caulLlamaCpp: testLocalLlmStatus({
+                model: {
+                  id: 'qwen2.5-1.5b-instruct-q4_k_m',
+                  installed: false,
+                  name: 'Qwen 2.5 1.5B Instruct Q4',
+                  path: '/tmp/caul/local-llm/models/qwen2.5-1.5b-instruct-q4_k_m.gguf',
+                  sizeGb: 1.1
+                }
+              })
+            }
+          }
+        })
+      })
+    });
+
+    render(<App />);
+
+    await user.hover(await screen.findByRole('button', { name: 'Local AI recommendation details' }));
+
+    expect((await screen.findAllByText('Gemma 4 12B IT Q4_0')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('About 6.5 GB').length).toBeGreaterThan(0);
+    expect(screen.queryByText('About 1.1 GB')).not.toBeInTheDocument();
   });
 
   it('shows transcription setup before AI model setup in onboarding', async () => {
@@ -660,14 +729,16 @@ describe('App', () => {
 
     render(<App />);
 
-    const transcriptionHeading = await screen.findByRole('heading', { name: 'Transcription' });
+    const transcriptionHeading = await screen.findByRole('heading', { name: 'Local transcription' });
     const aiHeading = await screen.findByRole('heading', { name: 'AI responses' });
 
+    expect(screen.getByText('Local and private. Audio is transcribed on this computer. Nothing is sent to the internet.')).toBeInTheDocument();
     expect(transcriptionHeading.compareDocumentPosition(aiHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('defaults onboarding AI setup to cloud when cloud is recommended', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const user = userEvent.setup();
     installTestBridge({
       onboardingStatus: testOnboardingStatus({
         ai: testAiRecommendation({
@@ -682,8 +753,43 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByRole('tab', { name: 'Cloud', selected: true })).toBeInTheDocument();
-    expect(screen.getByText('Sends to ChatGPT. Faster and smarter than Local.')).toBeInTheDocument();
+    expect(screen.getByText('Sends to a cloud model like ChatGPT. Faster and smarter than Local.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign in with ChatGPT' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'ChatGPT sign in details' })).not.toBeInTheDocument();
+    expect(screen.getByText('Not signed in')).toBeInTheDocument();
+    const cloudSetup = screen.getByRole('group', { name: 'Cloud AI setup' });
+    expect(within(cloudSetup).getByRole('button', { name: 'Sign in with ChatGPT' })).toBeInTheDocument();
+    expect(within(cloudSetup).queryByRole('button', { name: 'ChatGPT sign in details' })).not.toBeInTheDocument();
+    expect(within(cloudSetup).getByText('Not signed in')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('tab', { name: 'Local' }));
+    expect(await screen.findByRole('tab', { name: 'Local', selected: true })).toBeInTheDocument();
+    await user.click(screen.getByText('Recommended'));
+    expect(await screen.findByRole('tab', { name: 'Cloud', selected: true })).toBeInTheDocument();
+
+    await user.hover(screen.getByRole('button', { name: 'Why this is recommended' }));
+    expect((await screen.findAllByText('Based on this computer’s power, Caul recommends Cloud because local AI probably will not give acceptable results on this machine.')).length).toBeGreaterThan(0);
+  });
+
+  it('uses the recommended AI provider as the onboarding default when saved provider is stale', async () => {
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const bridge = installTestBridge({
+      onboardingStatus: testOnboardingStatus({
+        ai: testAiRecommendation({
+          provider: 'local',
+          recommended: 'cloud',
+          recommendedModel: null,
+          summary: 'Cloud AI is recommended for this machine',
+          viable: true
+        })
+      })
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole('tab', { name: 'Cloud', selected: true })).toBeInTheDocument();
+    expect(screen.getByText('Sends to a cloud model like ChatGPT. Faster and smarter than Local.')).toBeInTheDocument();
+    await waitFor(() => expect(bridge.selectedAiProviders).toEqual(['cloud']));
   });
 
   it('keeps model auto-update details out of onboarding', async () => {
@@ -759,8 +865,9 @@ describe('App', () => {
     await openSettingsSection(user, 'Models');
     await user.click(screen.getByRole('tab', { name: 'Cloud' }));
 
-    expect(screen.getByText('Sends to ChatGPT. Faster and smarter than Local.')).toBeInTheDocument();
+    expect(screen.getByText('Sends to a cloud model like ChatGPT. Faster and smarter than Local.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign in with ChatGPT' })).toBeEnabled();
+    expect(screen.getByText('Not signed in')).toBeInTheDocument();
     expect(screen.queryByLabelText('Model')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Reasoning')).not.toBeInTheDocument();
   });
@@ -775,8 +882,9 @@ describe('App', () => {
     await user.click(await screen.findByRole('tab', { name: 'Cloud' }));
 
     expect(bridge.selectedAiProviders).toEqual(['cloud']);
-    expect(screen.getByText('Sends to ChatGPT. Faster and smarter than Local.')).toBeInTheDocument();
+    expect(screen.getByText('Sends to a cloud model like ChatGPT. Faster and smarter than Local.')).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'Sign in with ChatGPT' })).toBeEnabled();
+    expect(screen.getByText('Not signed in')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Start using Caul' })).toBeEnabled();
   });
 
@@ -792,19 +900,69 @@ describe('App', () => {
 
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: 'Download local AI' }));
+    const downloadButton = await screen.findByRole('button', { name: 'Download local AI' });
+    await waitFor(() => expect(downloadButton).toBeEnabled());
+    await user.click(downloadButton);
 
     expect(bridge.localLlmDownloads).toBe(1);
     expect(bridge.selectedLocalAiDownloads).toEqual(['qwen2.5-3b-instruct-q4_k_m']);
-    expect(await screen.findByText('Preparing local AI')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    expect(screen.getByText('Requesting local AI download...')).toBeInTheDocument();
+    expect(screen.queryByText('Caul downloads one recommended model for this computer. You can cancel and use Cloud instead.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Preparing local AI')).not.toBeInTheDocument();
     expect(screen.queryByText('Preparing local AI · 0%')).not.toBeInTheDocument();
 
     act(() => {
       resolveDownload(testReadyLocalLlmStatus());
     });
 
-    await waitFor(() => expect(screen.getAllByText('Ready').length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Download local AI' })).toBeDisabled());
+    expect(screen.getAllByText('Ready').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: 'Start using Caul' })).toBeEnabled();
+  });
+
+  it('shows detailed local AI download progress in onboarding', async () => {
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const downloadingStatus = testLocalLlmStatus({
+      progress: {
+        downloadedBytes: 1_181_116_006,
+        label: 'Downloading local AI model',
+        percent: 50,
+        phase: 'model',
+        totalBytes: 2_362_232_013
+      },
+      status: 'downloading'
+    });
+    const bridge = installTestBridge({
+      onboardingStatus: testOnboardingStatus({
+        ai: testAiRecommendation({
+          localRuntime: downloadingStatus,
+          resources: {
+            ...testAiRecommendation().resources,
+            localRuntimes: {
+              caulLlamaCpp: downloadingStatus
+            }
+          }
+        })
+      })
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    expect(screen.getByText('Downloading local AI model · 50% · 1.1 GB of 2.2 GB')).toBeInTheDocument();
+
+    act(() => {
+      bridge.emitLocalLlmStatus(testLocalLlmStatus({
+        progress: undefined,
+        status: 'downloading'
+      }));
+    });
+
+    expect(screen.getByText('Downloading local AI model · 50% · 1.1 GB of 2.2 GB')).toBeInTheDocument();
+    expect(screen.queryByText('Downloading local AI...')).not.toBeInTheDocument();
+    expect(screen.queryByText('Caul downloads one recommended model for this computer. You can cancel and use Cloud instead.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Download local AI' })).not.toBeInTheDocument();
   });
 
   it('shows a loading state while ChatGPT sign in opens from onboarding', async () => {
@@ -825,10 +983,13 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: 'Sign in with ChatGPT' }));
 
     expect(screen.getByRole('button', { name: 'Opening' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'ChatGPT sign in details' })).not.toBeInTheDocument();
+    expect(screen.getByText('Opening ChatGPT sign in...')).toBeInTheDocument();
 
     resolveLogin({ ok: true });
 
     expect(await screen.findByRole('button', { name: 'Sign in with ChatGPT' })).toBeEnabled();
+    expect(screen.getByText('Not signed in')).toBeInTheDocument();
   });
 
   it('keeps onboarding start disabled and explains missing setup', async () => {
@@ -907,6 +1068,59 @@ describe('App', () => {
     expect(bridge.onboardingCompletes).toBe(1);
   });
 
+  it('requires microphone permission before onboarding can finish', async () => {
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const user = userEvent.setup();
+    const readyLocalAi = testReadyLocalLlmStatus();
+    installTestBridge({
+      onboardingStatus: testOnboardingStatus({
+        ai: testAiRecommendation({
+          localRuntime: readyLocalAi,
+          resources: {
+            ...testAiRecommendation().resources,
+            localRuntimes: {
+              caulLlamaCpp: readyLocalAi
+            }
+          }
+        }),
+        permissions: {
+          ok: true,
+          platform: 'darwin',
+          permissions: [
+            {
+              description: 'Required when listening to speaker audio output.',
+              id: 'screen-recording',
+              label: 'Screen & System Audio Recording',
+              status: 'granted'
+            },
+            {
+              description: 'Required when listening to audio from other apps.',
+              id: 'system-audio',
+              label: 'System Audio',
+              status: 'granted'
+            },
+            {
+              description: 'Required when listening to your microphone.',
+              id: 'microphone',
+              label: 'Microphone',
+              status: 'not-determined'
+            }
+          ]
+        }
+      })
+    });
+
+    render(<App />);
+
+    const startButton = await screen.findByRole('button', { name: 'Start using Caul' });
+    expect(startButton).toBeDisabled();
+
+    await user.hover(startButton.parentElement!);
+
+    expect(await screen.findByText('Still needed')).toBeInTheDocument();
+    expect(screen.getAllByText('Microphone')).not.toHaveLength(0);
+  });
+
   it('shows progress and ignores repeat clicks while onboarding completes', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
     const user = userEvent.setup();
@@ -968,6 +1182,7 @@ describe('App', () => {
 
     const startButton = await screen.findByRole('button', { name: 'Start using Caul' });
     await waitFor(() => expect(startButton).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Download local AI' })).toBeDisabled());
     expect(screen.getAllByText('Ready').length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Use' })).not.toBeInTheDocument();
     await waitFor(() => expect(bridge.selectedLocalTranscriptionModels).toEqual(['parakeet']));
@@ -987,7 +1202,7 @@ describe('App', () => {
     render(<App />);
 
     await user.click(await screen.findByRole('tab', { name: 'Cloud' }));
-    await screen.findByText('Sends to ChatGPT. Faster and smarter than Local.');
+    await screen.findByText('Sends to a cloud model like ChatGPT. Faster and smarter than Local.');
 
     expect(screen.queryByText('Sign in required')).not.toBeInTheDocument();
     expect(screen.queryByText('Opening browser')).not.toBeInTheDocument();
@@ -1550,13 +1765,16 @@ describe('App', () => {
     await openSettingsSection(user, 'Permissions');
 
     expect(screen.getByRole('button', { name: 'Grant Screen & System Audio Recording' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Grant Microphone & System Audio' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Grant System Audio' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Grant Microphone' })).toBeInTheDocument();
+    expect(screen.getByText('Required for setup')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Grant Microphone & System Audio' }));
-    expect(bridge.requestedPermissions).toEqual(['microphone', 'system-audio']);
+    await user.click(screen.getByRole('button', { name: 'Grant System Audio' }));
+    await user.click(screen.getByRole('button', { name: 'Grant Microphone' }));
+    expect(bridge.requestedPermissions).toEqual(['system-audio', 'microphone']);
   });
 
-  it('opens only one denied audio permission at a time from Settings', async () => {
+  it('requests denied audio permissions separately from Settings', async () => {
     const user = userEvent.setup();
     const bridge = installTestBridge({
       permissions: [
@@ -1586,12 +1804,51 @@ describe('App', () => {
     await openSettings(user);
     await openSettingsSection(user, 'Permissions');
 
-    expect(await screen.findByRole('button', { name: 'Grant Microphone & System Audio' })).toHaveTextContent('Open Settings');
+    expect(await screen.findByRole('button', { name: 'Grant System Audio' })).toHaveTextContent('Grant');
+    expect(screen.getByRole('button', { name: 'Grant Microphone' })).toHaveTextContent('Grant');
 
-    await user.click(screen.getByRole('button', { name: 'Grant Microphone & System Audio' }));
+    await user.click(screen.getByRole('button', { name: 'Grant System Audio' }));
+    await user.click(screen.getByRole('button', { name: 'Grant Microphone' }));
 
-    expect(bridge.requestedPermissions).toEqual(['microphone']);
-    expect(await screen.findByText('Changed it in System Settings? Restart Caul to apply the permission.')).toBeInTheDocument();
+    expect(bridge.requestedPermissions).toEqual(['system-audio', 'microphone']);
+    expect(screen.queryByText('Changed it in System Settings? Restart Caul to apply the permission.')).not.toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Restart System Audio' })).toHaveTextContent('Restart');
+    expect(screen.getByRole('button', { name: 'Restart Microphone' })).toHaveTextContent('Restart');
+  });
+
+  it('marks microphone permission as required when microphone input is enabled', async () => {
+    const user = userEvent.setup();
+    installTestBridge({
+      permissions: [
+        {
+          description: 'Required when listening to speaker audio output.',
+          id: 'screen-recording',
+          label: 'Screen & System Audio Recording',
+          status: 'granted'
+        },
+        {
+          description: 'Required when listening to audio from other apps.',
+          id: 'system-audio',
+          label: 'System Audio',
+          status: 'granted'
+        },
+        {
+          description: 'Required when listening to your microphone.',
+          id: 'microphone',
+          label: 'Microphone',
+          status: 'not-determined'
+        }
+      ]
+    });
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Microphone off' }));
+    await openSettings(user);
+    await openSettingsSection(user, 'Permissions');
+
+    expect(screen.getByText('Required now')).toBeInTheDocument();
+    expect(screen.queryByText('Required for setup')).not.toBeInTheDocument();
   });
 
   it('does not show Grant buttons for granted permissions in Settings', async () => {
@@ -4504,6 +4761,7 @@ function installTestBridge(overrides: {
   let modelCatalogueRefreshes = 0;
   let chatGptLoginOpens = 0;
   let onboardingCompletes = 0;
+  const onboardingStatusOptions: Array<{ refreshCatalogue?: boolean } | undefined> = [];
   let parakeetDownloads = 0;
   const removedLocalTranscriptionModels: string[] = [];
   let parakeetStatus = overrides.parakeetStatus ?? testParakeetStatus();
@@ -4893,7 +5151,10 @@ function installTestBridge(overrides: {
           return getCurrentOnboardingStatus();
         },
         open: async () => getCurrentOnboardingStatus(),
-        status: async () => getCurrentOnboardingStatus()
+        status: async (options) => {
+          onboardingStatusOptions.push(options);
+          return getCurrentOnboardingStatus();
+        }
       },
       history: {
         chooseFolder: async () => {
@@ -5154,6 +5415,7 @@ function installTestBridge(overrides: {
     get modelCatalogueRefreshes() {
       return modelCatalogueRefreshes;
     },
+    onboardingStatusOptions,
     starts,
     get portablePreferences() {
       return portablePreferences;

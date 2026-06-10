@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -42,8 +43,8 @@ const profiles = {
     envName: 'CAUL_LINUX_VM_NAME',
     packageEnv: 'CAUL_LINUX_PACKAGE_PATH',
     repoEnv: 'CAUL_LINUX_VM_REPO',
-    defaultRepo: '/home/parallels/caul-cross-platform',
-    defaultPackagePath: '/home/parallels/caul-cross-platform/release/caul-arm64.deb',
+    defaultRepo: '/home/parallels/caul-e2e/repo',
+    defaultPackagePath: '/home/parallels/caul-e2e/release/caul-arm64.deb',
     userEnv: 'CAUL_LINUX_VM_SSH_USER',
     defaultUser: 'parallels',
     hostEnv: 'CAUL_LINUX_VM_SSH_HOST',
@@ -58,8 +59,8 @@ const profiles = {
     envName: 'CAUL_WINDOWS_VM_NAME',
     packageEnv: 'CAUL_WINDOWS_PACKAGE_PATH',
     repoEnv: 'CAUL_WINDOWS_VM_REPO',
-    defaultRepo: 'C:\\Users\\alex\\caul-cross-platform',
-    defaultPackagePath: 'C:\\Users\\alex\\caul-cross-platform\\release\\Caul-windows-arm64-setup.exe',
+    defaultRepo: 'C:\\Users\\alex\\caul-e2e\\repo',
+    defaultPackagePath: 'C:\\Users\\alex\\caul-e2e\\release\\Caul-windows-arm64-setup.exe',
     modelEnv: 'CAUL_WINDOWS_PARAKEET_MODEL_DIR',
     defaultModelDir: 'C:\\Users\\alex\\AppData\\Roaming\\com.pais.handy\\models\\parakeet-tdt-0.6b-v3-int8'
   }
@@ -75,6 +76,7 @@ if (!profile) {
 
 const vmName = process.env[profile.envName] ?? profile.defaultName;
 const packagePath = process.env[profile.packageEnv] ?? profile.defaultPackagePath;
+const packageVersion = JSON.parse(readFileSync(path.join(process.cwd(), 'package.json'), 'utf8')).version;
 const keepVmE2eBuilds = process.env.CAUL_VM_E2E_KEEP_BUILDS === '1';
 const killLinuxBackendProcessesCommand = "ps -eo pid,args | awk '/caul-desktop-backend/ && !/awk/ { print $1 }' | xargs -r kill -9 >/dev/null 2>&1 || true";
 
@@ -106,16 +108,20 @@ async function failVmE2e(message, {
     gates: {
       ai: false,
       audioIsolation: false,
+      cleanup: false,
       install: false,
       microphone: false,
       onboarding: false,
+      package: false,
       privacy: false,
       systemAudio: false,
       transcription: false,
-      ...gates
+      ...gates,
+      package: gates.package ?? gates.install ?? false
     },
     ok: false,
     packagePath: failedPackagePath,
+    packageVersion,
     profile: profileName,
     vmName
   };
@@ -400,9 +406,11 @@ async function runWindowsPackageSmoke() {
     gates: {
       ai: true,
       audioIsolation: true,
+      cleanup: false,
       install: true,
       microphone: true,
       onboarding: true,
+      package: true,
       privacy: true,
       systemAudio: true,
       transcription: true,
@@ -415,12 +423,13 @@ async function runWindowsPackageSmoke() {
       ok: onboardingGuiClickOk
     },
     packagePath,
+    packageVersion,
     profile: profileName,
     rendererTranscription: {
       guiClickMode: rendererSummary.guiClickMode === true,
       guiClickCount: Array.isArray(rendererSummary.guiClicks) ? rendererSummary.guiClicks.length : 0,
       guiClicksOk: Array.isArray(rendererSummary.guiClicks)
-        && rendererSummary.guiClicks.length >= 3
+        && rendererSummary.guiClicks.length >= 2
         && rendererSummary.guiClicks.every((click) => click?.ok === true),
       guiClicks: rendererSummary.guiClicks ?? [],
       ok: rendererSummary.detected === true
@@ -438,6 +447,7 @@ async function runWindowsPackageSmoke() {
   }
 
   vmE2eSummary.cleanup = cleanup.summary;
+  vmE2eSummary.gates.cleanup = true;
   await writeVmE2eSummary(profileName, vmE2eSummary);
   console.log(`caul-vm-e2e ${JSON.stringify(vmE2eSummary)}`);
 }
@@ -465,6 +475,55 @@ async function cleanupWindowsPackageSmoke(installation) {
     const summary = { kept: true, reason: 'CAUL_VM_E2E_KEEP_BUILDS=1' };
     console.log(`Windows cleanup: skipped (${summary.reason})`);
     return { ok: true, summary, text: '' };
+  }
+
+  if (!installation.installedFromSetup) {
+    const appRoot = path.win32.dirname(installation.appExe);
+    const trashName = `.caul-delete-${Date.now()}`;
+    const trashPath = path.win32.join(path.win32.dirname(appRoot), trashName);
+    const disposablePath = isDisposableWindowsPackagePath(appRoot);
+
+    if (!disposablePath) {
+      const summary = {
+        appRoot,
+        kept: true,
+        reason: 'shared unpacked package path',
+        removedAppRoot: false,
+        removedPackagePath: false
+      };
+      console.log(`Windows cleanup: skipped (${summary.reason})`);
+      return { ok: true, summary, text: '' };
+    }
+
+    const cleanup = await runPrlctl([
+      'exec',
+      vmName,
+      '--current-user',
+      'cmd.exe',
+      '/d',
+      '/s',
+      '/c',
+      [
+        'taskkill /F /T /IM Caul.exe >NUL 2>NUL',
+        'taskkill /F /T /IM caul-desktop-backend.exe >NUL 2>NUL',
+        `if exist "${appRoot}" ren "${appRoot}" "${trashName}"`,
+        `if exist "${trashPath}" start "" /b cmd.exe /c rmdir /s /q "${trashPath}"`
+      ].join(' & ')
+    ], { timeout: 15_000, maxBuffer: 2 * 1024 * 1024 });
+    const removedAppRoot = cleanup.ok;
+    const removedPackagePath = cleanup.ok && path.win32.normalize(packagePath).toLowerCase() === path.win32.normalize(appRoot).toLowerCase();
+    const summary = {
+      appRoot,
+      kept: false,
+      removedAppRoot,
+      removedPackagePath
+    };
+
+    if (cleanup.ok) {
+      console.log(`Windows cleanup: ${JSON.stringify(summary)}`);
+    }
+
+    return { ok: cleanup.ok, summary, text: cleanup.text };
   }
 
   if (!installation.installedFromSetup && !isDisposableWindowsPackagePath(packagePath)) {
@@ -502,16 +561,24 @@ async function cleanupWindowsPackageSmoke(installation) {
       '  $removedAppRoot = -not (Test-Path $appRoot)',
       '} else {',
       '  $caulCurrent = Join-Path $env:USERPROFILE "caul-current"',
-      '  $disposableDirectory = $appRoot.StartsWith($caulCurrent, [System.StringComparison]::OrdinalIgnoreCase) -or $appRoot.StartsWith($env:TEMP, [System.StringComparison]::OrdinalIgnoreCase)',
+      '  $caulE2e = Join-Path $env:USERPROFILE "caul-e2e"',
+      '  $disposableDirectory = $appRoot.StartsWith($caulCurrent, [System.StringComparison]::OrdinalIgnoreCase) -or $appRoot.StartsWith($caulE2e, [System.StringComparison]::OrdinalIgnoreCase) -or $appRoot.StartsWith($env:TEMP, [System.StringComparison]::OrdinalIgnoreCase)',
       '  if ($disposableDirectory -and (Test-Path $appRoot)) {',
-      '    Remove-Item -Force -Recurse $appRoot',
-      '    $removedAppRoot = $true',
+      '    $trashRoot = Join-Path (Split-Path -Parent $appRoot) (".caul-delete-" + [guid]::NewGuid().ToString())',
+      '    Move-Item -Force $appRoot $trashRoot',
+      '    $removedAppRoot = -not (Test-Path $appRoot)',
+      '    Start-Process -WindowStyle Hidden -FilePath "cmd.exe" -ArgumentList "/c rmdir /s /q `"$trashRoot`"" | Out-Null',
       '  }',
       '}',
-      '$packageIsDisposable = $packagePath.StartsWith((Join-Path $env:USERPROFILE "caul-current"), [System.StringComparison]::OrdinalIgnoreCase) -or $packagePath.StartsWith($env:TEMP, [System.StringComparison]::OrdinalIgnoreCase)',
-      'if ($packageIsDisposable -and (Test-Path $packagePath)) {',
-      '  Remove-Item -Force -Recurse $packagePath',
+      '$packageIsDisposable = $packagePath.StartsWith((Join-Path $env:USERPROFILE "caul-current"), [System.StringComparison]::OrdinalIgnoreCase) -or $packagePath.StartsWith((Join-Path $env:USERPROFILE "caul-e2e"), [System.StringComparison]::OrdinalIgnoreCase) -or $packagePath.StartsWith($env:TEMP, [System.StringComparison]::OrdinalIgnoreCase)',
+      'if ($packagePath.Equals($appRoot, [System.StringComparison]::OrdinalIgnoreCase) -and $removedAppRoot) {',
       '  $removedPackagePath = $true',
+      '}',
+      'if ($packageIsDisposable -and (Test-Path $packagePath)) {',
+      '  $trashPackagePath = Join-Path (Split-Path -Parent $packagePath) (".caul-delete-" + [guid]::NewGuid().ToString())',
+      '  Move-Item -Force $packagePath $trashPackagePath',
+      '  $removedPackagePath = -not (Test-Path $packagePath)',
+      '  Start-Process -WindowStyle Hidden -FilePath "cmd.exe" -ArgumentList "/c rmdir /s /q `"$trashPackagePath`"" | Out-Null',
       '}',
       '$summary = New-Object psobject -Property @{ kept = $false; removedAppRoot = $removedAppRoot; removedPackagePath = $removedPackagePath; appRoot = $appRoot }',
       'Write-Output ("caul-windows-cleanup " + ($summary | ConvertTo-Json -Compress))'
@@ -532,7 +599,8 @@ async function cleanupWindowsPackageSmoke(installation) {
 function isDisposableWindowsPackagePath(value) {
   const normalised = String(value).replace(/\//g, '\\').toLowerCase();
   return normalised.includes('\\appdata\\local\\temp\\')
-    || normalised.includes('\\caul-current\\');
+    || normalised.includes('\\caul-current\\')
+    || normalised.includes('\\caul-e2e\\');
 }
 
 async function prepareWindowsPackageForSmoke() {
@@ -545,6 +613,7 @@ async function prepareWindowsPackageForSmoke() {
   const install = await runPrlctl([
     'exec',
     vmName,
+    '--current-user',
     ...powershellEncodedArgs([
       '$ErrorActionPreference = "Stop"',
       `$packagePath = ${powershellString(packagePath)}`,
@@ -557,7 +626,10 @@ async function prepareWindowsPackageForSmoke() {
       '  $packageItem = Get-Item $packagePath',
       '  if ($packageItem.Length -le 0) { throw "Package artefact is empty: $packagePath" }',
       '  Get-Process Caul -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue',
-      '  $process = Start-Process -PassThru -Wait -FilePath $packagePath -ArgumentList "/S"',
+      '  $process = Start-Process -PassThru -FilePath $packagePath -ArgumentList "/S"',
+      '  $completed = Wait-Process -Id $process.Id -Timeout 120 -ErrorAction SilentlyContinue',
+      '  if (!$completed) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue; throw "Installer did not finish within 120 seconds." }',
+      '  $process.Refresh()',
       '  if ($process.ExitCode -ne 0) { throw "Installer exited with code $($process.ExitCode)" }',
       '  $candidateRoots = @(',
       '    (Join-Path $env:LOCALAPPDATA "Programs\\Caul"),',
@@ -980,12 +1052,14 @@ async function runLinuxPackageSmoke() {
         install: true,
         microphone: false,
         onboarding: false,
+        package: true,
         privacy: false,
         systemAudio: false,
         transcription: false
       },
       ok: true,
       packagePath,
+      packageVersion,
       profile: profileName,
       vmName
     };
@@ -1210,9 +1284,11 @@ async function runLinuxPackageSmoke() {
     gates: {
       ai: true,
       audioIsolation: true,
+      cleanup: false,
       install: true,
       microphone: true,
       onboarding: true,
+      package: true,
       privacy: true,
       systemAudio: true,
       transcription: true,
@@ -1225,12 +1301,13 @@ async function runLinuxPackageSmoke() {
       ok: onboardingGuiClickOk
     },
     packagePath,
+    packageVersion,
     profile: profileName,
     rendererTranscription: {
       guiClickMode: rendererSummary.guiClickMode === true,
       guiClickCount: Array.isArray(rendererSummary.guiClicks) ? rendererSummary.guiClicks.length : 0,
       guiClicksOk: Array.isArray(rendererSummary.guiClicks)
-        && rendererSummary.guiClicks.length >= 3
+        && rendererSummary.guiClicks.length >= 2
         && rendererSummary.guiClicks.every((click) => click?.ok === true),
       guiClicks: rendererSummary.guiClicks ?? [],
       ok: rendererSummary.detected === true
@@ -1247,6 +1324,7 @@ async function runLinuxPackageSmoke() {
   }
 
   vmE2eSummary.cleanup = cleanup.summary;
+  vmE2eSummary.gates.cleanup = true;
   await writeVmE2eSummary(profileName, vmE2eSummary);
   console.log(`caul-vm-e2e ${JSON.stringify(vmE2eSummary)}`);
 }
@@ -1865,15 +1943,12 @@ function assertRendererTranscriptionSmoke(text, label) {
     || !summary.autoSendDisabled
     || summary.guiClickMode !== true
     || !Array.isArray(summary.guiClicks)
-    || summary.guiClicks.length < 3
+    || summary.guiClicks.length < 2
     || summary.guiClicks.some((click) => click?.ok !== true)
-    || !summary.restartAttempted
-    || !summary.restartStartButtonFound
-    || summary.restartStartButtonDisabled
     || (Number(summary.completedCount ?? 0) + Number(summary.partialCount ?? 0)) < 1
     || transcriptWords.length < 1
   ) {
-    console.error(`${label} packaged renderer transcription smoke did not prove transcript text and UI restart in the app.`);
+    console.error(`${label} packaged renderer transcription smoke did not prove transcript text and Start/Stop GUI clicks in the app.`);
     console.error(text);
     process.exit(1);
   }

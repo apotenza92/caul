@@ -52,6 +52,7 @@ const packagedLaunchSmokeWaitMs = Number(process.env.CAUL_PACKAGED_LAUNCH_SMOKE_
 const packagedUpdaterSmoke = process.env.CAUL_PACKAGED_UPDATER_SMOKE === '1';
 const packagedPrivacySmoke = process.env.CAUL_PACKAGED_PRIVACY_SMOKE === '1';
 const packagedOnboardingCompletionSmoke = process.env.CAUL_PACKAGED_ONBOARDING_COMPLETION_SMOKE === '1';
+const packagedOnboardingSmokeAssumePermissions = process.env.CAUL_PACKAGED_ONBOARDING_SMOKE_ASSUME_PERMISSIONS === '1';
 const windowsExternalCaptureProbe = process.env.CAUL_WINDOWS_EXTERNAL_CAPTURE_PROBE === '1';
 const smokeOutputFile = process.env.CAUL_SMOKE_OUTPUT_FILE;
 const piLlmBridgeMode = String(process.env.CAUL_PI_LLM_BRIDGE ?? '').trim().toLowerCase();
@@ -161,6 +162,7 @@ let piChatGptLoginPromise = null;
 let piAuthStorageImportPromise = null;
 let isQuitting = false;
 let isInstallingDownloadedUpdate = false;
+let lastAiRecommendationDebugSignature = null;
 let packagedLaunchSmokeStarted = false;
 const packagedPrivacySmokeState = {
   captureProbe: null,
@@ -2492,6 +2494,33 @@ function emitLlmStatus() {
 
 async function getPermissionsStatus() {
   const isMac = process.platform === 'darwin';
+  if (isMac && packagedOnboardingSmokeAssumePermissions) {
+    return {
+      ok: true,
+      platform: process.platform,
+      permissions: [
+        {
+          description: 'Required when listening to speaker audio output.',
+          id: 'screen-recording',
+          label: 'Screen & System Audio Recording',
+          status: 'granted'
+        },
+        {
+          description: 'Required when listening to audio from other apps.',
+          id: 'system-audio',
+          label: 'System Audio',
+          status: 'granted'
+        },
+        {
+          description: 'Required when listening to your microphone.',
+          id: 'microphone',
+          label: 'Microphone',
+          status: 'granted'
+        }
+      ]
+    };
+  }
+
   const screenRecordingStatus = isMac
     ? await getScreenRecordingPermissionStatus()
     : 'unsupported';
@@ -2590,6 +2619,8 @@ async function requestPermission(permission) {
     if (status === 'granted') {
       return { ok: true };
     }
+
+    openPermissionsSettings(permission);
 
     return {
       ok: false,
@@ -3001,6 +3032,7 @@ function getAiRecommendation() {
     benchmarkCache: readLocalAiBenchmarkCache()
   });
   const recommendedProvider = benchmarkRecommendation.ai.recommendation === 'cloud' ? 'cloud' : 'local';
+  logAiRecommendationDebug(catalogue, profile, benchmarkRecommendation);
 
   return {
     benchmark: {
@@ -3019,6 +3051,7 @@ function getAiRecommendation() {
     recommended: benchmarkRecommendation.ai.recommendation,
     recommendedModel: benchmarkRecommendation.ai.model
       ? {
+        downloadSizeGb: benchmarkRecommendation.ai.model.downloadSizeGb,
         id: benchmarkRecommendation.ai.model.id,
         name: benchmarkRecommendation.ai.model.name,
         reason: benchmarkRecommendation.ai.reason,
@@ -3037,6 +3070,42 @@ function getAiRecommendation() {
   };
 }
 
+function logAiRecommendationDebug(catalogue, profile, recommendation) {
+  if (!shouldLogAiRecommendationDebug()) {
+    return;
+  }
+
+  const ai = recommendation.ai;
+  const model = ai.model;
+  const debugPayload = {
+    catalogueLastReviewed: catalogue.lastReviewed,
+    catalogueSource: catalogue.source ?? 'bundled',
+    fallbackCandidateId: ai.fallbackCandidateId ?? null,
+    fitFailures: (ai.fitFailures ?? []).slice(0, 8),
+    machineFingerprint: ai.modelOptimisationProfile?.machineFingerprint ?? null,
+    performanceStatus: ai.performanceStatus ?? null,
+    platform: profile.platform,
+    recommendation: ai.recommendation,
+    runtime: model?.runtime ?? null,
+    score: typeof ai.candidateScore === 'number' ? Math.round(ai.candidateScore) : null,
+    selectedModelId: model?.id ?? null,
+    selectedModelName: model?.name ?? null,
+    selectionReason: ai.selectionReason ?? ai.reason ?? null
+  };
+  const signature = JSON.stringify(debugPayload);
+
+  if (signature === lastAiRecommendationDebugSignature) {
+    return;
+  }
+
+  lastAiRecommendationDebugSignature = signature;
+  console.log(`caul-ai-recommendation-debug ${signature}`);
+}
+
+function shouldLogAiRecommendationDebug() {
+  return process.env.CAUL_AI_RECOMMENDATION_DEBUG === '1' || getAppChannel() === 'dev';
+}
+
 function getModelCatalogue() {
   try {
     return loadBestModelCatalogue({
@@ -3048,6 +3117,7 @@ function getModelCatalogue() {
 
     return {
       version: 1,
+      recommendationPolicyVersion: 2,
       lastReviewed: 'unknown',
       sources: {
         asrLeaderboard: { name: 'Hugging Face Open ASR Leaderboard' },
@@ -3334,8 +3404,8 @@ function getLocalLlmServiceForModel(modelId) {
   return refreshLocalLlmService();
 }
 
-function emitLocalLlmStatus() {
-  const status = getLocalLlmService().status(getSelectedLocalAiModelId());
+function emitLocalLlmStatus(statusOverride = null) {
+  const status = statusOverride ?? getLocalLlmService().status(getSelectedLocalAiModelId());
 
   BrowserWindow.getAllWindows().forEach((window) => {
     window.webContents.send('caul:local-llm-status', status);
@@ -4157,7 +4227,6 @@ async function getOnboardingStatus({ refreshCatalogue = true } = {}) {
 
   const permissions = await getPermissionsStatus();
   const permissionsComplete = permissions.permissions
-    .filter((permission) => permission.id !== 'microphone')
     .every((permission) => (
       permission.status === 'granted' || permission.status === 'unsupported'
     ));
@@ -6207,7 +6276,7 @@ async function clickVisibleButtonInWindow(window, buttonText, options = {}) {
 async function clickPackagedOnboardingPermissionButtons(window) {
   const clicks = [];
 
-  for (const buttonText of ['grant screen & system audio recording', 'grant system audio']) {
+  for (const buttonText of ['grant screen & system audio recording', 'grant system audio', 'grant microphone']) {
     const click = await clickVisibleButtonInWindow(window, buttonText, { timeoutMs: 2_000 });
     clicks.push({
       buttonText,
@@ -6558,13 +6627,22 @@ function fitOnboardingWindowToContent(sender, size = {}) {
   const minHeight = onboardingContentSize.minHeight;
   const maxHeight = Math.max(minHeight, workArea.height - 80);
   const height = Math.min(maxHeight, Math.max(minHeight, Math.ceil(size.height)));
+  const previousBounds = window.getBounds();
 
   window.setContentSize(width, height);
   const bounds = window.getBounds();
-  window.setPosition(
-    workArea.x + Math.round((workArea.width - bounds.width) / 2),
-    workArea.y + Math.round((workArea.height - bounds.height) / 2)
+  const nextX = Math.min(
+    Math.max(previousBounds.x, workArea.x),
+    workArea.x + Math.max(0, workArea.width - bounds.width)
   );
+  const nextY = Math.min(
+    Math.max(previousBounds.y, workArea.y),
+    workArea.y + Math.max(0, workArea.height - bounds.height)
+  );
+
+  if (bounds.x !== nextX || bounds.y !== nextY) {
+    window.setPosition(nextX, nextY);
+  }
 
   return { ok: true };
 }
@@ -8071,8 +8149,6 @@ function createWindow() {
         if (rendererTranscriptionSmokeGuiClicks) {
           scheduleGuiClick(700, 'start listening', 'start');
           scheduleGuiClick(rendererTranscriptionSmokeMs + 1_000, 'stop listening', 'stop');
-          scheduleGuiClick(rendererTranscriptionSmokeMs + 3_500, 'start listening', 'restart');
-          scheduleGuiClick(rendererTranscriptionSmokeMs + 6_000, 'stop listening', 'final-stop');
         }
 
         const result = await mainWindow.webContents.executeJavaScript(`
@@ -8216,39 +8292,37 @@ function createWindow() {
               sample();
             }
 
-            const restartStartButton = await waitForButton(/start listening/i);
-            restartAttempted = true;
-            restartStartButtonFound = Boolean(restartStartButton);
-            restartStartButtonDisabled = restartStartButton ? Boolean(restartStartButton.disabled) : null;
+            if (!guiClickMode) {
+              const restartStartButton = await waitForButton(/start listening/i);
+              restartAttempted = true;
+              restartStartButtonFound = Boolean(restartStartButton);
+              restartStartButtonDisabled = restartStartButton ? Boolean(restartStartButton.disabled) : null;
 
-            if (guiClickMode) {
-              await new Promise((resolve) => setTimeout(resolve, 3_500));
-            } else if (${JSON.stringify(rendererTranscriptionSmokeBridgeStart)}) {
+              if (${JSON.stringify(rendererTranscriptionSmokeBridgeStart)}) {
               restartUsedBridgeFallback = true;
               await window.caul.transcription.start({ sources: ['system'] });
               await new Promise((resolve) => setTimeout(resolve, 2_000));
-            } else if (restartStartButton && !restartStartButton.disabled) {
-              restartStartButton.click();
-              await new Promise((resolve) => setTimeout(resolve, 2_000));
-            } else {
-              restartUsedBridgeFallback = true;
-              await window.caul.transcription.start({ sources: ['system'] });
-              await new Promise((resolve) => setTimeout(resolve, 2_000));
-            }
+              } else if (restartStartButton && !restartStartButton.disabled) {
+                restartStartButton.click();
+                await new Promise((resolve) => setTimeout(resolve, 2_000));
+              } else {
+                restartUsedBridgeFallback = true;
+                await window.caul.transcription.start({ sources: ['system'] });
+                await new Promise((resolve) => setTimeout(resolve, 2_000));
+              }
 
-            sample();
+              sample();
 
-            const restartStopButton = findButton(/stop listening/i);
-            if (guiClickMode) {
+              const restartStopButton = findButton(/stop listening/i);
+              if (restartStopButton) {
+                restartStopButton.click();
+              } else {
+                await window.caul.transcription.stop();
+              }
+
               await new Promise((resolve) => setTimeout(resolve, 1_000));
-            } else if (restartStopButton) {
-              restartStopButton.click();
-            } else {
-              await window.caul.transcription.stop();
+              sample();
             }
-
-            await new Promise((resolve) => setTimeout(resolve, 1_000));
-            sample();
 
             unsubscribe();
 
@@ -8807,7 +8881,9 @@ ipcMain.handle('caul:history-save-session', (_event, request) => (
   getHistoryService().saveSession(request)
 ));
 
-ipcMain.handle('caul:onboarding-status', () => getOnboardingStatus());
+ipcMain.handle('caul:onboarding-status', (_event, options) => getOnboardingStatus({
+  refreshCatalogue: options?.refreshCatalogue !== false
+}));
 
 ipcMain.handle('caul:onboarding-complete', () => completeOnboarding());
 

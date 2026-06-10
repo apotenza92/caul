@@ -7,6 +7,7 @@ const catalogueStaleAfterMs = 90 * 24 * 60 * 60 * 1000;
 const localAiBenchmarkTtlMs = 30 * 24 * 60 * 60 * 1000;
 const liveCallFirstTokenTargetMs = 2500;
 const liveCallTotalTargetMs = 9000;
+const recommendationPolicyVersion = 2;
 
 function getDefaultModelCataloguePath(rootDir = path.resolve(__dirname, '..')) {
   return path.join(rootDir, 'model-catalog.json');
@@ -69,6 +70,10 @@ function validateModelCatalogue(catalogue) {
 
   if (catalogue.version !== 1) {
     throw new Error('Model catalogue version must be 1.');
+  }
+
+  if (catalogue.recommendationPolicyVersion !== recommendationPolicyVersion) {
+    throw new Error(`Model catalogue recommendation policy version must be ${recommendationPolicyVersion}.`);
   }
 
   for (const key of ['lastReviewed', 'sources']) {
@@ -505,6 +510,7 @@ function recommendAiResponseModel(catalogue, profile, { benchmarkCache = null, c
   const optimisationProfile = buildModelOptimisationProfile(profile);
   const evaluatedCandidates = catalogue.aiResponse
     .filter((model) => model.local && model.implemented)
+    .filter((model) => !isCodeSpecialisedAiModel(model))
     .filter((model) => model.caulSmokeStatus !== 'failed-basic-instruction')
     .filter((model) => !Array.isArray(model.platforms) || model.platforms.includes(profile.platform))
     .map((model) => ({
@@ -569,6 +575,22 @@ function getAiFitFailures(candidates) {
   });
 }
 
+function isCodeSpecialisedAiModel(model) {
+  const text = [
+    model.id,
+    model.name,
+    model.providerModelId,
+    model.provenanceUrl,
+    model.fileName,
+    model.benchmark?.preferenceSource,
+    model.benchmark?.qualitySource
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  return /(?:^|[^a-z0-9])(?:code|coder|coding|programming|starcoder|codestral|devstral)(?:[^a-z0-9]|$)/i.test(text)
+    || /deepseek[-_\s]?coder/i.test(text)
+    || /qwen\d*(?:\.\d+)?[-_\s]?coder/i.test(text);
+}
+
 function getCatalogueSourceLabel(catalogue) {
   return catalogue.source === 'live-cache'
     ? 'live benchmark catalogue'
@@ -579,6 +601,7 @@ function scoreAiModel(model, profile, optimisationProfile = buildModelOptimisati
   const predictedFit = scoreAiPredictedFit(model, profile, optimisationProfile);
   const predictedLiveCallValue = scoreAiPredictedLiveCallValue(model, profile, optimisationProfile);
   const performance = getBenchmarkPerformanceStatus(model, optimisationProfile, benchmarkCache);
+  const evidenceAdjustment = getAiEvidenceAdjustment(model, performance);
   const benchmarkAdjustment = performance.status === 'passed'
     ? getPassedBenchmarkAdjustment(performance)
     : performance.status === 'degraded'
@@ -587,7 +610,7 @@ function scoreAiModel(model, profile, optimisationProfile = buildModelOptimisati
         ? -1000
         : 0;
 
-  return predictedFit + predictedLiveCallValue + benchmarkAdjustment;
+  return predictedFit + predictedLiveCallValue + evidenceAdjustment + benchmarkAdjustment;
 }
 
 function getPassedBenchmarkAdjustment(performance) {
@@ -623,7 +646,7 @@ function scoreAiPredictedFit(model, profile, optimisationProfile = buildModelOpt
 
 function scoreAiPredictedLiveCallValue(model, profile, optimisationProfile = buildModelOptimisationProfile(profile)) {
   const qualityScore = model.benchmark.qualityBand === 'strong-local'
-    ? 115
+    ? 130
     : model.benchmark.qualityBand === 'balanced-local'
       ? 70
       : model.benchmark.qualityBand === 'small-local'
@@ -631,13 +654,44 @@ function scoreAiPredictedLiveCallValue(model, profile, optimisationProfile = bui
         : 30;
   const speedScore = model.benchmark.latencyBand === 'fast-local' ? 30 : 20;
   const acceleratorScore = profile.accelerator === 'apple-silicon' || profile.gpu.available ? 10 : 0;
-  const runtimeFitScore = getRuntimeFitScore(model, optimisationProfile);
   const defaultPriorityScore = Math.min(8, Number(model.defaultPriority ?? 0) / 4);
   const sizePenalty = (Number(model.modelSizeB ?? 0) * 1.4)
     + (Number(model.downloadSizeGb ?? 0) * 0.7)
     + (Number(model.estimatedMemoryGb ?? 0) * 0.5);
 
-  return qualityScore + speedScore + acceleratorScore + runtimeFitScore + defaultPriorityScore - sizePenalty;
+  return qualityScore + speedScore + acceleratorScore + defaultPriorityScore - sizePenalty;
+}
+
+function getAiEvidenceAdjustment(model, performance) {
+  if (performance.status === 'passed') {
+    return 0;
+  }
+
+  const evidenceText = [
+    model.benchmark?.preferenceSource,
+    model.benchmark?.qualitySource,
+    model.benchmark?.speedSource
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  let adjustment = 0;
+
+  if (/hugging face public .*discovery/.test(evidenceText) && /independent benchmark review pending/.test(evidenceText)) {
+    adjustment -= 40;
+  }
+
+  if (/google deepmind|artificial analysis|lmarena/.test(evidenceText)) {
+    adjustment += 18;
+  }
+
+  if (/general|assistant|gemma 4/.test(evidenceText)) {
+    adjustment += 8;
+  }
+
+  if (/coder|coding|swe-bench|livecodebench|terminal-bench/.test(evidenceText)) {
+    adjustment -= 24;
+  }
+
+  return adjustment;
 }
 
 function getRuntimeFitScore(model, optimisationProfile) {
@@ -823,6 +877,7 @@ module.exports = {
   getRecommendationMemoryGb,
   getLiveModelCataloguePath,
   getStaleCatalogueEntries,
+  isCodeSpecialisedAiModel,
   loadBestModelCatalogue,
   loadModelCatalogue,
   parseMacAvailableMemoryGb,

@@ -201,6 +201,7 @@ export type AiRecommendation = {
   provider: AiProvider;
   recommended: 'cloud' | 'local' | 'none';
   recommendedModel: null | {
+    downloadSizeGb?: number;
     id: string;
     name: string;
     reason: string;
@@ -439,7 +440,7 @@ export type SettingsBridge = {
     complete: () => Promise<OnboardingStatus>;
     fitContent?: (size: { height: number; width?: number }) => Promise<{ ok: boolean }>;
     open: () => Promise<OnboardingStatus>;
-    status: () => Promise<OnboardingStatus>;
+    status: (options?: { refreshCatalogue?: boolean }) => Promise<OnboardingStatus>;
   };
   history?: {
     chooseFolder: () => Promise<HistoryStatus>;

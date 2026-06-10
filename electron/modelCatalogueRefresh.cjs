@@ -265,6 +265,10 @@ async function discoverHuggingFaceGgufModels(catalogue, { fetchFn, reviewedAt })
 }
 
 async function maybeAddDiscoveredGgufModel(catalogue, repoId, { fetchFn, reviewedAt, searchMetadata }) {
+  if (isCodeSpecialisedModelText(repoId)) {
+    return false;
+  }
+
   if (catalogue.aiResponse.some((model) => model.providerModelId === repoId || model.provenanceUrl === `https://huggingface.co/${repoId}`)) {
     return false;
   }
@@ -274,12 +278,21 @@ async function maybeAddDiscoveredGgufModel(catalogue, repoId, { fetchFn, reviewe
     return false;
   }
 
+  if (isCodeSpecialisedModelText(`${repoId} ${(metadata.tags ?? []).join(' ')} ${metadata.cardData?.language ?? ''}`)) {
+    return false;
+  }
+
   const ggufFiles = findPreferredGgufFiles(metadata);
   if (ggufFiles.length === 0) {
     return false;
   }
 
+  let addedCount = 0;
   for (const ggufFile of ggufFiles) {
+    if (isCodeSpecialisedModelText(`${repoId} ${ggufFile.rfilename}`)) {
+      continue;
+    }
+
     const downloadUrl = `https://huggingface.co/${repoId}/resolve/main/${encodeURIComponent(ggufFile.rfilename)}`;
     const downloadSizeGb = await fetchContentLengthGb(fetchFn, downloadUrl).catch(() => inferDownloadSizeGb(repoId, ggufFile.rfilename));
     const modelSizeB = inferModelSizeB(repoId, ggufFile.rfilename, downloadSizeGb);
@@ -322,9 +335,10 @@ async function maybeAddDiscoveredGgufModel(catalogue, repoId, { fetchFn, reviewe
       runtime: 'llama.cpp',
       toolSupport: false
     });
+    addedCount += 1;
   }
 
-  return ggufFiles.length > 0;
+  return addedCount > 0;
 }
 
 async function discoverHuggingFaceMlxModels(catalogue, { fetchFn, reviewedAt }) {
@@ -383,12 +397,20 @@ async function discoverHuggingFaceMlxModels(catalogue, { fetchFn, reviewedAt }) 
 }
 
 async function maybeAddDiscoveredMlxModel(catalogue, repoId, { fetchFn, reviewedAt, searchMetadata }) {
+  if (isCodeSpecialisedModelText(repoId)) {
+    return false;
+  }
+
   if (catalogue.aiResponse.some((model) => model.providerModelId === repoId || model.provenanceUrl === `https://huggingface.co/${repoId}`)) {
     return false;
   }
 
   const metadata = await fetchJson(fetchFn, `https://huggingface.co/api/models/${repoId}`).catch(() => searchMetadata);
   if (!isPublicHuggingFaceModel(metadata) || !isMlxModelMetadata(repoId, metadata)) {
+    return false;
+  }
+
+  if (isCodeSpecialisedModelText(`${repoId} ${(metadata.tags ?? []).join(' ')}`)) {
     return false;
   }
 
@@ -544,6 +566,14 @@ function isMlxModelMetadata(repoId, metadata) {
   const text = `${repoId} ${(metadata?.tags ?? []).join(' ')}`.toLowerCase();
 
   return text.includes('mlx') && !text.includes('gguf');
+}
+
+function isCodeSpecialisedModelText(value) {
+  const text = String(value ?? '').toLowerCase();
+
+  return /(?:^|[^a-z0-9])(?:code|coder|coding|programming|starcoder|codestral|devstral)(?:[^a-z0-9]|$)/i.test(text)
+    || /deepseek[-_\s]?coder/i.test(text)
+    || /qwen\d*(?:\.\d+)?[-_\s]?coder/i.test(text);
 }
 
 function getUniqueModelId(catalogue, value) {

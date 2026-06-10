@@ -62,6 +62,7 @@ function createLocalLlmService({
     return catalogue.aiResponse.filter((model) => (
       model.local
       && model.implemented
+      && !isCodeSpecialisedModel(model)
       && model.caulSmokeStatus !== 'failed-basic-instruction'
       && (!Array.isArray(model.platforms) || model.platforms.includes(process.platform))
     ));
@@ -685,6 +686,22 @@ function createLocalLlmService({
 
   function clampPercent(percent) {
     return Math.max(0, Math.min(100, Math.round(Number.isFinite(percent) ? percent : 0)));
+  }
+
+  function isCodeSpecialisedModel(model) {
+    const text = [
+      model.id,
+      model.name,
+      model.providerModelId,
+      model.provenanceUrl,
+      model.fileName,
+      model.benchmark?.preferenceSource,
+      model.benchmark?.qualitySource
+    ].filter(Boolean).join(' ').toLowerCase();
+
+    return /(?:^|[^a-z0-9])(?:code|coder|coding|programming|starcoder|codestral|devstral)(?:[^a-z0-9]|$)/i.test(text)
+      || /deepseek[-_\s]?coder/i.test(text)
+      || /qwen\d*(?:\.\d+)?[-_\s]?coder/i.test(text);
   }
 
   function extractArchive(archivePath, destinationPath) {
