@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest';
 
 const root = resolve(import.meta.dirname, '..');
 const html = readFileSync(resolve(root, 'docs/index.html'), 'utf8');
+const readme = readFileSync(resolve(root, 'README.md'), 'utf8');
+const productDescription = 'Caul recommends the best setup for your computer, including local models for transcription and AI when they fit, with cloud AI available when that makes more sense.';
 
 async function loadDownloadPage({
   architecture = '',
@@ -55,11 +57,25 @@ function hero(dom) {
   };
 }
 
+function primaryDownload(dom) {
+  return {
+    href: dom.window.document.getElementById('download-btn').href,
+    label: dom.window.document.getElementById('download-label').textContent
+  };
+}
+
 describe('download page hero autodetect', () => {
+  it('keeps the download page subtitle and README intro in sync', async () => {
+    const dom = await loadDownloadPage();
+
+    expect(dom.window.document.querySelector('.subtitle').textContent).toBe(productDescription);
+    expect(readme).toContain(productDescription);
+  });
+
   it('recommends Windows x64 downloads', async () => {
     const dom = await loadDownloadPage({ architecture: 'x86', platform: 'Windows' });
 
-    expect(hero(dom).label).toContain('Download for Windows x64');
+    expect(hero(dom).label).toContain('Download Caul for Windows x64');
     expect(hero(dom).href).toContain('Caul-windows-x64-setup.exe');
     expect([...dom.window.document.querySelectorAll('.arch-btn')].map((button) => button.id)).toEqual([
       'arch-x64',
@@ -70,28 +86,28 @@ describe('download page hero autodetect', () => {
   it('recommends Windows ARM64 downloads', async () => {
     const dom = await loadDownloadPage({ architecture: 'arm64', platform: 'Windows' });
 
-    expect(hero(dom).label).toContain('Download for Windows 11 ARM64');
+    expect(hero(dom).label).toContain('Download Caul for Windows 11 ARM64');
     expect(hero(dom).href).toContain('Caul-windows-arm64-setup.exe');
   });
 
   it('recommends Linux x64 AppImage downloads', async () => {
     const dom = await loadDownloadPage({ architecture: 'x86', platform: 'Linux' });
 
-    expect(hero(dom).label).toContain('Download AppImage for Linux x64');
+    expect(hero(dom).label).toContain('Download Caul AppImage for Linux x64');
     expect(hero(dom).href).toContain('caul-x64.AppImage');
   });
 
   it('recommends Linux ARM64 AppImage downloads', async () => {
     const dom = await loadDownloadPage({ architecture: 'arm64', platform: 'Linux' });
 
-    expect(hero(dom).label).toContain('Download AppImage for Linux ARM64');
+    expect(hero(dom).label).toContain('Download Caul AppImage for Linux ARM64');
     expect(hero(dom).href).toContain('caul-arm64.AppImage');
   });
 
   it('recommends Apple Silicon Mac downloads for macOS', async () => {
     const dom = await loadDownloadPage({ architecture: 'arm64', platform: 'macOS' });
 
-    expect(hero(dom).label).toContain('Download for Apple Silicon Mac');
+    expect(hero(dom).label).toContain('Download Caul for Apple Silicon Mac');
     expect(hero(dom).href).toContain('Caul-macos-arm64.zip');
   });
 
@@ -110,8 +126,45 @@ describe('download page hero autodetect', () => {
     document.getElementById('platform-linux').click();
     document.getElementById('format-deb').click();
 
-    expect(hero(dom).label).toContain('Download .deb for Ubuntu x64');
+    expect(hero(dom).label).toContain('Download Caul .deb for Ubuntu x64');
     expect(hero(dom).href).toContain('caul-x64.deb');
     expect(hero(dom).link.getAttribute('aria-disabled')).toBeNull();
+  });
+
+  it('updates page title and mac download labels when beta is selected', async () => {
+    const dom = await loadDownloadPage({ architecture: 'arm64', platform: 'macOS' });
+    const document = dom.window.document;
+
+    document.getElementById('download-options').open = true;
+    document.getElementById('channel-beta').click();
+
+    expect(document.getElementById('page-title').textContent).toBe('Caul Beta');
+    expect(dom.window.document.title).toBe('Download Caul Beta');
+    expect(hero(dom).label).toContain('Download Caul Beta for Apple Silicon Mac');
+    expect(hero(dom).href).toContain('Caul-Beta-macos-arm64.zip');
+    expect(primaryDownload(dom).label).toContain('Download Caul Beta for Apple Silicon Mac');
+    expect(primaryDownload(dom).href).toContain('Caul-Beta-macos-arm64.zip');
+  });
+
+  it('uses beta asset URLs and channel-aware labels for selected platforms', async () => {
+    const dom = await loadDownloadPage();
+    const document = dom.window.document;
+
+    document.getElementById('download-options').open = true;
+    document.getElementById('channel-beta').click();
+    document.getElementById('platform-windows').click();
+
+    expect(hero(dom).label).toContain('Download Caul Beta for Windows x64');
+    expect(hero(dom).href).toContain('Caul-Beta-windows-x64-setup.exe');
+    expect(primaryDownload(dom).label).toContain('Download Caul Beta for Windows x64');
+    expect(primaryDownload(dom).href).toContain('Caul-Beta-windows-x64-setup.exe');
+
+    document.getElementById('platform-linux').click();
+    document.getElementById('format-deb').click();
+
+    expect(hero(dom).label).toContain('Download Caul Beta .deb for Ubuntu x64');
+    expect(hero(dom).href).toContain('caul-beta-x64.deb');
+    expect(primaryDownload(dom).label).toContain('Download Caul Beta .deb for Ubuntu x64');
+    expect(primaryDownload(dom).href).toContain('caul-beta-x64.deb');
   });
 });

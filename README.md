@@ -7,6 +7,6 @@
 </a>
 <br><br>
 
-Caul is fast, private AI for live calls, with local transcription first and your existing ChatGPT subscription for the AI model.
+Caul recommends the best setup for your computer, including local models for transcription and AI when they fit, with cloud AI available when that makes more sense.
 
 Caul is still early-stage, early-development software. Expect issues for now, and please report bugs or rough edges through [GitHub Issues](https://github.com/apotenza92/caul/issues).

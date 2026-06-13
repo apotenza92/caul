@@ -172,13 +172,6 @@
         transform: none;
       }
 
-      .hero-detected-label {
-        color: var(--text-subtle);
-        font-size: 0.76rem;
-        line-height: 1.4;
-        min-height: 1.1rem;
-      }
-
       .download-options {
         position: relative;
         width: 100%;
@@ -417,7 +410,7 @@
       }
 
       .command-box {
-        align-items: center;
+        align-items: stretch;
         background: var(--code-bg);
         border: 1px solid var(--border);
         border-radius: 8px;
@@ -441,20 +434,29 @@
       .format-command {
         align-items: center;
         display: flex;
+        gap: var(--space-sm);
         justify-content: center;
         padding: 0;
       }
 
       .format-command code {
-        display: none;
+        color: var(--text);
+        display: block;
+        flex: 1 1 auto;
+        font-size: 0.72rem;
+        line-height: 1.45;
+        overflow-wrap: anywhere;
+        text-align: left;
+        user-select: all;
       }
 
       .copy-btn {
         align-items: center;
         background: none;
         border: none;
-        color: var(--accent);
+        color: var(--action-text);
         cursor: pointer;
+        flex: 0 0 auto;
         display: flex;
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
         gap: var(--space-xs);
@@ -467,6 +469,10 @@
       .copy-btn svg {
         height: 15px;
         width: 15px;
+      }
+
+      .copy-btn:hover {
+        color: var(--action-text-hover);
       }
 
       .coming-soon {
@@ -543,11 +549,19 @@
   <body>
     <main class="container">
       <img id="app-icon" class="icon" src="assets/icons/icon-rounded.png" alt="Caul icon" />
-      <h1>Download Caul</h1>
-      <p class="subtitle">Caul is fast, private AI for live calls, with local transcription first and your existing ChatGPT subscription for the AI model.</p>
+      <h1 id="page-title">Caul</h1>
+      <p class="subtitle">Caul recommends the best setup for your computer, including local models for transcription and AI when they fit, with cloud AI available when that makes more sense.</p>
       <p class="early-stage-note">Caul is still early-stage, early-development software. Expect issues for now, and please report bugs or rough edges through <a href="https://github.com/apotenza92/caul/issues">GitHub Issues</a>.</p>
 
       <section class="hero-download" aria-label="Recommended download">
+        <a id="hero-download-btn" class="download-btn" href="#" aria-disabled="true" tabindex="-1">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <path d="M7 10l5 5 5-5"/>
+            <path d="M12 15V3"/>
+          </svg>
+          <span id="hero-download-label">Choose your download</span>
+        </a>
         <div class="hero-meta">
           <a class="github-icon-link" href="https://github.com/apotenza92/caul" aria-label="View Caul on GitHub">
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -557,15 +571,6 @@
           </a>
           <div id="version-display" class="version-display"></div>
         </div>
-        <a id="hero-download-btn" class="download-btn" href="#" aria-disabled="true" tabindex="-1">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <path d="M7 10l5 5 5-5"/>
-            <path d="M12 15V3"/>
-          </svg>
-          <span id="hero-download-label">Choose your download</span>
-        </a>
-        <p id="hero-detected-label" class="hero-detected-label"></p>
       </section>
 
       <details id="download-options" class="download-options">
@@ -719,9 +724,10 @@
       let manualSelection = false;
       const releaseAvailable = {
         stable: true,
-        beta: false
+        beta: true
       };
       const darkMode = window.matchMedia("(prefers-color-scheme: dark)");
+      let copyStatusResetTimer = null;
 
       if (state.platform === "linux" && state.arch === "arm64") {
         state.linuxFormat = "appimage";
@@ -764,6 +770,32 @@
       function labelWithSize(label, url) {
         const size = formatAssetSize(assetSizes[assetNameFromUrl(url)]);
         return size ? `${label} · ${size}` : label;
+      }
+
+      function productNameForChannel(channel) {
+        return channel === "beta" ? "Caul Beta" : "Caul";
+      }
+
+      function downloadLabelForChannel(label, channel) {
+        const productName = productNameForChannel(channel);
+
+        if (label.startsWith("Download for ")) {
+          return label.replace("Download for ", `Download ${productName} for `);
+        }
+
+        if (label.startsWith("Download AppImage for ")) {
+          return label.replace("Download AppImage for ", `Download ${productName} AppImage for `);
+        }
+
+        if (label.startsWith("Download .deb for ")) {
+          return label.replace("Download .deb for ", `Download ${productName} .deb for `);
+        }
+
+        if (label.startsWith("Download .rpm for ")) {
+          return label.replace("Download .rpm for ", `Download ${productName} .rpm for `);
+        }
+
+        return `Download ${productName} ${label.replace(/^Download\s*/i, "")}`.trim();
       }
 
       function detectSystem(extra = {}) {
@@ -827,7 +859,7 @@
             : "Download for Windows x64";
 
           return url
-            ? { available: true, label, url }
+            ? { available: true, label: downloadLabelForChannel(label, selection.channel), url }
             : { available: false, message: "Caul for Windows beta is coming soon." };
         }
 
@@ -849,10 +881,11 @@
               : `Download AppImage for Linux ${architectureLabel}`;
 
           return url
-            ? { available: true, label, url }
+            ? { available: true, label: downloadLabelForChannel(label, selection.channel), url }
             : { available: false, message: "Caul for Linux beta is coming soon." };
         }
 
+        const macLabel = "Download for Apple Silicon Mac";
         return {
           available: true,
           homebrewCommand: selection.channel === "beta"
@@ -861,7 +894,7 @@
           homebrewLabel: selection.channel === "beta"
             ? "Or install via Homebrew (Beta):"
             : "Or install via Homebrew:",
-          label: "Download for Apple Silicon Mac",
+          label: downloadLabelForChannel(macLabel, selection.channel),
           url: channelDownloads.mac || downloads.stable.mac
         };
       }
@@ -884,25 +917,66 @@
       function updateHeroDownload(resolved) {
         const heroDownload = document.getElementById("hero-download-btn");
         const heroLabel = document.getElementById("hero-download-label");
-        const detectedLabel = document.getElementById("hero-detected-label");
 
         if (!detectedSystem.known && !manualSelection) {
           heroDownload.href = "#";
           heroDownload.setAttribute("aria-disabled", "true");
           heroDownload.setAttribute("tabindex", "-1");
           heroLabel.textContent = "Choose your download";
-          detectedLabel.textContent = "We could not detect your system. Choose one below.";
           return;
         }
 
         setDownloadLink(heroDownload, heroLabel, resolved);
-        detectedLabel.textContent = manualSelection
-          ? "Using your selected download."
-          : "Recommended for your system.";
       }
 
       function markManualSelection() {
         manualSelection = true;
+      }
+
+      async function copyText(text) {
+        if (navigator.clipboard?.writeText) {
+          try {
+            await navigator.clipboard.writeText(text);
+            return;
+          } catch {
+            // Fall through to the selection-based fallback used for local files.
+          }
+        }
+
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.setAttribute("readonly", "");
+        textarea.style.left = "-9999px";
+        textarea.style.position = "fixed";
+        textarea.style.top = "0";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        textarea.setSelectionRange(0, textarea.value.length);
+
+        try {
+          if (!document.execCommand("copy")) {
+            throw new Error("Copy command was not accepted");
+          }
+        } finally {
+          textarea.remove();
+        }
+      }
+
+      function setHomebrewCopyStatus(text) {
+        const copyTextLabel = document.querySelector("#homebrew-copy span");
+        copyTextLabel.textContent = text;
+
+        if (copyStatusResetTimer) {
+          clearTimeout(copyStatusResetTimer);
+        }
+
+        if (text !== "Copy") {
+          copyStatusResetTimer = window.setTimeout(() => {
+            copyTextLabel.textContent = "Copy";
+            copyStatusResetTimer = null;
+          }, 1800);
+        }
       }
 
       async function loadReleaseInfo() {
@@ -984,10 +1058,13 @@
         const extraDownloadLinks = document.getElementById("extra-download-links");
         const comingSoon = document.getElementById("coming-soon");
         const comingSoonLabel = document.getElementById("coming-soon-label");
+        const pageTitle = document.getElementById("page-title");
         const resolved = resolveDownload(state);
 
         document.body.classList.toggle("beta-mode", state.channel === "beta");
         icon.src = getIconSrc();
+        pageTitle.textContent = productNameForChannel(state.channel);
+        document.title = `Download ${productNameForChannel(state.channel)}`;
 
         setActive(".channel-btn", `channel-${state.channel}`);
         setActive(".platform-btn", `platform-${state.platform}`);
@@ -1080,13 +1157,11 @@
       });
       document.getElementById("homebrew-box").addEventListener("click", async () => {
         const command = document.getElementById("homebrew-code").textContent;
-        const copyLabel = document.getElementById("homebrew-copy");
-        const copyText = copyLabel.querySelector("span");
         try {
-          await navigator.clipboard.writeText(command);
-          copyText.textContent = "Copied";
+          await copyText(command);
+          setHomebrewCopyStatus("Copied");
         } catch {
-          copyText.textContent = "Select";
+          setHomebrewCopyStatus("Copy failed");
         }
       });
       document.getElementById("homebrew-box").addEventListener("keydown", (event) => {
