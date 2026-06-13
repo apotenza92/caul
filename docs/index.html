@@ -92,6 +92,24 @@
         max-width: 420px;
       }
 
+      .early-stage-note {
+        color: var(--text-muted);
+        font-size: 0.84rem;
+        line-height: 1.5;
+        margin: calc(var(--space-sm) * -0.4) auto 0;
+        max-width: 440px;
+      }
+
+      .early-stage-note a {
+        color: var(--accent);
+        font-weight: 600;
+        text-decoration: none;
+      }
+
+      .early-stage-note a:hover {
+        text-decoration: underline;
+      }
+
       .github-icon-link {
         align-items: center;
         color: var(--text-muted);
@@ -500,6 +518,7 @@
       <img id="app-icon" class="icon" src="assets/icons/icon-rounded.png" alt="Caul icon" />
       <h1>Download Caul</h1>
       <p class="subtitle">Named from the Latin root for whispering or murmuring, Caul is fast, private AI for live calls, with local transcription first and your existing ChatGPT subscription for the AI model.</p>
+      <p class="early-stage-note">Caul is still early-stage, early-development software. Expect issues for now, and please report bugs or rough edges through <a href="https://github.com/apotenza92/caul/issues">GitHub Issues</a>.</p>
 
       <section class="hero-download" aria-label="Recommended download">
         <a id="hero-download-btn" class="download-btn" href="#" aria-disabled="true" tabindex="-1">
