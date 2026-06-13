@@ -19,6 +19,8 @@
         color-scheme: light dark;
         --accent: #34424A;
         --accent-hover: #263238;
+        --action-text: #34424A;
+        --action-text-hover: #263238;
         --bg-gradient: linear-gradient(135deg, #f8fafc 0%, #edf1f2 50%, #f8fafc 100%);
         --border: #d8dee1;
         --btn-shadow: rgba(52, 66, 74, 0.24);
@@ -34,6 +36,8 @@
 
       @media (prefers-color-scheme: dark) {
         :root {
+          --action-text: #b9d7e4;
+          --action-text-hover: #e1f2f8;
           --bg-gradient: linear-gradient(135deg, #05080a 0%, #101619 50%, #080d10 100%);
           --border: #2d3a40;
           --btn-shadow: rgba(142, 166, 173, 0.24);
@@ -101,12 +105,13 @@
       }
 
       .early-stage-note a {
-        color: var(--accent);
+        color: var(--action-text);
         font-weight: 600;
         text-decoration: none;
       }
 
       .early-stage-note a:hover {
+        color: var(--action-text-hover);
         text-decoration: underline;
       }
 
@@ -172,7 +177,7 @@
       }
 
       .download-options summary {
-        color: var(--accent);
+        color: var(--action-text);
         cursor: pointer;
         display: inline-flex;
         font-size: 0.84rem;
@@ -194,6 +199,10 @@
 
       .download-options[open] summary::after {
         transform: rotate(180deg);
+      }
+
+      .download-options summary:hover {
+        color: var(--action-text-hover);
       }
 
       .download-options[open] .selection-flow {
