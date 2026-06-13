@@ -7,6 +7,6 @@
 </a>
 <br><br>
 
-Named from the Latin root for whispering or murmuring, Caul is fast, private AI for live calls, with local transcription first and your existing ChatGPT subscription for the AI model.
+Caul is fast, private AI for live calls, with local transcription first and your existing ChatGPT subscription for the AI model.
 
 Caul is still early-stage, early-development software. Expect issues for now, and please report bugs or rough edges through [GitHub Issues](https://github.com/apotenza92/caul/issues).
