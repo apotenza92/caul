@@ -236,6 +236,7 @@
       "quantisation": ["4-bit MLX"],
       "toolSupport": false,
       "reasoningSupport": true,
+      "thinkingControl": "qwen-slash-no-think",
       "platforms": ["darwin"],
       "defaultPriority": 35,
       "providerModelId": "Qwen/Qwen3-1.7B-MLX-4bit",

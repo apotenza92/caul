@@ -1933,10 +1933,7 @@ function assertTranscriptionSmoke(text, label) {
 
 function assertRendererTranscriptionSmoke(text, label) {
   const summary = parsePrefixedJson(text, 'caul-renderer-transcription-smoke');
-  const eventTranscript = [
-    ...(summary?.completed ?? []),
-    ...(summary?.partial ?? [])
-  ].join('\n');
+  const eventTranscript = (summary?.completed ?? []).join('\n');
   const transcript = eventTranscript || summary?.longestOutput || summary?.renderedOutput || '';
   const wordOverlap = scoreTranscript(transcriptionExpectedPhrase, transcript);
   const transcriptWords = normaliseWords(transcript);
@@ -1950,7 +1947,7 @@ function assertRendererTranscriptionSmoke(text, label) {
     || !Array.isArray(summary.guiClicks)
     || summary.guiClicks.length < 2
     || summary.guiClicks.some((click) => click?.ok !== true)
-    || (Number(summary.completedCount ?? 0) + Number(summary.partialCount ?? 0)) < 1
+    || Number(summary.completedCount ?? 0) < 1
     || transcriptWords.length < 1
   ) {
     console.error(`${label} packaged renderer transcription smoke did not prove transcript text and Start/Stop GUI clicks in the app.`);

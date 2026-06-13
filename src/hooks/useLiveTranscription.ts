@@ -9,7 +9,12 @@ import {
   type TranscriptionBridgeEvent
 } from '../foundation/desktopBridge';
 import type { CaptureSource } from '../foundation/capture';
+import {
+  createProvisionalTranscriptReducer,
+  type ProvisionalTranscriptLine
+} from '../foundation/provisionalTranscript';
 import { getRuntimeContext } from '../foundation/runtime';
+import cloudLlmConfig from '../../electron/llmConfig.json';
 
 const awaitingResponseText = '';
 const preparingLocalAiText = 'Preparing local AI...';
@@ -33,6 +38,8 @@ export type StopTranscriptionOptions = {
 };
 
 export type TranscriptSession = {
+  confirmedOutput: string;
+  draftOutput?: string;
   id: string;
   output: string;
   startedAt: string;
@@ -57,20 +64,11 @@ type SpeculativeRequest = {
   transcript: string;
 };
 
-type TranscriptLine = {
-  displayAt: Date;
-  key: string;
-  order: number;
-  source?: CaptureSource;
-  startAt: Date;
-  startMs?: number;
-  text: string;
-};
-
 export function useLiveTranscription() {
   const [isListening, setIsListening] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [isAsking, setIsAsking] = useState(false);
+  const [confirmedOutput, setConfirmedOutput] = useState('');
   const [output, setOutput] = useState(idleTranscriptText);
   const [sessions, setSessions] = useState<TranscriptSession[]>([]);
   const [llmQuery, setLlmQuery] = useState('No query sent yet.');
@@ -80,8 +78,7 @@ export function useLiveTranscription() {
   const sessionsRef = useRef<TranscriptSession[]>([]);
   const llmResponsesRef = useRef<AiResponseSession[]>([]);
   const finalTranscriptRef = useRef('');
-  const finalTranscriptLinesRef = useRef<TranscriptLine[]>([]);
-  const partialTranscriptLinesRef = useRef<Map<string, TranscriptLine>>(new Map());
+  const provisionalTranscriptRef = useRef(createProvisionalTranscriptReducer());
   const activeSourcesRef = useRef<CaptureSource[]>([]);
   const sourceLabelsStartOrderRef = useRef<number | null>(null);
   const sessionStartedAtRef = useRef<Date | null>(null);
@@ -92,6 +89,7 @@ export function useLiveTranscription() {
   const speculativeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const debugSequenceRef = useRef(0);
+  const startSequenceRef = useRef(0);
 
   useEffect(() => () => {
     void stop();
@@ -107,6 +105,7 @@ export function useLiveTranscription() {
     const bridge = getTranscriptionBridge();
     const sources = getSelectedSources(options);
     const waitingText = 'Listening. Waiting for speech...';
+    const startingAudioText = 'Starting audio...';
 
     logTranscriptDebug('renderer.start_requested', {
       selectedSources: sources
@@ -124,26 +123,30 @@ export function useLiveTranscription() {
 
     setIsStarting(true);
     setIsListening(true);
+    const startSequence = startSequenceRef.current + 1;
+    startSequenceRef.current = startSequence;
     const sessionStartedAt = new Date();
     const sessionId = `transcript-${sessionStartedAt.getTime()}`;
     sessionStartedAtRef.current = sessionStartedAt;
     activeSessionIdRef.current = sessionId;
     finalTranscriptRef.current = '';
-    finalTranscriptLinesRef.current = [];
-    partialTranscriptLinesRef.current = new Map();
+    provisionalTranscriptRef.current.reset();
     activeSourcesRef.current = sources;
     sourceLabelsStartOrderRef.current = sources.length > 1 ? 0 : null;
     activeLlmRequestIdRef.current = null;
     speculativeRequestRef.current = null;
     clearSpeculativeTimer();
     const sessionHeader = getTranscriptHeader(sessionStartedAt);
-    const waitingTranscript = appendTranscript(sessionHeader, waitingText);
+    const waitingTranscript = appendTranscript(sessionHeader, startingAudioText);
     const session = {
+      confirmedOutput: sessionHeader,
+      draftOutput: '',
       id: sessionId,
       output: waitingTranscript,
       startedAt: sessionStartedAt.toISOString()
     };
     setTranscriptSessions((current) => [...current, session]);
+    setConfirmedOutput(sessionHeader);
     saveHistorySession({ ...session, output: sessionHeader });
     setOutput((currentOutput) => {
       const previousOutput = isTranscriptText(currentOutput) ? currentOutput : '';
@@ -154,17 +157,42 @@ export function useLiveTranscription() {
       snapshot: getTranscriptDebugSnapshot()
     });
 
+    let captureReadiness: ReturnType<typeof createCaptureReadinessTracker> | null = null;
+
     try {
-      unsubscribeRef.current = bridge.onEvent(handleTranscriptionEvent);
+      captureReadiness = createCaptureReadinessTracker(sources);
+      unsubscribeRef.current = bridge.onEvent((event) => {
+        captureReadiness?.handleEvent(event);
+        handleTranscriptionEvent(event);
+      });
+      const prepareResult = await bridge.prepare?.({
+        hotCapture: true,
+        sources
+      });
+
+      if (prepareResult?.hotCaptureArmed) {
+        await captureReadiness.wait();
+      } else {
+        captureReadiness.cancel();
+      }
+
+      if (startSequenceRef.current !== startSequence) {
+        return;
+      }
+
       await bridge.start({
         sources
       });
       setOutput((currentOutput) => (
         shouldShowListeningWaitingText(currentOutput, sessionHeader)
-          ? currentOutput.replace(sessionHeader, appendTranscript(sessionHeader, waitingText))
+          ? currentOutput.replace(
+            appendTranscript(sessionHeader, startingAudioText),
+            appendTranscript(sessionHeader, waitingText)
+          )
           : currentOutput
       ));
     } catch (error) {
+      captureReadiness?.cancel();
       unsubscribeRef.current?.();
       unsubscribeRef.current = null;
       await bridge.stop().catch(() => undefined);
@@ -176,8 +204,8 @@ export function useLiveTranscription() {
   }
 
   async function stop({
-    llmModel = 'openai-codex/gpt-5.4-mini',
-    llmReasoning = 'off',
+    llmModel = cloudLlmConfig.defaultModel,
+    llmReasoning = cloudLlmConfig.defaultReasoning as LlmReasoning,
     generalInstructionsText,
     aiProvider = 'cloud',
     promptTemplateAttachments = [],
@@ -201,6 +229,7 @@ export function useLiveTranscription() {
 
     setIsListening(false);
     setIsStarting(false);
+    startSequenceRef.current += 1;
     const stopPromise = bridge?.stop().catch(() => undefined) ?? Promise.resolve();
     await stopPromise;
 
@@ -306,8 +335,8 @@ export function useLiveTranscription() {
   }
 
   async function ask({
-    llmModel = 'openai-codex/gpt-5.4-mini',
-    llmReasoning = 'off',
+    llmModel = cloudLlmConfig.defaultModel,
+    llmReasoning = cloudLlmConfig.defaultReasoning as LlmReasoning,
     aiProvider = 'cloud',
     promptTemplateAttachments = [],
     promptTemplateText,
@@ -320,7 +349,13 @@ export function useLiveTranscription() {
     transcript?: string;
   } = {}) {
     const bridge = getTranscriptionBridge();
-    const requestTranscript = formatPromptTemplateRequest(transcript ?? output, promptTemplateText, generalInstructionsText);
+    const sourceTranscript = transcript ?? confirmedOutput;
+
+    if (transcript === undefined && !isTranscriptText(sourceTranscript)) {
+      return;
+    }
+
+    const requestTranscript = formatPromptTemplateRequest(sourceTranscript, promptTemplateText, generalInstructionsText);
 
     if (!bridge || !requestTranscript || isSetupMessage(requestTranscript) || requestTranscript === idleTranscriptText) {
       return;
@@ -334,7 +369,7 @@ export function useLiveTranscription() {
     setLlmRequestedAt(requestedAt);
     setLlmOutput(initialResponseText);
     activeLlmResponseIdRef.current = responseId;
-    const historySessionId = findHistorySessionIdForTranscript(transcript ?? output);
+    const historySessionId = findHistorySessionIdForTranscript(sourceTranscript);
     setAiResponseSessions((current) => [...current, {
       historySessionId,
       id: responseId,
@@ -389,66 +424,32 @@ export function useLiveTranscription() {
       const transcript = event.text.trim();
 
       if (transcript) {
-        let line = createTranscriptLine({
-          event,
-          order: sequence,
-          text: transcript
-        }, sessionStartedAtRef.current);
-        const eventUtteranceKey = line.key;
-        const beforeBody = renderTranscriptBody();
         const before = renderTranscript();
         const beforeSnapshot = getTranscriptDebugSnapshot();
-        const beforeFinalLines = finalTranscriptLinesRef.current;
-        const partialKey = getPartialTranscriptSlotKey(line);
-        const matchingPartial = partialTranscriptLinesRef.current.get(partialKey);
-        const mergedText = chooseCompletedTranscriptText(transcript, matchingPartial?.text);
-        if (mergedText !== transcript) {
-          line = {
-            ...line,
-            text: mergedText
-          };
-        }
-        const shouldClearPartial = eventUtteranceKey === undefined
-          || partialTranscriptLinesRef.current.get(partialKey)?.key === eventUtteranceKey;
 
-        if (shouldClearPartial) {
-          partialTranscriptLinesRef.current.delete(partialKey);
-        }
+        provisionalTranscriptRef.current.apply({
+          ...event,
+          displayAtMs: Date.now(),
+          text: transcript,
+          utteranceId: event.utteranceId ?? sequence
+        });
+        const after = renderTranscript();
+        const visibleAfter = renderVisibleTranscript();
+        const draftAfter = renderDraftTranscript();
 
-        upsertFinalTranscriptLine(line);
-        let after = renderTranscript();
-
-        if (!shouldClearPartial && shouldPreserveVisibleTranscript(before, after)) {
-          logTranscriptDebug('renderer.completed_preserved_previous', {
-            afterCandidate: after,
-            before,
-            event,
-            sequence,
-            snapshot: getTranscriptDebugSnapshot()
-          });
-
-          finalTranscriptLinesRef.current = beforeFinalLines;
-          finalTranscriptRef.current = beforeBody;
-          partialTranscriptLinesRef.current.delete(partialKey);
-          after = before;
-        }
-
-        logTranscriptDebug('renderer.completed_merged', {
+        logTranscriptDebug('renderer.completed_appended', {
           afterSnapshot: getTranscriptDebugSnapshot(),
           beforeSnapshot,
           event,
           before,
           rawText: transcript,
           labelledText: labelTranscriptBySource(transcript, event.source, activeSourcesRef.current),
-          timestampedText: renderTranscriptLine(line, sourceLabelsStartOrderRef.current),
           finalTranscript: finalTranscriptRef.current,
-          partialTranscript: renderPartialTranscriptDebugText(partialTranscriptLinesRef.current, sourceLabelsStartOrderRef.current),
           sequence,
-          shouldClearPartial,
           after
         });
         invalidateSpeculativeRequest(after);
-        publishTranscript(after);
+        publishTranscript(visibleAfter || after, after, draftAfter);
         scheduleSpeculativeRequest();
       } else {
         logTranscriptDebug('renderer.completed_ignored_empty', {
@@ -466,39 +467,36 @@ export function useLiveTranscription() {
 
       if (transcript) {
         const eventSource = event.type === 'partial' ? event.source : undefined;
-        const line = createTranscriptLine({
-          event: event.type === 'partial' ? event : { ...event, source: eventSource },
-          order: sequence,
-          text: transcript
-        }, sessionStartedAtRef.current);
         const beforeSnapshot = getTranscriptDebugSnapshot();
-        if (isStalePartialTranscriptLine(line, finalTranscriptLinesRef.current)) {
-          logTranscriptDebug('renderer.partial_ignored_stale', {
-            beforeSnapshot,
-            event,
-            rawText: transcript,
-            sequence
+        const statusTranscript = appendTranscript(getTranscriptHeader(sessionStartedAtRef.current), 'Transcribing local audio...');
+
+        if (event.type === 'partial') {
+          provisionalTranscriptRef.current.apply({
+            ...event,
+            displayAtMs: Date.now(),
+            text: transcript
           });
-          return;
         }
 
-        partialTranscriptLinesRef.current.set(getPartialTranscriptSlotKey(line), line);
-        const after = renderTranscript();
-        logTranscriptDebug('renderer.partial_displayed', {
+        const confirmed = renderTranscript();
+        const visible = renderVisibleTranscript();
+        const draft = renderDraftTranscript();
+
+        if (draft) {
+          publishTranscript(visible || confirmed, confirmed, draft);
+        } else if (!confirmed) {
+          publishTranscript(statusTranscript, getTranscriptHeader(sessionStartedAtRef.current), '');
+        }
+
+        logTranscriptDebug('renderer.partial_displayed_status', {
           afterSnapshot: getTranscriptDebugSnapshot(),
           beforeSnapshot,
           event,
           rawText: transcript,
           labelledText: labelTranscriptBySource(transcript, eventSource, activeSourcesRef.current),
-          timestampedText: renderTranscriptLine(line, sourceLabelsStartOrderRef.current),
           finalTranscript: finalTranscriptRef.current,
-          partialTranscript: renderPartialTranscriptDebugText(partialTranscriptLinesRef.current, sourceLabelsStartOrderRef.current),
-          sequence,
-          after
+          sequence
         });
-        invalidateSpeculativeRequest(after);
-        publishTranscript(after);
-        clearSpeculativeTimer();
       } else {
         logTranscriptDebug('renderer.partial_ignored_empty', {
           event,
@@ -613,7 +611,7 @@ export function useLiveTranscription() {
   }
 
   function renderTranscript() {
-    const body = renderTranscriptBody();
+    const body = renderTranscriptBody('confirmed');
 
     if (!body) {
       return '';
@@ -622,23 +620,55 @@ export function useLiveTranscription() {
     return appendTranscript(getTranscriptHeader(sessionStartedAtRef.current), body);
   }
 
-  function publishTranscript(transcript: string) {
+  function renderDraftTranscript() {
+    const body = renderTranscriptBody('draft');
+
+    if (!body) {
+      return '';
+    }
+
+    return appendTranscript(getTranscriptHeader(sessionStartedAtRef.current), body);
+  }
+
+  function renderVisibleTranscript() {
+    const confirmed = renderTranscript();
+    const draftBody = renderTranscriptBody('draft');
+
+    if (!draftBody) {
+      return confirmed;
+    }
+
+    const visibleBody = [renderTranscriptBody('confirmed'), draftBody].filter(Boolean).join('\n');
+
+    return appendTranscript(getTranscriptHeader(sessionStartedAtRef.current), visibleBody);
+  }
+
+  function publishTranscript(transcript: string, confirmedTranscript = transcript, draftTranscript = '') {
     const sessionId = activeSessionIdRef.current;
 
     if (!sessionId) {
       setOutput(transcript || idleTranscriptText);
+      setConfirmedOutput(confirmedTranscript || '');
       return;
     }
 
     setTranscriptSessions((current) => {
       const next = current.map((session) => (
-        session.id === sessionId ? { ...session, output: transcript } : session
+        session.id === sessionId
+          ? {
+            ...session,
+            confirmedOutput: confirmedTranscript,
+            draftOutput: draftTranscript,
+            output: transcript
+          }
+          : session
       ));
       const savedSession = next.find((session) => session.id === sessionId);
       if (savedSession) {
         saveHistorySession(savedSession);
       }
       setOutput(combineTranscriptSessions(next));
+      setConfirmedOutput(combineConfirmedTranscriptSessions(next));
       return next;
     });
   }
@@ -647,45 +677,24 @@ export function useLiveTranscription() {
     return {
       finalTranscript: finalTranscriptRef.current,
       finalTranscriptLength: finalTranscriptRef.current.length,
-      partialTranscript: renderPartialTranscriptDebugText(partialTranscriptLinesRef.current, sourceLabelsStartOrderRef.current),
-      partialTranscriptLength: [...partialTranscriptLinesRef.current.values()]
-        .reduce((length, line) => length + line.text.length, 0),
-      partialUtteranceKeys: [...partialTranscriptLinesRef.current.values()].map((line) => line.key),
+      renderedDraftTranscript: renderDraftTranscript(),
       renderedTranscript: renderTranscript()
     };
   }
 
-  function renderTranscriptBody() {
-    const lines = [...finalTranscriptLinesRef.current];
-
-    lines.push(...partialTranscriptLinesRef.current.values());
-
+  function renderTranscriptBody(kind: 'confirmed' | 'draft' = 'confirmed') {
+    const snapshot = provisionalTranscriptRef.current.snapshot();
+    const lines = kind === 'confirmed' ? snapshot.confirmed : snapshot.drafts;
     const body = lines
-      .sort(compareTranscriptLines)
       .map((line) => renderTranscriptLine(line, sourceLabelsStartOrderRef.current))
       .join('\n')
       .trim();
 
-    finalTranscriptRef.current = finalTranscriptLinesRef.current
-      .sort(compareTranscriptLines)
-      .map((line) => renderTranscriptLine(line, sourceLabelsStartOrderRef.current))
-      .join('\n')
-      .trim();
-
-    return body;
-  }
-
-  function upsertFinalTranscriptLine(line: TranscriptLine) {
-    const existingIndex = finalTranscriptLinesRef.current.findIndex((current) => current.key === line.key);
-
-    if (existingIndex >= 0) {
-      finalTranscriptLinesRef.current = finalTranscriptLinesRef.current.map((current, index) => (
-        index === existingIndex ? line : current
-      ));
-      return;
+    if (kind === 'confirmed') {
+      finalTranscriptRef.current = body;
     }
 
-    finalTranscriptLinesRef.current = [...finalTranscriptLinesRef.current, line];
+    return body;
   }
 
   function nextTranscriptDebugSequence() {
@@ -814,6 +823,7 @@ export function useLiveTranscription() {
     llmOutput,
     llmRequestedAt,
     llmResponses,
+    confirmedOutput,
     output,
     sessions,
     ask,
@@ -841,10 +851,10 @@ export function useLiveTranscription() {
     }
 
     setOutput(idleTranscriptText);
+    setConfirmedOutput('');
     setTranscriptSessions([]);
     finalTranscriptRef.current = '';
-    finalTranscriptLinesRef.current = [];
-    partialTranscriptLinesRef.current = new Map();
+    provisionalTranscriptRef.current.reset();
     sourceLabelsStartOrderRef.current = null;
     activeSessionIdRef.current = null;
     sessionStartedAtRef.current = null;
@@ -894,14 +904,14 @@ export function useLiveTranscription() {
         })),
       sessionId: session.id,
       startedAt: session.startedAt,
-      transcript: session.output
+      transcript: session.confirmedOutput
     });
   }
 
   function findHistorySessionIdForTranscript(transcript: string) {
     const trimmedTranscript = transcript.trim();
 
-    return sessionsRef.current.find((session) => session.output.trim() === trimmedTranscript)?.id
+    return sessionsRef.current.find((session) => session.confirmedOutput.trim() === trimmedTranscript)?.id
       ?? sessionsRef.current.at(-1)?.id;
   }
 
@@ -933,6 +943,83 @@ function isTranscriptionEventSourceActive(
   }
 
   return !event.source || activeSources.includes(event.source);
+}
+
+function createCaptureReadinessTracker(sources: CaptureSource[]) {
+  const pending = new Set(sources);
+  let settled = false;
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  let resolveReady: () => void = () => {};
+  let rejectReady: (error: Error) => void = () => {};
+  const promise = new Promise<void>((resolve, reject) => {
+    resolveReady = resolve;
+    rejectReady = reject;
+    timeout = setTimeout(() => {
+      finish(() => reject(new Error('Timed out waiting for audio capture to start.')));
+    }, 15_000);
+  });
+
+  const finish = (complete: () => void) => {
+    if (settled) {
+      return;
+    }
+
+    settled = true;
+    if (timeout) {
+      clearTimeout(timeout);
+      timeout = null;
+    }
+    complete();
+  };
+
+  const markReady = (source: CaptureSource) => {
+    pending.delete(source);
+    if (pending.size === 0) {
+      finish(resolveReady);
+    }
+  };
+
+  const handleEvent = (event: TranscriptionBridgeEvent) => {
+    if (settled) {
+      return;
+    }
+
+    if (event.type === 'error') {
+      finish(() => rejectReady(new Error(event.message || 'Audio capture failed to start.')));
+      return;
+    }
+
+    if (event.type !== 'stage') {
+      return;
+    }
+
+    if (event.message === 'microphone capture started') {
+      markReady('microphone');
+      return;
+    }
+
+    if (isSystemAudioReadyStage(event.message)) {
+      markReady('system');
+    }
+  };
+
+  if (pending.size === 0) {
+    finish(resolveReady);
+  }
+
+  return {
+    cancel: () => finish(resolveReady),
+    handleEvent,
+    wait: () => promise
+  };
+}
+
+function isSystemAudioReadyStage(message: string) {
+  return message === 'ScreenCaptureKit audio capture started'
+    || message === 'Core Audio capture started'
+    || message === 'WASAPI loopback capture started'
+    || message === 'Pulse/PipeWire monitor capture started'
+    || message === 'system audio capture started';
 }
 
 function getErrorMessage(error: unknown) {
@@ -971,10 +1058,27 @@ function combineTranscriptSessions(sessions: TranscriptSession[]) {
   return transcript || idleTranscriptText;
 }
 
+function combineConfirmedTranscriptSessions(sessions: TranscriptSession[]) {
+  return sessions
+    .map((session) => session.confirmedOutput.trim())
+    .filter(Boolean)
+    .join('\n\n');
+}
+
 function isTranscriptText(output: string) {
-  return output.trim().length > 0
+  return getTranscriptBody(output).trim().length > 0
     && output !== idleTranscriptText
     && !isSetupMessage(output);
+}
+
+function getTranscriptBody(output: string) {
+  const lines = output.split('\n');
+
+  if (/^Transcript started:/.test(lines[0] ?? '')) {
+    return lines.slice(1).join('\n');
+  }
+
+  return output;
 }
 
 function shouldShowListeningWaitingText(output: string, sessionHeader: string) {
@@ -1010,46 +1114,12 @@ function getTranscriptHeader(startedAt: Date | null) {
   return `Transcript started: ${timestamp}`;
 }
 
-function timestampTranscriptLine(transcript: string, recordedAt: Date) {
-  return `[${formatUserTime(recordedAt)}]: ${transcript}`;
-}
-
-function createTranscriptLine({
-  event,
-  order,
-  text
-}: {
-  event: Extract<TranscriptionBridgeEvent, { type: 'completed' | 'partial' }> | (Extract<TranscriptionBridgeEvent, { type: 'delta' }> & { source?: CaptureSource });
-  order: number;
-  text: string;
-}, sessionStartedAt: Date | null): TranscriptLine {
-  const source = event.source;
-  const startMs = event.type === 'delta' ? undefined : event.startMs;
-  const displayAt = new Date();
-  const startAt = getEventStartedAt(startMs, sessionStartedAt);
-  const utteranceKey = event.type === 'delta' ? undefined : getUtteranceKey(source, event.utteranceId);
-
-  return {
-    displayAt,
-    key: utteranceKey ?? getTranscriptEventItemId(event) ?? `${source ?? 'unknown'}:${startMs ?? startAt.getTime()}:${text}`,
-    order,
-    source,
-    startAt,
-    startMs,
-    text
-  };
-}
-
-function getTranscriptEventItemId(event: TranscriptionBridgeEvent) {
-  return 'itemId' in event ? event.itemId : undefined;
-}
-
-function renderTranscriptLine(line: TranscriptLine, sourceLabelsStartOrder: number | null) {
+function renderTranscriptLine(line: ProvisionalTranscriptLine, sourceLabelsStartOrder: number | null) {
   return formatTranscriptLine(
     line.text,
     line.source,
     shouldShowTranscriptSourceLabel(line, sourceLabelsStartOrder),
-    line.displayAt
+    new Date(line.displayAtMs)
   );
 }
 
@@ -1065,75 +1135,8 @@ function formatTranscriptLine(
   return `[${formatUserTime(recordedAt)}]${sourcePrefix}: ${transcript}`;
 }
 
-function shouldShowTranscriptSourceLabel(line: TranscriptLine, sourceLabelsStartOrder: number | null) {
+function shouldShowTranscriptSourceLabel(line: ProvisionalTranscriptLine, sourceLabelsStartOrder: number | null) {
   return sourceLabelsStartOrder !== null && line.order >= sourceLabelsStartOrder;
-}
-
-function chooseCompletedTranscriptText(completed: string, partial: string | undefined) {
-  const completedText = completed.trim();
-  const partialText = partial?.trim();
-
-  if (!partialText || partialText.length <= completedText.length) {
-    return completedText;
-  }
-
-  const completedWords = words(completedText.toLocaleLowerCase());
-  const partialWords = words(partialText.toLocaleLowerCase());
-
-  if (completedWords.length === 0 || partialWords.length <= completedWords.length) {
-    return completedText;
-  }
-
-  const completedAsSuffix = partialWords
-    .slice(partialWords.length - completedWords.length)
-    .every((word, index) => word === completedWords[index]);
-
-  return completedAsSuffix ? partialText : completedText;
-}
-
-function words(text: string) {
-  return text.split(/\s+/).filter(Boolean);
-}
-
-function compareTranscriptLines(left: TranscriptLine, right: TranscriptLine) {
-  const startDelta = left.startAt.getTime() - right.startAt.getTime();
-
-  if (startDelta !== 0) {
-    return startDelta;
-  }
-
-  return left.order - right.order;
-}
-
-function isStalePartialTranscriptLine(partial: TranscriptLine, finalLines: TranscriptLine[]) {
-  return finalLines.some((line) => (
-    line.source === partial.source
-    && line.startMs !== undefined
-    && partial.startMs !== undefined
-    && partial.startMs <= line.startMs
-  ));
-}
-
-function getPartialTranscriptSlotKey(line: TranscriptLine) {
-  return line.key ?? line.source ?? 'unknown';
-}
-
-function renderPartialTranscriptDebugText(
-  partials: Map<string, TranscriptLine>,
-  sourceLabelsStartOrder: number | null
-) {
-  return [...partials.values()]
-    .sort(compareTranscriptLines)
-    .map((line) => renderTranscriptLine(line, sourceLabelsStartOrder))
-    .join('\n');
-}
-
-function getEventStartedAt(startMs: number | undefined, sessionStartedAt: Date | null) {
-  if (sessionStartedAt && Number.isFinite(startMs)) {
-    return new Date(sessionStartedAt.getTime() + Number(startMs));
-  }
-
-  return new Date();
 }
 
 function formatUserDateTime(date: Date) {
@@ -1172,25 +1175,6 @@ function getTranscriptSourceLabel(
   return source === 'system' ? 'Speaker' : 'Microphone';
 }
 
-function getUtteranceKey(source: CaptureSource | undefined, utteranceId: number | undefined) {
-  if (utteranceId === undefined) {
-    return undefined;
-  }
-
-  return `${source ?? 'unknown'}:${utteranceId}`;
-}
-
-function shouldPreserveVisibleTranscript(before: string, after: string) {
-  const previous = before.trim();
-  const next = after.trim();
-
-  if (!previous || !next) {
-    return false;
-  }
-
-  return next.length < previous.length;
-}
-
 function formatStageMessage(message: string) {
   if (message === 'loading local Parakeet') {
     return 'Loading local Parakeet...';
@@ -1209,11 +1193,13 @@ function formatStageMessage(message: string) {
 
 function isSetupMessage(message: string) {
   return [
+    'Starting audio...',
     'Starting local Parakeet...',
     'Loading local Parakeet...',
     'starting microphone capture',
     'starting system audio capture',
-    'local Parakeet hot capture prepared',
+    'local Parakeet model prepared',
+    'local Parakeet hot capture armed',
     'microphone capture started',
     'Core Audio capture started',
     'local Parakeet warm daemon started',
@@ -1249,24 +1235,19 @@ function getSpeculativeDelayMs() {
 function getSpeculativeModel(): LlmModel {
   const model = import.meta.env.VITE_CAUL_SPECULATIVE_LLM_MODEL;
 
-  return isLlmModel(model) ? model : 'openai-codex/gpt-5.4-mini';
+  return isLlmModel(model) ? model : cloudLlmConfig.defaultModel;
 }
 
 function getSpeculativeReasoning(): LlmReasoning {
   const reasoning = import.meta.env.VITE_CAUL_SPECULATIVE_LLM_REASONING;
 
-  return isLlmReasoning(reasoning) ? reasoning : 'off';
+  return isLlmReasoning(reasoning) ? reasoning : cloudLlmConfig.defaultReasoning as LlmReasoning;
 }
 
 function isLlmModel(value: unknown): value is LlmModel {
-  return [
-    'openai-codex/gpt-5.2',
-    'openai-codex/gpt-5.4',
-    'openai-codex/gpt-5.4-mini',
-    'openai-codex/gpt-5.5'
-  ].includes(String(value));
+  return cloudLlmConfig.models.some((model) => model.value === String(value));
 }
 
 function isLlmReasoning(value: unknown): value is LlmReasoning {
-  return ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(String(value));
+  return cloudLlmConfig.reasoningLevels.some((reasoning) => reasoning.value === String(value));
 }

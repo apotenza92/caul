@@ -1,4 +1,5 @@
 import { access, mkdtemp, writeFile } from 'node:fs/promises';
+import { accessSync } from 'node:fs';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -100,12 +101,12 @@ await writeFile(htmlPath, `<!doctype html>
   </body>
 </html>`, 'utf8');
 
-const chromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const chromePath = resolveChromePath();
 
 try {
   await access(chromePath);
 } catch {
-  console.error('Google Chrome is required for the browser speech smoke harness.');
+  console.error('A Chromium-family browser is required for the browser speech smoke harness. Set CAUL_BROWSER_CHROME_PATH to its executable path.');
   process.exit(1);
 }
 
@@ -225,6 +226,29 @@ function requestJson(port, requestPath) {
 
     request.on('error', reject);
   });
+}
+
+function resolveChromePath() {
+  if (process.env.CAUL_BROWSER_CHROME_PATH) {
+    return process.env.CAUL_BROWSER_CHROME_PATH;
+  }
+
+  for (const candidate of [
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta',
+    '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
+    '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'
+  ]) {
+    try {
+      accessSync(candidate);
+      return candidate;
+    } catch {
+      // Try the next Chromium-family browser.
+    }
+  }
+
+  return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 }
 
 function clickPlayButton(webSocketDebuggerUrl) {

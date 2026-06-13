@@ -37,6 +37,7 @@ The Rust core should own:
 - `mic_level`
 - `system_level`
 - `audio_frame`
+- `transcription_partial`
 - `transcription_completed`
 - `daemon_state`
 - `capture_stage`
@@ -58,6 +59,7 @@ Names can change during implementation, but the contract should stay typed and n
 - Stop capture and confirm streams release cleanly.
 - Restart capture without relaunching the app.
 - Run a 30-minute capture session and check for dropped frames, memory growth and stuck streams.
+- For local Parakeet long-form diagnostics, verify that direct WAV transcription uses bounded overlapping ASR chunks and overlap-aware stitching rather than sending one unbounded model input or simply concatenating overlapping chunk text.
 
 ## Current Helper
 
@@ -85,13 +87,16 @@ Current local findings:
 - The app route uses ScreenCaptureKit because the packaged Core Audio route can receive microphone speech as `system` audio on the Scarlett route, even when Input is off.
 - When a USB audio interface such as Scarlett 2i2 is both default input and default output, verify the route with the dev diagnostic before changing product behaviour. The local Scarlett diagnostic showed mic-only speech did not appear in ScreenCaptureKit output capture, while speaker playback did.
 - The browser audio verification command is `npm run smoke:browser-system-audio`. It launches a temporary Chrome profile that plays a tone and fails unless the Caul smoke output reports `"detected":true`.
+- Browser audio smokes require a Chromium-family browser with the DevTools protocol. If Chrome is not installed at the standard path, set `CAUL_BROWSER_CHROME_PATH` to the browser executable.
 - The direct Core Audio helper browser verification command is `npm run smoke:core-audio-browser-system-audio`.
 - The direct ScreenCaptureKit helper browser verification command is `npm run smoke:sck-browser-system-audio`.
 - Local browser audio detection has been verified through `npm run smoke:sck-browser-system-audio`: Chrome tone playback produced non-zero ScreenCaptureKit system audio levels.
-- Local app transcription now uses the Rust backend: microphone capture through `cpal`, system audio PCM from the Swift helper, single-pass Rust resampling, endpointed utterances and Parakeet TDT v3 through `transcribe-rs`. The daemon warms Parakeet while idle, but does not open Core Audio capture until listening starts.
+- Local app transcription now uses the Rust backend: microphone capture through `cpal`, system audio PCM from the Swift helper, single-pass Rust resampling, endpointed utterances and Parakeet TDT v3 through `transcribe-rs`. The daemon warms Parakeet while idle, but does not open microphone or system audio capture until the user clicks Start listening. After that click, the app may explicitly arm hot capture, keep only a bounded pre-roll, and activate transcription once the real macOS stream is ready so first words are not clipped. Long calls are supported as many bounded ASR jobs rather than one long model input; direct WAV and lab transcription must chunk long files because the current Parakeet ONNX path fails near 5000 encoded frames, roughly 400 seconds of continuous audio.
+- Live partial transcription events are bounded active-utterance snapshots used only for provisional UI tails. They are enabled by default, disabled with `CAUL_LIVE_PARTIALS=0`, and use named defaults of 1500 ms for the first active-speech partial and 1500 ms of new active audio for later partials. The backend skips partial snapshot enqueue while ASR is queued or active so final chunks are not delayed. Stop flush emits final completed text only, never draft-only text.
+- The durable transcript contract remains confirmed chunks only. Copy, download, history and AI requests use confirmed text, while the renderer may show subdued draft tails that are replaced atomically by final text for the same source and utterance.
 - Stopping local listening must flush pending audio, destroy the Core Audio tap and release capture resources.
 - The direct helper route has been verified locally with `npm run smoke:local-parakeet-helper-system-audio`: Core Audio starts, local Parakeet streaming starts, and confirmed transcript events are emitted.
-- The Electron app route should be verified with `npm run smoke:local-parakeet-browser-system-audio`: Electron starts native local transcription, Chrome plays public-domain spoken media, and the renderer bridge receives confirmed local Parakeet transcript events.
+- The Electron app route should be verified with `npm run smoke:local-parakeet-browser-system-audio`: Electron starts native local transcription, Chrome plays public-domain spoken media, and the renderer bridge receives confirmed local Parakeet transcript events. For a fresh temporary smoke profile, set `CAUL_LOCAL_PARAKEET_MODEL_SOURCE` to an existing `parakeet-tdt-0.6b-v3-int8` model directory, or to a `models` directory that contains it.
 
 Scarlett route diagnostic:
 

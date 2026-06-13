@@ -1,0 +1,50 @@
+{
+  "provider": "openai-codex",
+  "defaultModel": "openai-codex/gpt-5.4-mini",
+  "defaultReasoning": "off",
+  "defaultLocalReasoning": "off",
+  "models": [
+    {
+      "label": "5.4 mini (Default)",
+      "value": "openai-codex/gpt-5.4-mini"
+    },
+    {
+      "label": "5.4",
+      "value": "openai-codex/gpt-5.4"
+    },
+    {
+      "label": "5.5",
+      "value": "openai-codex/gpt-5.5"
+    },
+    {
+      "label": "5.2",
+      "value": "openai-codex/gpt-5.2"
+    }
+  ],
+  "reasoningLevels": [
+    {
+      "label": "Off (Default)",
+      "value": "off"
+    },
+    {
+      "label": "Minimal",
+      "value": "minimal"
+    },
+    {
+      "label": "Low",
+      "value": "low"
+    },
+    {
+      "label": "Medium",
+      "value": "medium"
+    },
+    {
+      "label": "High",
+      "value": "high"
+    },
+    {
+      "label": "Extra high",
+      "value": "xhigh"
+    }
+  ]
+}

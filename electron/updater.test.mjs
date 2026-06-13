@@ -15,6 +15,7 @@ const {
 describe('updater helpers', () => {
   it('defaults invalid update frequencies to weekly', () => {
     expect(normaliseUpdateFrequency('daily')).toBe('daily');
+    expect(normaliseUpdateFrequency('monthly')).toBe('monthly');
     expect(normaliseUpdateFrequency('nonsense')).toBe('weekly');
     expect(normaliseUpdateFrequency(undefined)).toBe('weekly');
   });
@@ -40,6 +41,8 @@ describe('updater helpers', () => {
     expect(shouldCheckForUpdates('weekly', null, now)).toBe(true);
     expect(shouldCheckForUpdates('weekly', '2026-06-01T00:00:00.000Z', now)).toBe(false);
     expect(shouldCheckForUpdates('weekly', '2026-05-20T00:00:00.000Z', now)).toBe(true);
+    expect(shouldCheckForUpdates('monthly', '2026-05-20T00:00:00.000Z', now)).toBe(false);
+    expect(shouldCheckForUpdates('monthly', '2026-05-01T00:00:00.000Z', now)).toBe(true);
   });
 
   it('keeps stable users on stable releases only', () => {

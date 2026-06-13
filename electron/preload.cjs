@@ -81,7 +81,9 @@ contextBridge.exposeInMainWorld('caul', {
       openLogin: () => ipcRenderer.invoke('caul:pi-login'),
       openModel: () => ipcRenderer.invoke('caul:pi-model'),
       refreshCatalogue: () => ipcRenderer.invoke('caul:model-catalogue-refresh'),
+      refreshCatalogueStatus: () => ipcRenderer.invoke('caul:model-catalogue-refresh-status'),
       saveModel: (model) => ipcRenderer.invoke('caul:pi-save-model', { model }),
+      setRefreshCatalogueFrequency: (frequency) => ipcRenderer.invoke('caul:model-catalogue-refresh-set-frequency', { frequency }),
       setProvider: (provider) => ipcRenderer.invoke('caul:ai-provider', { provider }),
       setLocalModel: (modelId) => ipcRenderer.invoke('caul:local-llm-set-model', { modelId }),
       status: () => ipcRenderer.invoke('caul:pi-status')

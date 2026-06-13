@@ -12,7 +12,7 @@ const appDisplayName = isPrivateDevBuild ? 'Caul Dev-Private' : isDevBuild ? 'Ca
 const appId = isPrivateDevBuild ? 'dev.caul.app.dev-private' : isDevBuild ? 'dev.caul.app.dev' : isBeta ? 'dev.caul.app.beta' : 'dev.caul.app';
 const artifactPrefix = isPrivateDevBuild ? 'Caul-Dev-Private' : isDevBuild ? 'Caul-Dev' : isBeta ? 'Caul-Beta' : 'Caul';
 const devCodeSignIdentity = process.env.CAUL_DEV_CODESIGN_IDENTITY
-  ?? '0A2CD8B7803C6E7A4907B7CA517538115CA1A660';
+  ?? '8502BFEED12A89F3CEAE5F76D56D1B86D78A5F96';
 const packagePlatform = process.env.CAUL_PACKAGE_PLATFORM ?? process.platform;
 const packageArch = process.env.CAUL_PACKAGE_ARCH;
 const winArchitectures = packageArch ? [packageArch] : ['arm64'];

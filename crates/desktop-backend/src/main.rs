@@ -44,6 +44,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    if args
+        .iter()
+        .any(|arg| arg == "--fixture-long-transcription-soak")
+    {
+        local_transcription::run_long_transcription_soak_fixture()?;
+        return Ok(());
+    }
+
     if let Some(index) = args
         .iter()
         .position(|arg| arg == "--transcribe-parakeet-wav")

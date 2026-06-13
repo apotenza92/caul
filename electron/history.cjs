@@ -202,6 +202,8 @@ function createHistoryService({
       }
     }
 
+    removeEmptyFolders(fromFolder);
+
     return {
       moved,
       ...(conversion.message
@@ -246,6 +248,31 @@ function createHistoryService({
       if (filePath.startsWith(`${fromFolder}${pathModule.sep}`)) {
         sessionFiles.set(sessionId, pathModule.join(toFolder, pathModule.relative(fromFolder, filePath)));
       }
+    }
+  }
+
+  function removeEmptyFolders(folder) {
+    if (!folder || !fs.existsSync(folder)) {
+      return;
+    }
+
+    let entries;
+    try {
+      entries = fs.readdirSync(folder, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        removeEmptyFolders(pathModule.join(folder, entry.name));
+      }
+    }
+
+    try {
+      fs.rmdirSync(folder);
+    } catch {
+      // Leave folders that still contain unrelated files or cannot be removed.
     }
   }
 

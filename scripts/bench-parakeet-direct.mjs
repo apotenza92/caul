@@ -1,15 +1,19 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 const phrase = process.env.CAUL_BENCH_PHRASE
   ?? 'What is the refund policy for annual plans?';
 const minWordOverlap = Number(process.env.CAUL_BENCH_MIN_WORD_OVERLAP ?? 0.45);
-const fixtureDir = await mkdtemp(path.join(tmpdir(), 'caul-parakeet-direct-'));
+const requestedFixtureDir = process.env.CAUL_BENCH_FIXTURE_DIR;
+const fixtureDir = requestedFixtureDir
+  ? path.resolve(requestedFixtureDir)
+  : await mkdtemp(path.join(tmpdir(), 'caul-parakeet-direct-'));
 const aiffPath = path.join(fixtureDir, 'fixture.aiff');
 const wavPath = path.join(fixtureDir, 'fixture-16k-mono.wav');
 
+await mkdir(fixtureDir, { recursive: true });
 await writeFile(path.join(fixtureDir, 'fixture.txt'), phrase, 'utf8');
 await run('say', ['-o', aiffPath, phrase]);
 await run('afconvert', ['-f', 'WAVE', '-d', 'LEI16@16000', '-c', '1', aiffPath, wavPath]);

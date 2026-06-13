@@ -32,6 +32,10 @@ function createProfileService({
     return pathModule.join(folder, profilePromptsFileName);
   }
 
+  function getPromptBackupsFolder(folder = getFolder()) {
+    return pathModule.join(folder, 'Backups', 'prompts');
+  }
+
   function readSettings() {
     const folder = getFolder();
     const settingsPath = getSettingsPath(folder);
@@ -74,6 +78,19 @@ function createProfileService({
 
     writeJsonFile(promptsPath, withVersion(next));
     return next;
+  }
+
+  function archivePrompts(state, { now = new Date() } = {}) {
+    const backupsFolder = getPromptBackupsFolder();
+    const fileName = `prompts-${formatBackupTimestamp(now)}.json`;
+    const archivePath = getAvailableFilePath(backupsFolder, fileName);
+    const next = normalisePrompts(state);
+
+    writeJsonFile(archivePath, withVersion(next));
+    return {
+      folder: backupsFolder,
+      path: archivePath
+    };
   }
 
   function movePortableFiles(fromFolder, toFolder) {
@@ -136,7 +153,9 @@ function createProfileService({
   }
 
   return {
+    archivePrompts,
     getFolder,
+    getPromptBackupsFolder,
     getPromptsPath,
     getSettingsPath,
     movePortableFiles,
@@ -146,6 +165,21 @@ function createProfileService({
     updateSettings,
     writePrompts
   };
+}
+
+function formatBackupTimestamp(date) {
+  const value = date instanceof Date ? date : new Date(date);
+  const validDate = Number.isNaN(value.getTime()) ? new Date() : value;
+
+  return [
+    validDate.getFullYear(),
+    String(validDate.getMonth() + 1).padStart(2, '0'),
+    String(validDate.getDate()).padStart(2, '0'),
+    '-',
+    String(validDate.getHours()).padStart(2, '0'),
+    String(validDate.getMinutes()).padStart(2, '0'),
+    String(validDate.getSeconds()).padStart(2, '0')
+  ].join('');
 }
 
 function defaultNormaliseSettings(value) {

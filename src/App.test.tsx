@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { initialCaptureStatus, type CaptureRunState } from './foundation/capture';
-import type { AiProvider, HistorySessionUpdate, HistoryStatus, LocalLlmStatus, LocalTranscriptionModelId, OnboardingStatus, ParakeetStatus, PermissionItem, PiStatus, PortablePreferences, PrivateOverlayState, PromptTemplate, PromptTemplateAttachment, PromptTemplateState, TranscriptionBridgeEvent, UpdateFrequency, UpdateStatus } from './foundation/desktopBridge';
+import type { AiProvider, HistorySessionUpdate, HistoryStatus, LocalLlmStatus, LocalTranscriptionModelId, ModelCatalogueRefreshStatus, OnboardingStatus, ParakeetStatus, PermissionItem, PiStatus, PortablePreferences, PrivateOverlayState, PromptTemplate, PromptTemplateAttachment, PromptTemplateState, TranscriptionBridgeEvent, UpdateFrequency, UpdateStatus } from './foundation/desktopBridge';
 import type { RuntimeContext } from './foundation/runtime';
 
 function currentLongDatePattern() {
@@ -12,6 +12,10 @@ function currentLongDatePattern() {
   }).format(new Date());
 
   return new RegExp(formattedDate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+}
+
+function getTranscriptDraftTail() {
+  return screen.getByLabelText('Transcription output').querySelector('.transcript-draft-tail');
 }
 
 describe('App', () => {
@@ -92,7 +96,7 @@ describe('App', () => {
       .toHaveAttribute('data-active', 'true');
     expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: 'General' }))
       .toHaveClass('h-8', 'data-[active=true]:bg-sidebar-accent', 'data-[active=true]:text-sidebar-accent-foreground');
-    expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: 'Models' }))
+    expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: 'Transcription' }))
       .toHaveAttribute('data-active', 'false');
     expect(screen.getByRole('heading', { name: 'Settings' })).toHaveClass('text-sm', 'text-center');
 
@@ -129,7 +133,6 @@ describe('App', () => {
     render(<App />);
 
     await openSettings(user);
-    await openSettingsSection(user, 'Storage');
 
     expect(await screen.findByLabelText('Save HTML history')).toBeChecked();
     expect(screen.getByText('/Users/alex/Documents/Caul')).toBeInTheDocument();
@@ -162,6 +165,7 @@ describe('App', () => {
 
   it('renders guided onboarding setup rows', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const user = userEvent.setup();
     const bridge = installTestBridge();
 
     render(<App />);
@@ -172,11 +176,17 @@ describe('App', () => {
     expect(screen.getByText('Microphone')).toBeInTheDocument();
     expect(screen.queryByText('Optional')).not.toBeInTheDocument();
     expect(screen.queryByText('Microphone & System Audio')).not.toBeInTheDocument();
-    expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual([
-      'Local transcription',
-      'AI responses',
-      'Permissions'
-    ]);
+    expect(screen.getByRole('heading', { name: 'Permissions', level: 2 })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Local transcription' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'AI responses' })).not.toBeInTheDocument();
+    expect(screen.getByText('Step 1 of 3')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Step 1: Permissions' })).toHaveAttribute('aria-current', 'step');
+    expect(screen.getByRole('button', { name: 'Step 2: Local transcription' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Step 3: AI responses' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByRole('heading', { name: 'Local transcription', level: 2 })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByRole('heading', { name: 'AI responses', level: 2 })).toBeInTheDocument();
     expect(screen.queryByText('Permission setup')).not.toBeInTheDocument();
     expect(bridge.onboardingStatusOptions[0]).toEqual({ refreshCatalogue: false });
   });
@@ -190,7 +200,7 @@ describe('App', () => {
           description: 'Required when listening to speaker audio output.',
           id: 'screen-recording',
           label: 'Screen & System Audio Recording',
-          status: 'denied'
+          status: 'not-determined'
         },
         {
           description: 'Required when listening to audio from other apps.',
@@ -288,7 +298,7 @@ describe('App', () => {
     expect(bridge.requestedPermissions).toEqual(['system-audio']);
   });
 
-  it('offers to restart onboarding after the denied system audio permission path is retried', async () => {
+  it('keeps denied onboarding permissions as Grant actions after retry', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
     const bridge = installTestBridge({
       permissions: [
@@ -323,11 +333,13 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: 'Grant System Audio' }));
 
     expect(screen.queryByText('Changed it in System Settings? Restart Caul to apply the permission.')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Grant System Audio' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Grant System Audio' })).toHaveTextContent('Grant');
+    expect(screen.queryByRole('button', { name: 'Restart System Audio' })).not.toBeInTheDocument();
 
-    await user.click(await screen.findByRole('button', { name: 'Restart System Audio' }));
+    await user.click(await screen.findByRole('button', { name: 'Grant System Audio' }));
 
-    expect(bridge.relaunches).toBe(1);
+    expect(bridge.requestedPermissions).toEqual(['system-audio', 'system-audio']);
+    expect(bridge.relaunches).toBe(0);
   });
 
   it('requests each onboarding audio permission separately during recovery', async () => {
@@ -367,7 +379,8 @@ describe('App', () => {
 
     expect(bridge.requestedPermissions).toEqual(['system-audio']);
     expect(screen.queryByText('Changed it in System Settings? Restart Caul to apply the permission.')).not.toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: 'Restart System Audio' })).toHaveTextContent('Restart');
+    expect(await screen.findByRole('button', { name: 'Grant System Audio' })).toHaveTextContent('Grant');
+    expect(screen.queryByRole('button', { name: 'Restart System Audio' })).not.toBeInTheDocument();
   });
 
   it('hides the permissions step during onboarding when no platform permissions are relevant', async () => {
@@ -397,9 +410,13 @@ describe('App', () => {
 
     render(<App />);
 
-    await screen.findByText('AI responses');
+    await screen.findByText('Local transcription');
 
-    expect(screen.queryByText('Permissions')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Permissions' })).not.toBeInTheDocument();
+    expect(screen.getByText('Step 1 of 2')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Step 1: Local transcription' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Step 2: AI responses' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Step 3: AI responses' })).not.toBeInTheDocument();
     expect(screen.queryByText('Screen & System Audio Recording')).not.toBeInTheDocument();
     expect(screen.queryByText('System Audio')).not.toBeInTheDocument();
     expect(screen.queryByText('Microphone')).not.toBeInTheDocument();
@@ -422,8 +439,9 @@ describe('App', () => {
     expect(screen.getByAltText('Caul Dev')).toBeInTheDocument();
   });
 
-  it('starts downloading the recommended Parakeet model when onboarding opens', async () => {
+  it('lets the user explicitly download the recommended Parakeet model during onboarding', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const user = userEvent.setup();
     const bridge = installTestBridge({
       parakeetStatus: testParakeetStatus({
         installed: false,
@@ -433,15 +451,19 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findByText('Preparing local transcription')).toBeInTheDocument();
-    expect(screen.queryByLabelText('Transcription model')).not.toBeInTheDocument();
+    await openOnboardingStep(user, 'Local transcription');
+    expect(await screen.findByLabelText('Transcription model')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Best accuracy Recommended', selected: true })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Use' })).not.toBeInTheDocument();
+    expect(bridge.parakeetDownloads).toBe(0);
 
+    await user.click(screen.getByRole('button', { name: 'Download' }));
     await waitFor(() => expect(bridge.parakeetDownloads).toBe(1));
   });
 
-  it('starts downloading the recommended Moonshine model when onboarding opens', async () => {
+  it('lets the user explicitly download the recommended Moonshine model during onboarding', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const user = userEvent.setup();
     const moonshineStatus = testParakeetStatus({
       installed: false,
       modelId: 'moonshine-tiny',
@@ -465,21 +487,28 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findByText('Preparing local transcription')).toBeInTheDocument();
-    expect(screen.queryByLabelText('Transcription model')).not.toBeInTheDocument();
+    await openOnboardingStep(user, 'Local transcription');
+    expect(await screen.findByLabelText('Transcription model')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Lower memory use Recommended', selected: true })).toBeInTheDocument();
     expect(screen.queryByText('Moonshine tiny')).not.toBeInTheDocument();
+    expect(bridge.parakeetDownloads).toBe(0);
+
+    await user.click(screen.getByRole('button', { name: 'Download' }));
     await waitFor(() => expect(bridge.parakeetDownloads).toBe(1));
     expect(bridge.selectedLocalTranscriptionModels).toEqual(['moonshine-tiny']);
   });
 
-  it('does not expose manual transcription controls in onboarding', async () => {
+  it('shows transcription model selection in onboarding', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const user = userEvent.setup();
     installTestBridge();
 
     render(<App />);
 
-    expect(await screen.findByText('Ready')).toBeInTheDocument();
-    expect(screen.queryByLabelText('Transcription model')).not.toBeInTheDocument();
+    await openOnboardingStep(user, 'Local transcription');
+    expect((await screen.findAllByText('Ready')).length).toBeGreaterThan(0);
+    expect(screen.getByLabelText('Transcription model')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Best accuracy Recommended' })).toBeInTheDocument();
     expect(screen.queryByText('Parakeet v3')).not.toBeInTheDocument();
     expect(screen.queryByText('Moonshine tiny')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Use' })).not.toBeInTheDocument();
@@ -488,6 +517,7 @@ describe('App', () => {
 
   it('does not download a local model automatically when cloud transcription is recommended', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const user = userEvent.setup();
     const bridge = installTestBridge({
       onboardingStatus: testOnboardingStatus({
         parakeet: testParakeetStatus({
@@ -508,14 +538,15 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findByText('Transcription setup needs attention')).toBeInTheDocument();
-    expect(screen.queryByLabelText('Transcription model')).not.toBeInTheDocument();
+    await openOnboardingStep(user, 'Local transcription');
+    expect(await screen.findByLabelText('Transcription model')).toBeInTheDocument();
 
     expect(bridge.parakeetDownloads).toBe(0);
   });
 
   it('shows local model download progress in onboarding', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const user = userEvent.setup();
     installTestBridge({
       parakeetStatus: testParakeetStatus({
         installed: false,
@@ -530,15 +561,16 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findByText('Downloading local transcription')).toBeInTheDocument();
+    await openOnboardingStep(user, 'Local transcription');
+    expect(await screen.findByLabelText('Transcription model')).toBeInTheDocument();
     expect(screen.getByText('42% · 42 B/100 B')).toBeInTheDocument();
     expect(screen.getByLabelText('Downloading 42% · 42 B of 100 B')).toBeInTheDocument();
     expect(screen.queryByText('Downloading Parakeet v3')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Transcription model')).not.toBeInTheDocument();
   });
 
   it('shows Moonshine as a ready local recommendation instead of a failed state', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const user = userEvent.setup();
     installTestBridge({
       onboardingStatus: testOnboardingStatus({
         parakeet: testParakeetStatus({
@@ -563,15 +595,16 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findByText('Ready')).toBeInTheDocument();
+    await openOnboardingStep(user, 'Local transcription');
+    await waitFor(() => expect(screen.getAllByText('Ready').length).toBeGreaterThan(0));
     expect(screen.queryByRole('button', { name: 'Use' })).not.toBeInTheDocument();
     expect(screen.queryByText('Moonshine tiny')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Transcription model')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Transcription model')).toBeInTheDocument();
   });
 
   it('keeps manual transcription model switching in settings', async () => {
     const user = userEvent.setup();
-    installTestBridge({
+    const bridge = installTestBridge({
       parakeetStatus: testParakeetStatus({
         modelId: 'parakeet',
         modelName: 'Parakeet v3'
@@ -581,20 +614,39 @@ describe('App', () => {
     render(<App />);
 
     await openSettings(user);
-    await openSettingsSection(user, 'Models');
+    await openSettingsSection(user, 'Transcription');
 
-    expect(await screen.findByLabelText('Transcription model')).toHaveValue('parakeet');
-    expect(screen.getAllByText('Recommended').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('Ready')).toBeInTheDocument();
+    const localTranscriptionGroup = await screen.findByRole('group', { name: 'Local transcription' });
+    const transcriptionModelControl = await within(localTranscriptionGroup).findByRole('tablist', { name: 'Transcription model' });
+
+    expect(transcriptionModelControl).toHaveTextContent('Best accuracy');
+    expect(within(localTranscriptionGroup).getByRole('tab', { name: 'Best accuracy Recommended', selected: true })).toBeInTheDocument();
+    expect(within(localTranscriptionGroup).getByRole('button', { name: 'Why this is recommended' })).toBeInTheDocument();
+    await user.hover(within(localTranscriptionGroup).getByRole('button', { name: 'Why this is recommended' }));
+    expect((await screen.findAllByText('Recommended for this computer based on accuracy, memory use and supported local audio models.')).length).toBeGreaterThan(0);
+    expect(within(localTranscriptionGroup).getByText('Uses more memory and processing power.')).toBeInTheDocument();
+    expect(screen.queryByText('Parakeet v3 is best when accuracy matters most. It can be harder on your computer because it uses more memory and processing power.')).not.toBeInTheDocument();
+    expect(within(localTranscriptionGroup).getByText('Ready')).toBeInTheDocument();
+    await user.hover(within(localTranscriptionGroup).getByRole('button', { name: 'Parakeet v3 details' }));
+    expect((await screen.findAllByText('Parakeet v3 is best when accuracy matters most. It can be harder on your computer because it uses more memory and processing power.')).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Use' })).not.toBeInTheDocument();
+    expect(within(localTranscriptionGroup).queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
 
-    await selectSetting(user, 'Transcription model', 'Lower memory use');
+    await user.click(within(localTranscriptionGroup).getByRole('tab', { name: 'Lower memory use' }));
 
-    expect(screen.queryByText('Ready')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Use' })).toBeEnabled();
+    expect(await within(localTranscriptionGroup).findByRole('tab', { name: 'Lower memory use', selected: true })).toBeInTheDocument();
+    expect(within(localTranscriptionGroup).getByText('Lighter load. May be less accurate.')).toBeInTheDocument();
+    expect(screen.queryByText('Moonshine tiny is best when you want lower memory use or a lighter load on your computer. It may be less accurate than Parakeet v3.')).not.toBeInTheDocument();
+    expect(within(localTranscriptionGroup).queryByText('Ready')).not.toBeInTheDocument();
+    expect(within(localTranscriptionGroup).getByText('Not downloaded yet')).toBeInTheDocument();
+    expect(within(localTranscriptionGroup).getByRole('button', { name: 'Download' })).toBeEnabled();
+    await user.hover(within(localTranscriptionGroup).getByRole('button', { name: 'Moonshine tiny details' }));
+    expect((await screen.findAllByText('Moonshine tiny is best when you want lower memory use or a lighter load on your computer. It may be less accurate than Parakeet v3.')).length).toBeGreaterThan(0);
+    await user.click(within(localTranscriptionGroup).getByRole('button', { name: 'Moonshine tiny details' }));
+    expect(bridge.parakeetDownloads).toBe(0);
   });
 
-  it('organises settings into clearer General, Storage, Updates and Models sections', async () => {
+  it('organises settings into clearer General, Transcription and AI responses sections', async () => {
     const user = userEvent.setup();
 
     installTestBridge();
@@ -603,26 +655,56 @@ describe('App', () => {
     await openSettings(user);
 
     expect(screen.getByRole('group', { name: 'Floating button' })).toBeInTheDocument();
-    expect(screen.getByRole('group', { name: 'Auto-collapse' })).toBeInTheDocument();
-    expect(screen.getByRole('checkbox', { name: 'Auto-collapse' })).toBeInTheDocument();
-    expect(screen.queryByRole('group', { name: 'Caul folder' })).not.toBeInTheDocument();
-
-    await openSettingsSection(user, 'Storage');
     expect(screen.getByRole('group', { name: 'History and storage' })).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: 'Auto-collapse transcripts' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: 'Auto-collapse AI responses' })).not.toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: 'Save HTML history' })).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Caul folder' })).not.toBeInTheDocument();
+    expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).queryByRole('button', { name: 'Storage' })).not.toBeInTheDocument();
+    expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).queryByRole('button', { name: 'Updates' })).not.toBeInTheDocument();
+    expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).queryByRole('button', { name: 'Permissions' })).not.toBeInTheDocument();
 
-    await openSettingsSection(user, 'Updates');
-    expect(screen.getByRole('group', { name: 'Updates' })).toBeInTheDocument();
+    await openSettingsSection(user, 'Transcription');
+    expect(screen.queryByText('Automatically collapse previous transcriptions.')).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Auto update local transcription model' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Auto-collapse' })).toBeInTheDocument();
+    await user.hover(screen.getByRole('button', { name: 'Auto update local transcription model info' }));
+    expect((await screen.findAllByText('Caul can suggest and select a better supported local transcription model on your update schedule.')).length).toBeGreaterThan(0);
+    await user.hover(screen.getByRole('button', { name: 'Auto-collapse info' }));
+    expect((await screen.findAllByText('Automatically collapse previous transcriptions when a new transcript starts.')).length).toBeGreaterThan(0);
+
+    await openSettingsSection(user, 'AI responses');
+    expect(screen.queryByText('Automatically collapse previous AI responses.')).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Auto update local AI model' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Auto-collapse' })).toBeInTheDocument();
+    await user.hover(screen.getByRole('button', { name: 'Auto update local AI model info' }));
+    expect((await screen.findAllByText('Caul can suggest and download a better supported local AI model on your update schedule.')).length).toBeGreaterThan(0);
+    await user.hover(screen.getByRole('button', { name: 'Auto-collapse info' }));
+    expect((await screen.findAllByText('Automatically collapse previous AI responses when a new response starts.')).length).toBeGreaterThan(0);
+
+    await openSettingsSection(user, 'General');
+    expect(screen.getByRole('group', { name: 'Caul updates' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Local AI Catalogue' })).toBeInTheDocument();
     expect(screen.getByLabelText('Automatic checks')).toHaveTextContent('Weekly');
+    expect(screen.getByLabelText('Automatic refresh')).toHaveTextContent('Monthly');
 
-    await openSettingsSection(user, 'Models');
+    await openSettingsSection(user, 'Transcription');
     expect(screen.getByRole('group', { name: 'Local transcription' })).not.toHaveClass('border-t');
+
+    await openSettingsSection(user, 'AI responses');
     expect(screen.getByRole('group', { name: 'AI responses' })).toBeInTheDocument();
-    expect(screen.getByRole('group', { name: 'AI recommendations' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Local Recommended', selected: true })).toBeInTheDocument();
-    await user.hover(screen.getByRole('button', { name: 'Why this is recommended' }));
+    await user.hover(within(screen.getByRole('group', { name: 'AI responses' })).getByRole('button', { name: 'Why this is recommended' }));
     expect((await screen.findAllByText('Based on this computer’s power, Caul recommends Local because you should still get acceptable private AI results on this machine.')).length).toBeGreaterThan(0);
+    expect(within(screen.getByRole('group', { name: 'AI responses' })).getByText('Ready')).toBeInTheDocument();
+    await user.hover(within(screen.getByRole('group', { name: 'AI responses' })).getByRole('button', { name: 'Local AI recommendation details' }));
+    expect((await screen.findAllByText('Qwen 2.5 3B Instruct Q4')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('About 2.2 GB')).length).toBeGreaterThan(0);
+    expect(within(screen.getByRole('group', { name: 'AI responses' })).queryByRole('button', { name: 'Download local AI' })).not.toBeInTheDocument();
     expect(screen.queryByRole('group', { name: 'Model list' })).not.toBeInTheDocument();
+
+    await openSettingsSection(user, 'General');
+    expect(screen.getByRole('group', { name: 'Permissions' })).toBeInTheDocument();
   });
 
   it('starts ChatGPT sign in from onboarding', async () => {
@@ -632,6 +714,7 @@ describe('App', () => {
 
     render(<App />);
 
+    await openOnboardingStep(user, 'AI responses');
     await user.click(await screen.findByRole('tab', { name: 'Cloud' }));
     await user.click(await screen.findByRole('button', { name: 'Sign in with ChatGPT' }));
 
@@ -659,9 +742,10 @@ describe('App', () => {
 
     render(<App />);
 
+    await openOnboardingStep(user, 'AI responses');
     expect(await screen.findByRole('tab', { name: 'Local', selected: true })).toBeInTheDocument();
-    expect(screen.getByText('Recommended')).toBeInTheDocument();
-    await user.hover(screen.getByRole('button', { name: 'Why this is recommended' }));
+    expect(within(screen.getByRole('region', { name: 'AI responses' })).getByRole('button', { name: 'Why this is recommended' })).toBeInTheDocument();
+    await user.hover(within(screen.getByRole('region', { name: 'AI responses' })).getByRole('button', { name: 'Why this is recommended' }));
     expect((await screen.findAllByText('Based on this computer’s power, Caul recommends Local because you should still get acceptable private AI results on this machine.')).length).toBeGreaterThan(0);
     expect(screen.getByText('Data stays local and private. Slower and less intelligent than Cloud.')).toBeInTheDocument();
     expect(screen.getByText('Not downloaded yet')).toBeInTheDocument();
@@ -671,8 +755,8 @@ describe('App', () => {
     expect(within(localSetup).getByText('Not downloaded yet')).toBeInTheDocument();
     expect(screen.queryByText('Qwen 2.5 3B Instruct Q4')).not.toBeInTheDocument();
     await user.hover(screen.getByRole('button', { name: 'Local AI recommendation details' }));
-    expect(screen.getAllByText('Qwen 2.5 3B Instruct Q4').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('About 2.2 GB').length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Qwen 2.5 3B Instruct Q4')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('About 2.2 GB')).length).toBeGreaterThan(0);
     expect(screen.queryByText('Local AI details')).not.toBeInTheDocument();
     expect(screen.queryByText('Recommended for this computer based on power, memory and local AI support.')).not.toBeInTheDocument();
     expect(screen.queryByText('Runtime')).not.toBeInTheDocument();
@@ -716,6 +800,7 @@ describe('App', () => {
 
     render(<App />);
 
+    await openOnboardingStep(user, 'AI responses');
     await user.hover(await screen.findByRole('button', { name: 'Local AI recommendation details' }));
 
     expect((await screen.findAllByText('Gemma 4 12B IT Q4_0')).length).toBeGreaterThan(0);
@@ -723,17 +808,19 @@ describe('App', () => {
     expect(screen.queryByText('About 1.1 GB')).not.toBeInTheDocument();
   });
 
-  it('shows transcription setup before AI model setup in onboarding', async () => {
+  it('shows onboarding setup as permissions, transcription, then AI', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
     installTestBridge();
 
     render(<App />);
 
-    const transcriptionHeading = await screen.findByRole('heading', { name: 'Local transcription' });
-    const aiHeading = await screen.findByRole('heading', { name: 'AI responses' });
-
-    expect(screen.getByText('Local and private. Audio is transcribed on this computer. Nothing is sent to the internet.')).toBeInTheDocument();
-    expect(transcriptionHeading.compareDocumentPosition(aiHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Permissions' })).toBeInTheDocument();
+    await openOnboardingStep(userEvent.setup(), 'Local transcription');
+    expect(await screen.findByRole('heading', { name: 'Local transcription' })).toBeInTheDocument();
+    expect(screen.getByText('Local and private. Audio is transcribed on this computer.')).toBeInTheDocument();
+    expect(screen.queryByText('Nothing is sent to the internet.')).not.toBeInTheDocument();
+    await openOnboardingStep(userEvent.setup(), 'AI responses');
+    expect(await screen.findByRole('heading', { name: 'AI responses' })).toBeInTheDocument();
   });
 
   it('defaults onboarding AI setup to cloud when cloud is recommended', async () => {
@@ -752,6 +839,7 @@ describe('App', () => {
 
     render(<App />);
 
+    await openOnboardingStep(user, 'AI responses');
     expect(await screen.findByRole('tab', { name: 'Cloud', selected: true })).toBeInTheDocument();
     expect(screen.getByText('Sends to a cloud model like ChatGPT. Faster and smarter than Local.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign in with ChatGPT' })).toBeEnabled();
@@ -764,10 +852,10 @@ describe('App', () => {
 
     await user.click(screen.getByRole('tab', { name: 'Local' }));
     expect(await screen.findByRole('tab', { name: 'Local', selected: true })).toBeInTheDocument();
-    await user.click(screen.getByText('Recommended'));
+    await user.click(screen.getByRole('tab', { name: 'Cloud' }));
     expect(await screen.findByRole('tab', { name: 'Cloud', selected: true })).toBeInTheDocument();
 
-    await user.hover(screen.getByRole('button', { name: 'Why this is recommended' }));
+    await user.hover(within(screen.getByRole('region', { name: 'AI responses' })).getByRole('button', { name: 'Why this is recommended' }));
     expect((await screen.findAllByText('Based on this computer’s power, Caul recommends Cloud because local AI probably will not give acceptable results on this machine.')).length).toBeGreaterThan(0);
   });
 
@@ -787,6 +875,7 @@ describe('App', () => {
 
     render(<App />);
 
+    await openOnboardingStep(userEvent.setup(), 'AI responses');
     expect(await screen.findByRole('tab', { name: 'Cloud', selected: true })).toBeInTheDocument();
     expect(screen.getByText('Sends to a cloud model like ChatGPT. Faster and smarter than Local.')).toBeInTheDocument();
     await waitFor(() => expect(bridge.selectedAiProviders).toEqual(['cloud']));
@@ -794,12 +883,14 @@ describe('App', () => {
 
   it('keeps model auto-update details out of onboarding', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const user = userEvent.setup();
     installTestBridge();
 
     render(<App />);
 
+    await openOnboardingStep(user, 'AI responses');
     await screen.findByRole('tab', { name: 'Local', selected: true });
-    expect(screen.queryByRole('checkbox', { name: 'Auto update model' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: /Auto update local/ })).not.toBeInTheDocument();
     expect(screen.queryByText(/checks trusted online model sources during setup/)).not.toBeInTheDocument();
     expect(screen.queryByText(/uses the bundled model list offline/)).not.toBeInTheDocument();
   });
@@ -816,15 +907,16 @@ describe('App', () => {
     render(<App />);
 
     await openSettings(user);
-    await openSettingsSection(user, 'Models');
+    await openSettingsSection(user, 'Transcription');
 
-    const autoUpdateControls = await screen.findAllByRole('checkbox', { name: 'Auto update model' });
-    expect(autoUpdateControls).toHaveLength(2);
-    expect(autoUpdateControls[0]).not.toBeChecked();
-    expect(autoUpdateControls[1]).not.toBeChecked();
+    const transcriptionAutoUpdateControl = await screen.findByRole('checkbox', { name: 'Auto update local transcription model' });
+    expect(transcriptionAutoUpdateControl).not.toBeChecked();
+    await user.click(transcriptionAutoUpdateControl);
 
-    await user.click(autoUpdateControls[0]);
-    await user.click(autoUpdateControls[1]);
+    await openSettingsSection(user, 'AI responses');
+    const aiAutoUpdateControl = await screen.findByRole('checkbox', { name: 'Auto update local AI model' });
+    expect(aiAutoUpdateControl).not.toBeChecked();
+    await user.click(aiAutoUpdateControl);
 
     await waitFor(() => expect(bridge.portablePreferenceSaves).toEqual([
       { autoUpdateTranscriptionModel: true },
@@ -839,14 +931,17 @@ describe('App', () => {
     render(<App />);
 
     await openSettings(user);
-    await openSettingsSection(user, 'Models');
+    await openSettingsSection(user, 'General');
 
-    expect(screen.getByText('Check for newer AI recommendations.')).toBeInTheDocument();
+    expect(screen.getByText('Refresh available local transcription and local AI model recommendations.')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Refresh AI recommendations' }));
+    await user.click(screen.getByRole('button', { name: 'Refresh catalogue' }));
 
     await waitFor(() => expect(bridge.modelCatalogueRefreshes).toBe(1));
-    expect(await screen.findByText(/AI recommendations refreshed/)).toHaveTextContent('2 sources checked');
+    expect(await screen.findByText(/Local AI Catalogue refreshed/)).toHaveTextContent('2 sources checked');
+
+    await selectSetting(user, 'Automatic refresh', 'Daily');
+    expect(bridge.modelCatalogueRefreshFrequencyChanges).toEqual(['daily']);
   });
 
   it('keeps cloud model controls hidden until ChatGPT is signed in', async () => {
@@ -862,7 +957,7 @@ describe('App', () => {
     render(<App />);
 
     await openSettings(user);
-    await openSettingsSection(user, 'Models');
+    await openSettingsSection(user, 'AI responses');
     await user.click(screen.getByRole('tab', { name: 'Cloud' }));
 
     expect(screen.getByText('Sends to a cloud model like ChatGPT. Faster and smarter than Local.')).toBeInTheDocument();
@@ -872,19 +967,102 @@ describe('App', () => {
     expect(screen.queryByLabelText('Reasoning')).not.toBeInTheDocument();
   });
 
-  it('does not require ChatGPT sign in before onboarding can finish', async () => {
+  it('shows Cloud AI as ready in Settings after ChatGPT sign in', async () => {
+    const user = userEvent.setup();
+    installTestBridge({
+      piStatus: testPiStatus({
+        connected: true,
+        selectedModel: 'openai-codex/gpt-5.4-mini',
+        status: 'ready'
+      })
+    });
+
+    render(<App />);
+
+    await openSettings(user);
+    await openSettingsSection(user, 'AI responses');
+    await user.click(screen.getByRole('tab', { name: 'Cloud' }));
+
+    const aiResponsesGroup = screen.getByRole('group', { name: 'AI responses' });
+    expect(within(aiResponsesGroup).getByText('Ready')).toBeInTheDocument();
+    expect(within(aiResponsesGroup).getByRole('button', { name: 'Cloud AI model details' })).toBeInTheDocument();
+    await user.hover(within(aiResponsesGroup).getByRole('button', { name: 'Cloud AI model details' }));
+    expect((await screen.findAllByText('5.4 mini (Default)')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Off (Default)')).length).toBeGreaterThan(0);
+    expect(within(aiResponsesGroup).queryByRole('button', { name: 'Sign in with ChatGPT' })).not.toBeInTheDocument();
+    expect(within(aiResponsesGroup).getByLabelText('Model')).toBeInTheDocument();
+    expect(within(aiResponsesGroup).getByLabelText('Reasoning')).toBeInTheDocument();
+  });
+
+  it('uses backend AI readiness when switching providers in Settings', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge({
+      localLlmStatus: testReadyLocalLlmStatus(),
+      onSetAiProvider: (provider) => provider === 'local' ? testLocalLlmStatus() : undefined,
+      piStatus: testPiStatus({
+        connected: true,
+        selectedModel: 'openai-codex/gpt-5.4-mini',
+        status: 'ready'
+      }),
+      portablePreferences: {
+        selectedAiProvider: 'cloud'
+      }
+    });
+
+    render(<App />);
+
+    await openSettings(user);
+    await openSettingsSection(user, 'AI responses');
+    await user.click(screen.getByRole('tab', { name: 'Local Recommended' }));
+
+    await waitFor(() => expect(bridge.selectedAiProviders).toEqual(['local']));
+    const aiResponsesGroup = screen.getByRole('group', { name: 'AI responses' });
+    expect(within(aiResponsesGroup).getByRole('button', { name: 'Download local AI' })).toBeInTheDocument();
+    expect(within(aiResponsesGroup).getByText('Not downloaded yet')).toBeInTheDocument();
+    expect(within(aiResponsesGroup).queryByText('Ready')).not.toBeInTheDocument();
+  });
+
+  it('requires ChatGPT sign in when Cloud is selected before onboarding can finish', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
     const user = userEvent.setup();
     const bridge = installTestBridge();
 
     render(<App />);
 
+    await openOnboardingStep(user, 'AI responses');
     await user.click(await screen.findByRole('tab', { name: 'Cloud' }));
 
     expect(bridge.selectedAiProviders).toEqual(['cloud']);
     expect(screen.getByText('Sends to a cloud model like ChatGPT. Faster and smarter than Local.')).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'Sign in with ChatGPT' })).toBeEnabled();
     expect(screen.getByText('Not signed in')).toBeInTheDocument();
+    const startButton = screen.getByRole('button', { name: 'Start using Caul' });
+    expect(startButton).toBeDisabled();
+
+    await user.hover(startButton.parentElement!);
+
+    expect(await screen.findByText('Still needed')).toBeInTheDocument();
+    expect(screen.getByText('ChatGPT sign in')).toBeInTheDocument();
+  });
+
+  it('enables onboarding start when Cloud is selected and signed in', async () => {
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const user = userEvent.setup();
+    const bridge = installTestBridge({
+      piStatus: testPiStatus({
+        connected: true,
+        selectedModel: 'openai-codex/gpt-5.4-mini',
+        status: 'ready'
+      })
+    });
+
+    render(<App />);
+
+    await openOnboardingStep(user, 'AI responses');
+    await user.click(await screen.findByRole('tab', { name: 'Cloud' }));
+
+    expect(bridge.selectedAiProviders).toEqual(['cloud']);
+    expect(within(await screen.findByRole('group', { name: 'Cloud AI setup' })).getByText('Ready')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Start using Caul' })).toBeEnabled();
   });
 
@@ -893,6 +1071,7 @@ describe('App', () => {
     const user = userEvent.setup();
     let resolveDownload!: (status: LocalLlmStatus) => void;
     const bridge = installTestBridge({
+      localLlmStatus: testLocalLlmStatus(),
       downloadLocalAi: () => new Promise((resolve) => {
         resolveDownload = resolve;
       })
@@ -900,8 +1079,10 @@ describe('App', () => {
 
     render(<App />);
 
+    await openOnboardingStep(user, 'AI responses');
     const downloadButton = await screen.findByRole('button', { name: 'Download local AI' });
     await waitFor(() => expect(downloadButton).toBeEnabled());
+    expect(downloadButton).toHaveAttribute('data-size', 'default');
     await user.click(downloadButton);
 
     expect(bridge.localLlmDownloads).toBe(1);
@@ -916,8 +1097,12 @@ describe('App', () => {
       resolveDownload(testReadyLocalLlmStatus());
     });
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Download local AI' })).toBeDisabled());
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Download local AI' })).not.toBeInTheDocument());
     expect(screen.getAllByText('Ready').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Qwen 2.5 3B Instruct Q4')).not.toBeInTheDocument();
+    await user.hover(screen.getByRole('button', { name: 'Local AI recommendation details' }));
+    expect((await screen.findAllByText('Qwen 2.5 3B Instruct Q4')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('About 2.2 GB')).length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: 'Start using Caul' })).toBeEnabled();
   });
 
@@ -949,6 +1134,7 @@ describe('App', () => {
 
     render(<App />);
 
+    await openOnboardingStep(userEvent.setup(), 'AI responses');
     expect(await screen.findByRole('button', { name: 'Cancel' })).toBeInTheDocument();
     expect(screen.getByText('Downloading local AI model · 50% · 1.1 GB of 2.2 GB')).toBeInTheDocument();
 
@@ -979,6 +1165,7 @@ describe('App', () => {
 
     render(<App />);
 
+    await openOnboardingStep(user, 'AI responses');
     await user.click(await screen.findByRole('tab', { name: 'Cloud' }));
     await user.click(await screen.findByRole('button', { name: 'Sign in with ChatGPT' }));
 
@@ -995,39 +1182,47 @@ describe('App', () => {
   it('keeps onboarding start disabled and explains missing setup', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
     const user = userEvent.setup();
+    const permissions: PermissionItem[] = [
+      {
+        description: 'Required when listening to speaker audio output.',
+        id: 'screen-recording',
+        label: 'Screen & System Audio Recording',
+        status: 'denied'
+      },
+      {
+        description: 'Required when listening to your microphone.',
+        id: 'microphone',
+        label: 'Microphone',
+        status: 'granted'
+      }
+    ];
     installTestBridge({
       onboardingStatus: testOnboardingStatus({
         parakeet: testParakeetStatus({
           installed: false,
           status: 'missing'
         }),
+        permissions: {
+          ok: true,
+          permissions,
+          platform: 'darwin'
+        },
         transcription: testTranscriptionRecommendation({
           autoDownloadModel: false,
           autoDownloadParakeet: false
         })
       }),
+      localLlmStatus: testReadyLocalLlmStatus(),
       parakeetStatus: testParakeetStatus({
         installed: false,
         status: 'missing'
       }),
-      permissions: [
-        {
-          description: 'Required when listening to speaker audio output.',
-          id: 'screen-recording',
-          label: 'Screen & System Audio Recording',
-          status: 'denied'
-        },
-        {
-          description: 'Required when listening to your microphone.',
-          id: 'microphone',
-          label: 'Microphone',
-          status: 'granted'
-        }
-      ]
+      permissions
     });
 
     render(<App />);
 
+    await openOnboardingStep(user, 'AI responses');
     const startButton = await screen.findByRole('button', { name: 'Start using Caul' });
     expect(startButton).toBeDisabled();
 
@@ -1060,6 +1255,7 @@ describe('App', () => {
 
     render(<App />);
 
+    await openOnboardingStep(user, 'AI responses');
     const startButton = await screen.findByRole('button', { name: 'Start using Caul' });
     await waitFor(() => expect(startButton).toBeEnabled());
 
@@ -1112,6 +1308,7 @@ describe('App', () => {
 
     render(<App />);
 
+    await openOnboardingStep(user, 'AI responses');
     const startButton = await screen.findByRole('button', { name: 'Start using Caul' });
     expect(startButton).toBeDisabled();
 
@@ -1145,6 +1342,7 @@ describe('App', () => {
 
     render(<App />);
 
+    await openOnboardingStep(user, 'AI responses');
     const startButton = await screen.findByRole('button', { name: 'Start using Caul' });
     await waitFor(() => expect(startButton).toBeEnabled());
 
@@ -1159,8 +1357,9 @@ describe('App', () => {
     });
   });
 
-  it('uses a ready Parakeet model automatically during onboarding', async () => {
+  it('lets the user explicitly choose a ready Parakeet model during onboarding', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const user = userEvent.setup();
     const readyLocalAi = testReadyLocalLlmStatus();
     const bridge = installTestBridge({
       onboardingStatus: testOnboardingStatus({
@@ -1180,11 +1379,17 @@ describe('App', () => {
 
     render(<App />);
 
+    await openOnboardingStep(user, 'AI responses');
     const startButton = await screen.findByRole('button', { name: 'Start using Caul' });
-    await waitFor(() => expect(startButton).toBeEnabled());
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Download local AI' })).toBeDisabled());
-    expect(screen.getAllByText('Ready').length).toBeGreaterThan(0);
+    expect(startButton).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Use' })).not.toBeInTheDocument();
+    await openOnboardingStep(user, 'Local transcription');
+    await user.click(screen.getByRole('tab', { name: 'Best accuracy Recommended' }));
+    await openOnboardingStep(user, 'AI responses');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start using Caul' })).toBeEnabled());
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Download local AI' })).not.toBeInTheDocument());
+    expect(screen.getAllByText('Ready').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
     await waitFor(() => expect(bridge.selectedLocalTranscriptionModels).toEqual(['parakeet']));
   });
 
@@ -1201,6 +1406,7 @@ describe('App', () => {
 
     render(<App />);
 
+    await openOnboardingStep(user, 'AI responses');
     await user.click(await screen.findByRole('tab', { name: 'Cloud' }));
     await screen.findByText('Sends to a cloud model like ChatGPT. Faster and smarter than Local.');
 
@@ -1295,6 +1501,24 @@ describe('App', () => {
       expect(screen.getByRole('button', { name: 'Toggle Caul app' })).toHaveAttribute('data-open', 'true');
     });
     expect(screen.getByRole('button', { name: 'Toggle Caul app' })).toHaveAttribute('data-open', 'true');
+  });
+
+  it('marks the private overlay handle as pressing while clicked', () => {
+    installTestBridge();
+    window.history.pushState({}, '', '/?caul-surface=handle');
+
+    render(<App />);
+
+    const handle = screen.getByRole('button', { name: 'Toggle Caul app' });
+
+    fireEvent.pointerDown(handle, {
+      button: 0,
+      pointerId: 1,
+      screenX: 100,
+      screenY: 100
+    });
+
+    expect(handle).toHaveAttribute('data-motion', 'pressing');
   });
 
   it('drags the circular private overlay handle without toggling the app overlay', () => {
@@ -1483,6 +1707,33 @@ describe('App', () => {
     expect(bridge.quits).toBe(0);
 
     await user.click(screen.getByRole('button', { name: 'Quit Caul' }));
+    await user.click(screen.getAllByRole('button', { name: 'Quit Caul' }).at(-1)!);
+
+    expect(bridge.quits).toBe(1);
+  });
+
+  it('requires confirmation before quitting from Settings Advanced', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge();
+
+    render(<App />);
+
+    await openSettings(user);
+
+    const advancedSettings = screen.getByRole('group', { name: 'Advanced' });
+    await user.click(within(advancedSettings).getByRole('button', { name: 'Quit Caul' }));
+
+    expect(await screen.findByRole('heading', { name: 'Quit Caul?' })).toBeInTheDocument();
+    expect(bridge.quits).toBe(0);
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: 'Quit Caul?' })).not.toBeInTheDocument();
+    });
+    expect(bridge.quits).toBe(0);
+
+    await user.click(within(advancedSettings).getByRole('button', { name: 'Quit Caul' }));
     await user.click(screen.getAllByRole('button', { name: 'Quit Caul' }).at(-1)!);
 
     expect(bridge.quits).toBe(1);
@@ -1688,13 +1939,15 @@ describe('App', () => {
     render(<App />);
 
     await openSettings(user);
-    await openSettingsSection(user, 'Permissions');
+    await openSettingsSection(user, 'General');
 
-    expect(screen.getByRole('group', { name: 'Permissions' })).toBeInTheDocument();
-    expect(screen.getByText('Screen & System Audio Recording')).toBeInTheDocument();
-    expect(screen.getByText('Microphone')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Grant Screen & System Audio Recording' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Grant Microphone' })).not.toBeInTheDocument();
+    const settingsDialog = within(screen.getByRole('dialog', { name: 'Settings' }));
+
+    expect(settingsDialog.getByRole('group', { name: 'Permissions' })).toBeInTheDocument();
+    expect(settingsDialog.getByText('Screen & System Audio Recording')).toBeInTheDocument();
+    expect(settingsDialog.getByText('Microphone')).toBeInTheDocument();
+    expect(settingsDialog.getByRole('button', { name: 'Grant Screen & System Audio Recording' })).toBeInTheDocument();
+    expect(settingsDialog.queryByRole('button', { name: 'Grant Microphone' })).not.toBeInTheDocument();
   });
 
   it('hides unsupported permission rows in Settings', async () => {
@@ -1725,12 +1978,14 @@ describe('App', () => {
     render(<App />);
 
     await openSettings(user);
-    await openSettingsSection(user, 'Permissions');
+    await openSettingsSection(user, 'General');
 
-    expect(screen.queryByText('Screen & System Audio Recording')).not.toBeInTheDocument();
-    expect(screen.queryByText('System Audio')).not.toBeInTheDocument();
-    expect(screen.getByText('Microphone')).toBeInTheDocument();
-    expect(screen.queryByText('Unsupported')).not.toBeInTheDocument();
+    const settingsDialog = within(screen.getByRole('dialog', { name: 'Settings' }));
+
+    expect(settingsDialog.queryByText('Screen & System Audio Recording')).not.toBeInTheDocument();
+    expect(settingsDialog.queryByText('System Audio')).not.toBeInTheDocument();
+    expect(settingsDialog.getByText('Microphone')).toBeInTheDocument();
+    expect(settingsDialog.queryByText('Unsupported')).not.toBeInTheDocument();
   });
 
   it('requests a permission from the Settings permissions area', async () => {
@@ -1762,15 +2017,17 @@ describe('App', () => {
     render(<App />);
 
     await openSettings(user);
-    await openSettingsSection(user, 'Permissions');
+    await openSettingsSection(user, 'General');
 
-    expect(screen.getByRole('button', { name: 'Grant Screen & System Audio Recording' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Grant System Audio' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Grant Microphone' })).toBeInTheDocument();
-    expect(screen.getByText('Required for setup')).toBeInTheDocument();
+    const settingsDialog = within(screen.getByRole('dialog', { name: 'Settings' }));
 
-    await user.click(screen.getByRole('button', { name: 'Grant System Audio' }));
-    await user.click(screen.getByRole('button', { name: 'Grant Microphone' }));
+    expect(settingsDialog.getByRole('button', { name: 'Grant Screen & System Audio Recording' })).toBeInTheDocument();
+    expect(settingsDialog.getByRole('button', { name: 'Grant System Audio' })).toBeInTheDocument();
+    expect(settingsDialog.getByRole('button', { name: 'Grant Microphone' })).toBeInTheDocument();
+    expect(settingsDialog.queryByText('Required for setup')).not.toBeInTheDocument();
+
+    await user.click(settingsDialog.getByRole('button', { name: 'Grant System Audio' }));
+    await user.click(settingsDialog.getByRole('button', { name: 'Grant Microphone' }));
     expect(bridge.requestedPermissions).toEqual(['system-audio', 'microphone']);
   });
 
@@ -1802,18 +2059,22 @@ describe('App', () => {
     render(<App />);
 
     await openSettings(user);
-    await openSettingsSection(user, 'Permissions');
+    await openSettingsSection(user, 'General');
 
-    expect(await screen.findByRole('button', { name: 'Grant System Audio' })).toHaveTextContent('Grant');
-    expect(screen.getByRole('button', { name: 'Grant Microphone' })).toHaveTextContent('Grant');
+    const settingsDialog = within(screen.getByRole('dialog', { name: 'Settings' }));
 
-    await user.click(screen.getByRole('button', { name: 'Grant System Audio' }));
-    await user.click(screen.getByRole('button', { name: 'Grant Microphone' }));
+    expect(await settingsDialog.findByRole('button', { name: 'Grant System Audio' })).toHaveTextContent('Grant');
+    expect(settingsDialog.getByRole('button', { name: 'Grant Microphone' })).toHaveTextContent('Grant');
+
+    await user.click(settingsDialog.getByRole('button', { name: 'Grant System Audio' }));
+    await user.click(settingsDialog.getByRole('button', { name: 'Grant Microphone' }));
 
     expect(bridge.requestedPermissions).toEqual(['system-audio', 'microphone']);
-    expect(screen.queryByText('Changed it in System Settings? Restart Caul to apply the permission.')).not.toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: 'Restart System Audio' })).toHaveTextContent('Restart');
-    expect(screen.getByRole('button', { name: 'Restart Microphone' })).toHaveTextContent('Restart');
+    expect(settingsDialog.queryByText('Changed it in System Settings? Restart Caul to apply the permission.')).not.toBeInTheDocument();
+    expect(await settingsDialog.findByRole('button', { name: 'Grant System Audio' })).toHaveTextContent('Grant');
+    expect(settingsDialog.getByRole('button', { name: 'Grant Microphone' })).toHaveTextContent('Grant');
+    expect(settingsDialog.queryByRole('button', { name: 'Restart System Audio' })).not.toBeInTheDocument();
+    expect(settingsDialog.queryByRole('button', { name: 'Restart Microphone' })).not.toBeInTheDocument();
   });
 
   it('marks microphone permission as required when microphone input is enabled', async () => {
@@ -1845,10 +2106,12 @@ describe('App', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Microphone off' }));
     await openSettings(user);
-    await openSettingsSection(user, 'Permissions');
+    await openSettingsSection(user, 'General');
 
-    expect(screen.getByText('Required now')).toBeInTheDocument();
-    expect(screen.queryByText('Required for setup')).not.toBeInTheDocument();
+    const settingsDialog = within(screen.getByRole('dialog', { name: 'Settings' }));
+
+    expect(settingsDialog.getByText('Required now')).toBeInTheDocument();
+    expect(settingsDialog.queryByText('Required for setup')).not.toBeInTheDocument();
   });
 
   it('does not show Grant buttons for granted permissions in Settings', async () => {
@@ -1873,13 +2136,15 @@ describe('App', () => {
     render(<App />);
 
     await openSettings(user);
-    await openSettingsSection(user, 'Permissions');
+    await openSettingsSection(user, 'General');
 
-    expect(screen.queryByRole('button', { name: 'Grant Screen & System Audio Recording' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Grant Microphone' })).toBeInTheDocument();
+    const settingsDialog = within(screen.getByRole('dialog', { name: 'Settings' }));
+
+    expect(settingsDialog.queryByRole('button', { name: 'Grant Screen & System Audio Recording' })).not.toBeInTheDocument();
+    expect(settingsDialog.getByRole('button', { name: 'Grant Microphone' })).toBeInTheDocument();
   });
 
-  it('replaces Start Listening with Permissions when a selected source is missing permission', async () => {
+  it('keeps Start Listening visible and shows a transcript permission issue when a selected source is missing permission', async () => {
     const user = userEvent.setup();
     const bridge = installTestBridge({
       permissions: [
@@ -1887,7 +2152,7 @@ describe('App', () => {
           description: 'Required when listening to speaker audio output.',
           id: 'screen-recording',
           label: 'Screen & System Audio Recording',
-          status: 'denied'
+          status: 'not-determined'
         },
         {
           description: 'Required when listening to your microphone.',
@@ -1900,23 +2165,27 @@ describe('App', () => {
 
     render(<App />);
 
-    const permissionButton = await screen.findByRole('button', { name: 'Permissions' });
+    await screen.findByRole('button', { name: 'Start Listening' });
+    const grantButton = await screen.findByRole('button', { name: 'Grant Screen & System Audio Recording' });
 
-    expect(permissionButton).toBeInTheDocument();
-    expect(permissionButton).toHaveTextContent('Permissions');
-    expect(permissionButton).toHaveClass('text-destructive');
-    expect(screen.queryByRole('button', { name: 'Start Listening' })).not.toBeInTheDocument();
-    await user.click(permissionButton);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Start Listening' })).toBeDisabled();
+    });
+    expect(grantButton).toBeInTheDocument();
+    expect(screen.getByLabelText('Transcription output')).toHaveTextContent('Permissions are needed before listening.');
+    expect(screen.queryByLabelText('Start Listening hint')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Grant Microphone' })).not.toBeInTheDocument();
+    await user.click(grantButton);
 
-    expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
-    expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: 'Permissions' }))
-      .toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('button', { name: 'Grant Screen & System Audio Recording' })).toBeInTheDocument();
-    expect(bridge.requestedPermissions).toEqual([]);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Start Listening' })).not.toBeDisabled();
+    });
+      expect(screen.queryByText('Permissions are needed before listening.')).not.toBeInTheDocument();
+    expect(bridge.requestedPermissions).toEqual(['screen-recording']);
     expect(bridge.starts).toEqual([]);
   });
 
-  it('places Permissions before source indicators and Auto Send in the horizontal home toolbar', async () => {
+  it('keeps Start Listening before source indicators and Auto Send in the horizontal home toolbar when permissions are missing', async () => {
     installTestBridge({
       permissions: [
         {
@@ -1947,21 +2216,50 @@ describe('App', () => {
     expect(transcriptSection).toBeInTheDocument();
 
     const toolbarQueries = within(transcriptSection as HTMLElement);
-    const permissionButton = await waitFor(() => toolbarQueries.getByRole('button', {
-      name: 'Permissions'
+    const startButton = await waitFor(() => toolbarQueries.getByRole('button', {
+      name: 'Start Listening'
     }));
     const speakerButton = await waitFor(() => toolbarQueries.getByRole('button', { name: 'Speaker on' }));
     const autoSendButton = await waitFor(() => {
       return toolbarQueries.getByRole('button', { name: 'Auto Send' });
     });
 
-    expect(permissionButton).toHaveTextContent('Permissions');
+    expect(startButton).toHaveTextContent('Start Listening');
+    expect(startButton).toBeDisabled();
     expect(
-      permissionButton.compareDocumentPosition(speakerButton) & Node.DOCUMENT_POSITION_FOLLOWING
+      startButton.compareDocumentPosition(speakerButton) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
     expect(
-      permissionButton.compareDocumentPosition(autoSendButton) & Node.DOCUMENT_POSITION_FOLLOWING
+      startButton.compareDocumentPosition(autoSendButton) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
+  });
+
+  it('shows a transcript model recovery control without replacing Start Listening', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge({
+      parakeetStatus: testParakeetStatus({
+        installed: false,
+        status: 'missing'
+      })
+    });
+
+    render(<App />);
+
+    await screen.findByRole('button', { name: 'Start Listening' });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Start Listening' })).toBeDisabled();
+    });
+    expect(screen.getByLabelText('Transcription output')).toHaveTextContent('Download a transcription model before listening.');
+    expect(screen.queryByLabelText('Start Listening hint')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Transcription model')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Download' }));
+
+    await waitFor(() => {
+      expect(bridge.parakeetDownloads).toBe(1);
+      expect(screen.getByRole('button', { name: 'Start Listening' })).not.toBeDisabled();
+    });
+    expect(bridge.selectedLocalTranscriptionModels).toEqual(['parakeet']);
   });
 
   it('keeps global transcript and AI response actions in the horizontal bottom toolbar', async () => {
@@ -2055,7 +2353,12 @@ describe('App', () => {
 
     render(<App />);
 
-    await screen.findByRole('button', { name: 'Permissions' });
+    await screen.findByRole('button', { name: 'Start Listening' });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Start Listening' })).toBeDisabled();
+    });
+    expect(await screen.findByRole('button', { name: 'Grant Screen & System Audio Recording' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Grant System Audio' })).toBeInTheDocument();
 
     expect(bridge.requestedPermissions).toEqual([]);
     expect(window.localStorage.getItem('caul.initial-permission-requested')).toBeNull();
@@ -2088,7 +2391,7 @@ describe('App', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
 
-    expect(screen.getByLabelText('Transcription output')).toHaveTextContent('Listening. Waiting for speech...');
+    expect(screen.getByLabelText('Transcription output')).toHaveTextContent('Starting audio...');
   });
 
   it('shows speech detection before the first transcript text arrives', async () => {
@@ -2285,11 +2588,7 @@ describe('App', () => {
     expect(screen.getByLabelText('Start Listening hint')).toHaveTextContent(
       'Select Input, Output or both before starting.'
     );
-    expect(startListening).toHaveAttribute('aria-disabled', 'true');
-    expect(startListening).toHaveAttribute(
-      'title',
-      'Select a sound input or output source to listen to using the source buttons.'
-    );
+    expect(startListening).toBeDisabled();
   });
 
   it('uses green icon styling for Auto Send when it is on', async () => {
@@ -2417,7 +2716,7 @@ describe('App', () => {
     expect(output).not.toHaveTextContent('This book sold for two point two million dollars.');
   });
 
-  it('keeps live partial transcript chunks replaceable by final chunks', async () => {
+  it('shows provisional partial text before final chunks', async () => {
     const user = userEvent.setup();
     const bridge = installTestBridge();
 
@@ -2437,6 +2736,7 @@ describe('App', () => {
 
     const output = screen.getByLabelText('Transcription output');
     expect(output).toHaveTextContent('Speaker partial');
+    expect(getTranscriptDraftTail()).toHaveTextContent('Speaker partial');
 
     act(() => {
       bridge.emit({
@@ -2450,9 +2750,10 @@ describe('App', () => {
 
     expect(output).toHaveTextContent('Speaker final');
     expect(output).not.toHaveTextContent('Speaker partial');
+    expect(getTranscriptDraftTail()).toBeNull();
   });
 
-  it('does not replace a richer live partial with a shorter final for the same utterance', async () => {
+  it('replaces provisional partial text when a final arrives for the same utterance', async () => {
     const user = userEvent.setup();
     const bridge = installTestBridge();
 
@@ -2474,6 +2775,9 @@ describe('App', () => {
     expect(output).toHaveTextContent(
       'Um buy hero play. Um I think that is a pretty comfortable pick'
     );
+    expect(getTranscriptDraftTail()).toHaveTextContent(
+      'Um buy hero play. Um I think that is a pretty comfortable pick'
+    );
 
     act(() => {
       bridge.emit({
@@ -2486,11 +2790,13 @@ describe('App', () => {
     });
 
     expect(output).toHaveTextContent(
-      'Um buy hero play. Um I think that is a pretty comfortable pick'
+      'I think that is a pretty comfortable pick'
     );
+    expect(output).not.toHaveTextContent('Um buy hero play.');
+    expect(getTranscriptDraftTail()).toBeNull();
   });
 
-  it('keeps earlier partial utterances visible when a later partial arrives before finalisation', async () => {
+  it('renders diagnostic partial utterances only as draft tails', async () => {
     const user = userEvent.setup();
     const bridge = installTestBridge();
 
@@ -2520,6 +2826,8 @@ describe('App', () => {
     const output = screen.getByLabelText('Transcription output');
     expect(output).toHaveTextContent("Which I don't need to tell you guys about, you've heard enough about it already.");
     expect(output).toHaveTextContent('Nice.');
+    expect(getTranscriptDraftTail()).toHaveTextContent("Which I don't need to tell you guys about, you've heard enough about it already.");
+    expect(getTranscriptDraftTail()).toHaveTextContent('Nice.');
   });
 
   it('does not show audio source selection in Settings while listening', async () => {
@@ -2714,6 +3022,23 @@ describe('App', () => {
     expect(bridge.promptTemplateState.templates).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ name: 'Risk and actions' })
     ]));
+  });
+
+  it('auto-renames duplicate prompt template names in the modal', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge();
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Manage prompt templates' }));
+    await user.click(screen.getByRole('button', { name: 'New template' }));
+    await user.type(screen.getByLabelText('Name'), 'CV');
+    await user.type(screen.getByLabelText('Prompt'), 'Use the CV context carefully.');
+
+    await waitFor(() => expect(bridge.promptTemplateState.templates).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'CV 2', prompt: 'Use the CV context carefully.' })
+    ])));
+    expect(screen.getByRole('button', { name: 'CV 2' })).toHaveAttribute('data-active', 'true');
   });
 
   it('opens prompt templates without a blocking backdrop', async () => {
@@ -3284,7 +3609,7 @@ describe('App', () => {
     render(<App />);
 
     await openSettings(user);
-    await openSettingsSection(user, 'Models');
+    await openSettingsSection(user, 'AI responses');
     await user.click(screen.getByRole('tab', { name: 'Cloud' }));
     await selectSetting(user, 'Model', '5.5');
     await selectSetting(user, 'Reasoning', 'Low');
@@ -3313,13 +3638,49 @@ describe('App', () => {
     }]);
   });
 
+  it('sends the selected local thinking level to Local AI requests', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge({
+      localLlmStatus: testReadyLocalLlmStatus()
+    });
+
+    render(<App />);
+
+    await openSettings(user);
+    await openSettingsSection(user, 'AI responses');
+    await selectSetting(user, 'Thinking', 'Low');
+    await waitFor(() => expect(bridge.portablePreferences).toMatchObject({
+      localLlmReasoning: 'low'
+    }));
+    await openHome(user);
+    await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
+
+    act(() => {
+      bridge.emit({
+        type: 'completed',
+        utteranceId: 1,
+        text: 'Summarise the local model status.'
+      });
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
+
+    expect(bridge.llmRequests).toEqual([{
+      model: 'openai-codex/gpt-5.4-mini',
+      requestId: expect.stringMatching(/^manual-/),
+      reasoning: 'low',
+      transcript: expect.stringContaining('Summarise the local model status.')
+    }]);
+  });
+
   it('restores model, reasoning and instructions from portable preferences', async () => {
     const user = userEvent.setup();
     const bridge = installTestBridge({
       portablePreferences: {
         generalInstructions: 'Prefer concise answers.',
         llmModel: 'openai-codex/gpt-5.5',
-        llmReasoning: 'low'
+        llmReasoning: 'low',
+        selectedAiProvider: 'cloud'
       }
     });
 
@@ -3373,7 +3734,7 @@ describe('App', () => {
     expect(screen.queryByRole('group', { name: 'Setup' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Open Onboarding' })).not.toBeInTheDocument();
     expect(screen.queryByText('Restores window size and position, floating button position, model and listening sources, and starter prompt templates.')).not.toBeInTheDocument();
-    await openSettingsSection(user, 'Models');
+    await openSettingsSection(user, 'AI responses');
     await user.click(screen.getByRole('tab', { name: 'Cloud' }));
     await selectSetting(user, 'Model', '5.5');
     await selectSetting(user, 'Reasoning', 'Low');
@@ -3388,7 +3749,7 @@ describe('App', () => {
     expect(screen.getByText('Floating button position')).toBeInTheDocument();
     expect(screen.getByText('Model and listening sources')).toBeInTheDocument();
     expect(screen.getByText('Starter prompt templates')).toBeInTheDocument();
-    expect(screen.getByText('Your custom prompts will not be deleted')).toBeInTheDocument();
+    expect(screen.getByText('Your user prompt templates will be backed up to /Users/alex/Documents/Caul/Backups/prompts/, then removed from active prompts.')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Reset Settings' }));
 
@@ -3399,8 +3760,7 @@ describe('App', () => {
     expect(bridge.promptTemplateState.templates).toEqual([
       expect.objectContaining({ id: 'starter-answer-with-star' }),
       expect.objectContaining({ id: 'starter-use-my-cv' }),
-      expect.objectContaining({ id: 'starter-job-description' }),
-      expect.objectContaining({ id: 'custom-template' })
+      expect.objectContaining({ id: 'starter-job-description' })
     ]);
 
     await openHome(user);
@@ -3425,7 +3785,7 @@ describe('App', () => {
     });
   });
 
-  it('keeps customised starter prompt templates when settings reset', async () => {
+  it('removes customised starter prompt templates from active prompts when settings reset', async () => {
     const user = userEvent.setup();
     const bridge = installTestBridge({
       promptTemplateState: testPromptTemplateState({
@@ -3446,28 +3806,22 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Reset Settings' }));
 
     expect(bridge.promptTemplateState.selectedTemplateIds).toEqual([]);
-    expect(bridge.promptTemplateState.templates).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        id: 'starter-use-my-cv',
-        name: 'CV'
-      }),
-      expect.objectContaining({
-        id: 'custom-starter-use-my-cv',
-        name: 'My CV',
-        prompt: 'Use my edited CV instructions.'
-      })
-    ]));
+    expect(bridge.promptTemplateState.templates).toEqual(starterTestPromptTemplates());
   });
 
-  it('renames customised starter prompt templates when reset would recreate the same name', async () => {
+  it('keeps existing prompt templates active when settings reset fails', async () => {
     const user = userEvent.setup();
     const bridge = installTestBridge({
+      resetSettings: async () => {
+        throw new Error('Prompt backup failed.');
+      },
       promptTemplateState: testPromptTemplateState({
+        selectedTemplateIds: ['custom-template'],
         templates: [
           testPromptTemplate({
-            id: 'starter-use-my-cv',
-            name: 'CV',
-            prompt: 'Use my edited CV instructions.'
+            id: 'custom-template',
+            name: 'Custom template',
+            prompt: 'Use my custom instructions.'
           })
         ]
       })
@@ -3479,16 +3833,10 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Reset Settings' }));
     await user.click(screen.getByRole('button', { name: 'Reset Settings' }));
 
+    expect(screen.getByRole('dialog', { name: 'Reset settings?' })).toBeInTheDocument();
+    expect(bridge.promptTemplateState.selectedTemplateIds).toEqual(['custom-template']);
     expect(bridge.promptTemplateState.templates).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        id: 'starter-use-my-cv',
-        name: 'CV'
-      }),
-      expect.objectContaining({
-        id: 'custom-starter-use-my-cv',
-        name: 'CV custom',
-        prompt: 'Use my edited CV instructions.'
-      })
+      expect.objectContaining({ id: 'custom-template', name: 'Custom template' })
     ]));
   });
 
@@ -3499,9 +3847,9 @@ describe('App', () => {
     render(<App />);
 
     await openSettings(user);
-    await openSettingsSection(user, 'Updates');
+    await openSettingsSection(user, 'General');
 
-    expect(screen.getByRole('group', { name: 'Updates' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Caul updates' })).toBeInTheDocument();
     expect(screen.getByLabelText('Automatic checks')).toHaveTextContent('Weekly');
     expect(screen.getByText('Caul Beta 0.1.8 · Beta')).toBeInTheDocument();
 
@@ -3521,7 +3869,7 @@ describe('App', () => {
     installTestBridge();
     render(<App />);
     await openSettings(user);
-    await openSettingsSection(user, 'Updates');
+    await openSettingsSection(user, 'General');
     expect(await screen.findByText('Caul Beta 0.1.8 · Beta')).toBeInTheDocument();
     cleanup();
 
@@ -3533,7 +3881,7 @@ describe('App', () => {
     });
     render(<App />);
     await openSettings(user);
-    await openSettingsSection(user, 'Updates');
+    await openSettingsSection(user, 'General');
     expect(await screen.findByText('Caul 0.1.8 · Stable')).toBeInTheDocument();
     cleanup();
 
@@ -3545,7 +3893,7 @@ describe('App', () => {
     });
     render(<App />);
     await openSettings(user);
-    await openSettingsSection(user, 'Updates');
+    await openSettingsSection(user, 'General');
     expect(await screen.findByText('Caul Dev 0.1.8 · Dev')).toBeInTheDocument();
     cleanup();
 
@@ -3557,7 +3905,7 @@ describe('App', () => {
     });
     render(<App />);
     await openSettings(user);
-    await openSettingsSection(user, 'Updates');
+    await openSettingsSection(user, 'General');
     expect(await screen.findByText('Caul Dev-Private 0.1.8 · Dev-Private')).toBeInTheDocument();
   });
 
@@ -3587,7 +3935,7 @@ describe('App', () => {
     render(<App />);
 
     await openSettings(user);
-    await openSettingsSection(user, 'Updates');
+    await openSettingsSection(user, 'General');
 
     expect(screen.getByRole('button', { name: 'Download' })).toBeDisabled();
     expect(screen.getByText(/^Last checked: Never\.$/)).toBeInTheDocument();
@@ -3615,7 +3963,7 @@ describe('App', () => {
     render(<App />);
 
     await openSettings(user);
-    await openSettingsSection(user, 'Updates');
+    await openSettingsSection(user, 'General');
 
     expect(screen.queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Restart to update' })).toBeInTheDocument();
@@ -3642,13 +3990,13 @@ describe('App', () => {
     render(<App />);
 
     await openSettings(user);
-    await openSettingsSection(user, 'Updates');
+    await openSettingsSection(user, 'General');
     await user.click(screen.getByRole('button', { name: 'Restart to update' }));
 
     expect(await screen.findByRole('button', { name: 'Restarting...' })).toBeDisabled();
   });
 
-  it('shows a quiet main notification for app updates and opens Updates', async () => {
+  it('shows a quiet main notification for app updates and opens General', async () => {
     const user = userEvent.setup();
     installTestBridge({
       updateStatus: testUpdateStatus({
@@ -3667,10 +4015,33 @@ describe('App', () => {
 
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: 'Caul notifications' }));
+    const notificationsButton = await screen.findByRole('button', { name: 'Caul notifications' });
+    expect(notificationsButton).toHaveAttribute('data-notification-tone', 'attention');
+
+    await user.click(notificationsButton);
     await user.click(await screen.findByRole('button', { name: 'App update available' }));
 
-    expect(await screen.findByRole('group', { name: 'Updates' })).toBeInTheDocument();
+    expect(await screen.findByRole('group', { name: 'Caul updates' })).toBeInTheDocument();
+  });
+
+  it('shows an error main notification for missing transcription model setup and opens Transcription', async () => {
+    const user = userEvent.setup();
+    installTestBridge({
+      parakeetStatus: testParakeetStatus({
+        installed: false,
+        status: 'missing'
+      })
+    });
+
+    render(<App />);
+
+    const notificationsButton = await screen.findByRole('button', { name: 'Caul notifications' });
+    expect(notificationsButton).toHaveAttribute('data-notification-tone', 'error');
+
+    await user.click(notificationsButton);
+    await user.click(await screen.findByRole('button', { name: 'Transcription model needs setup' }));
+
+    expect(await screen.findByRole('group', { name: 'Local transcription' })).toBeInTheDocument();
   });
 
   it('streams AI response deltas while the request is still running', async () => {
@@ -3921,7 +4292,7 @@ describe('App', () => {
     expect(within(firstAiArticle).getByRole('button', { name: 'Collapse AI response' })).toBeInTheDocument();
   });
 
-  it('leaves older sections expanded when Auto-collapse is off', async () => {
+  it('leaves older sections expanded when both Auto-collapse settings are off', async () => {
     const user = userEvent.setup();
     let requestCount = 0;
     const bridge = installTestBridge({
@@ -3935,9 +4306,15 @@ describe('App', () => {
     render(<App />);
 
     await openSettings(user);
+    await openSettingsSection(user, 'Transcription');
     await user.click(screen.getByRole('checkbox', { name: 'Auto-collapse' }));
     expect(screen.getByRole('checkbox', { name: 'Auto-collapse' })).not.toBeChecked();
-    await waitFor(() => expect(bridge.portablePreferences.autoCollapse).toBe(false));
+    await waitFor(() => expect(bridge.portablePreferences.autoCollapseTranscription).toBe(false));
+
+    await openSettingsSection(user, 'AI responses');
+    await user.click(screen.getByRole('checkbox', { name: 'Auto-collapse' }));
+    expect(screen.getByRole('checkbox', { name: 'Auto-collapse' })).not.toBeChecked();
+    await waitFor(() => expect(bridge.portablePreferences.autoCollapseAiResponses).toBe(false));
     await openHome(user);
 
     await user.click(await screen.findByRole('button', { name: 'Start Listening' }));
@@ -3967,17 +4344,30 @@ describe('App', () => {
     render(<App />);
 
     await openSettings(user);
+    await openSettingsSection(user, 'Transcription');
     expect(screen.getByRole('checkbox', { name: 'Auto-collapse' })).toBeChecked();
 
     await user.click(screen.getByRole('checkbox', { name: 'Auto-collapse' }));
     expect(screen.getByRole('checkbox', { name: 'Auto-collapse' })).not.toBeChecked();
-    await waitFor(() => expect(bridge.portablePreferences.autoCollapse).toBe(false));
+    await waitFor(() => expect(bridge.portablePreferences.autoCollapseTranscription).toBe(false));
 
-    await user.click(screen.getByRole('button', { name: 'Reset Settings' }));
-    await user.click(screen.getByRole('button', { name: 'Reset Settings' }));
-
+    await openSettingsSection(user, 'AI responses');
     expect(screen.getByRole('checkbox', { name: 'Auto-collapse' })).toBeChecked();
-    await waitFor(() => expect(bridge.portablePreferences.autoCollapse).toBe(true));
+
+    await user.click(screen.getByRole('checkbox', { name: 'Auto-collapse' }));
+    expect(screen.getByRole('checkbox', { name: 'Auto-collapse' })).not.toBeChecked();
+    await waitFor(() => expect(bridge.portablePreferences.autoCollapseAiResponses).toBe(false));
+
+    await openSettingsSection(user, 'General');
+    await user.click(screen.getByRole('button', { name: 'Reset Settings' }));
+    await user.click(screen.getByRole('button', { name: 'Reset Settings' }));
+
+    await openSettingsSection(user, 'Transcription');
+    expect(screen.getByRole('checkbox', { name: 'Auto-collapse' })).toBeChecked();
+    await openSettingsSection(user, 'AI responses');
+    expect(screen.getByRole('checkbox', { name: 'Auto-collapse' })).toBeChecked();
+    await waitFor(() => expect(bridge.portablePreferences.autoCollapseTranscription).toBe(true));
+    await waitFor(() => expect(bridge.portablePreferences.autoCollapseAiResponses).toBe(true));
   });
 
   it('clears transcript and AI response feeds from the global action toolbar', async () => {
@@ -4135,6 +4525,7 @@ describe('App', () => {
     });
 
     expect(screen.getByLabelText('Transcription output')).toHaveTextContent('partial transcript before stop');
+    expect(getTranscriptDraftTail()).toHaveTextContent('partial transcript before stop');
 
     await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
 
@@ -4143,9 +4534,10 @@ describe('App', () => {
     });
     expect(bridge.llmRequests.at(-1)?.transcript).not.toContain('partial transcript before stop');
     expect(screen.getByLabelText('Transcription output')).toHaveTextContent('final flushed transcript');
+    expect(getTranscriptDraftTail()).toBeNull();
   });
 
-  it('keeps partial transcript text as the stop fallback when no final chunk arrives', async () => {
+  it('does not send diagnostic partial text as the stop fallback when no final chunk arrives', async () => {
     const user = userEvent.setup();
     const bridge = installTestBridge();
 
@@ -4161,12 +4553,15 @@ describe('App', () => {
       });
     });
 
+    expect(screen.getByLabelText('Transcription output')).toHaveTextContent('partial transcript survives stop');
+    expect(getTranscriptDraftTail()).toHaveTextContent('partial transcript survives stop');
+
     await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
 
-    await waitFor(() => {
-      expect(bridge.llmRequests.at(-1)?.transcript).toContain('partial transcript survives stop');
-    });
-    expect(screen.getByLabelText('Transcription output')).toHaveTextContent('partial transcript survives stop');
+    expect(bridge.llmRequests).toEqual([]);
+    expect(screen.getByLabelText('Transcription output')).toHaveTextContent(
+      'Your live transcript will appear here once you start listening.'
+    );
   });
 
   it('marks primary toolbar controls for compact viewport sizing', async () => {
@@ -4227,6 +4622,7 @@ describe('App', () => {
     });
 
     expect(screen.getByLabelText('Transcription output')).toHaveTextContent('volatile local transcript');
+    expect(getTranscriptDraftTail()).toHaveTextContent('volatile local transcript');
 
     act(() => {
       bridge.emit({
@@ -4238,6 +4634,7 @@ describe('App', () => {
 
     expect(screen.getByLabelText('Transcription output')).toHaveTextContent('confirmed local transcript');
     expect(screen.getByLabelText('Transcription output')).not.toHaveTextContent('volatile local transcript');
+    expect(getTranscriptDraftTail()).toBeNull();
 
     await user.click(screen.getByRole('button', { name: 'Stop Listening' }));
 
@@ -4267,6 +4664,7 @@ describe('App', () => {
 
     expect(screen.getByLabelText('Transcription output')).toHaveTextContent('a longer confirmed transcript line');
     expect(screen.getByLabelText('Transcription output')).toHaveTextContent('next words');
+    expect(getTranscriptDraftTail()).toHaveTextContent('next words');
   });
 
   it('renders confirmed chunks as timestamped transcript lines', async () => {
@@ -4300,6 +4698,7 @@ describe('App', () => {
     expect(output).toContain('first chunk');
     expect(output).toContain('second chunk');
     expect(output).toContain('third preview');
+    expect(getTranscriptDraftTail()).toHaveTextContent('third preview');
   });
 
   it('appends overlapping confirmed transcript chunks without renderer cleanup', async () => {
@@ -4352,7 +4751,7 @@ describe('App', () => {
     expect(screen.getByLabelText('Transcription output')).toHaveTextContent('But like you could see somebody overreacting to that.');
   });
 
-  it('shows local partial text until a final chunk replaces it', async () => {
+  it('shows local partial text until a final chunk arrives', async () => {
     const user = userEvent.setup();
     const bridge = installTestBridge();
 
@@ -4369,6 +4768,7 @@ describe('App', () => {
     });
 
     expect(screen.getByLabelText('Transcription output')).toHaveTextContent('the rolling preview');
+    expect(getTranscriptDraftTail()).toHaveTextContent('the rolling preview');
 
     act(() => {
       bridge.emit({
@@ -4380,9 +4780,10 @@ describe('App', () => {
 
     expect(screen.getByLabelText('Transcription output')).not.toHaveTextContent('the rolling preview');
     expect(screen.getByLabelText('Transcription output')).toHaveTextContent('the final sentence is ready');
+    expect(getTranscriptDraftTail()).toBeNull();
   });
 
-  it('replaces a longer live partial when its final transcript arrives', async () => {
+  it('ignores a longer diagnostic partial when its final transcript arrives', async () => {
     const user = userEvent.setup();
     const bridge = installTestBridge();
 
@@ -4401,6 +4802,7 @@ describe('App', () => {
     });
 
     expect(screen.getByLabelText('Transcription output')).toHaveTextContent('this is a longer live partial transcript');
+    expect(getTranscriptDraftTail()).toHaveTextContent('this is a longer live partial transcript');
 
     act(() => {
       bridge.emit({
@@ -4412,9 +4814,10 @@ describe('App', () => {
 
     expect(screen.getByLabelText('Transcription output')).not.toHaveTextContent('this is a longer live partial transcript');
     expect(screen.getByLabelText('Transcription output')).toHaveTextContent('this is final');
+    expect(getTranscriptDraftTail()).toBeNull();
   });
 
-  it('shows very early timed partials immediately for lowest transcript latency', async () => {
+  it('replaces very early timed partials as newer draft text arrives', async () => {
     const user = userEvent.setup();
     const bridge = installTestBridge();
 
@@ -4433,6 +4836,7 @@ describe('App', () => {
     });
 
     expect(screen.getByLabelText('Transcription output')).toHaveTextContent('unstable first guess');
+    expect(getTranscriptDraftTail()).toHaveTextContent('unstable first guess');
 
     act(() => {
       bridge.emit({
@@ -4444,7 +4848,9 @@ describe('App', () => {
       });
     });
 
+    expect(screen.getByLabelText('Transcription output')).not.toHaveTextContent('unstable first guess');
     expect(screen.getByLabelText('Transcription output')).toHaveTextContent('more stable first phrase');
+    expect(getTranscriptDraftTail()).toHaveTextContent('more stable first phrase');
   });
 
   it('saves transcript and AI response snapshots to HTML history', async () => {
@@ -4479,11 +4885,15 @@ describe('App', () => {
     ))).toBe(true));
   });
 
-  it('keeps start disabled until LLM prewarming completes', async () => {
+  it('keeps Start Listening enabled and shows an AI issue until cloud AI is ready', async () => {
+    const user = userEvent.setup();
     let emitLlmStatus: ((status: { ok: boolean; ready: boolean; status: 'warming' | 'ready' | 'error' | 'disabled' }) => void) | null = null;
-
-    installTestBridge({
+    let resolveLogin!: (value: { ok: boolean }) => void;
+    const bridge = installTestBridge({
       llmReady: false,
+      openChatGptLogin: () => new Promise((resolve) => {
+        resolveLogin = resolve;
+      }),
       portablePreferences: {
         selectedAiProvider: 'cloud'
       },
@@ -4498,7 +4908,22 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findByRole('button', { name: 'Preparing...' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'Start Listening' })).not.toBeDisabled();
+    expect(await screen.findByText('Cloud AI needs sign-in before AI responses can work.')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Local' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Cloud' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('button', { name: 'Sign in with ChatGPT' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Auto Send' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Send manual prompt to AI' })).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: 'Sign in with ChatGPT' }));
+
+    expect(bridge.chatGptLoginOpens).toBe(1);
+    expect(await screen.findByRole('button', { name: 'Opening' })).toBeDisabled();
+
+    act(() => {
+      resolveLogin({ ok: true });
+    });
 
     act(() => {
       emitLlmStatus?.({
@@ -4508,15 +4933,176 @@ describe('App', () => {
       });
     });
 
-    expect(await screen.findByRole('button', { name: 'Start Listening' })).not.toBeDisabled();
+    await waitFor(() => {
+      expect(screen.queryByText('Cloud AI needs sign-in before AI responses can work.')).not.toBeInTheDocument();
+    });
   });
 
-  it('shows local AI warm-up status above the AI placeholder', async () => {
-    const bridge = installTestBridge();
+  it('shows a local AI setup issue without blocking transcription', async () => {
+    const user = userEvent.setup();
+    let resolveDownload!: (status: LocalLlmStatus) => void;
+    const bridge = installTestBridge({
+      downloadLocalAi: () => new Promise((resolve) => {
+        resolveDownload = resolve;
+      }),
+      llmReady: false,
+      localLlmStatus: testLocalLlmStatus()
+    });
 
     render(<App />);
 
-    await screen.findByText('Local AI needs setup');
+    expect(await screen.findByRole('button', { name: 'Start Listening' })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Auto Send' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Send manual prompt to AI' })).toBeDisabled();
+    expect(screen.getByLabelText('AI response')).toHaveTextContent('Local AI needs setup before AI responses can work.');
+    expect(screen.queryByRole('tab', { name: 'Local' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Cloud' })).not.toBeInTheDocument();
+    const localSetup = screen.getByRole('group', { name: 'Local AI setup' });
+    expect(within(localSetup).getByRole('button', { name: 'Download local AI' })).toBeInTheDocument();
+    expect(within(localSetup).queryByText('Not downloaded yet')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Swap to Cloud' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Prompt template hint')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Download local AI' }));
+
+    expect(await screen.findByText('Requesting local AI download...')).toBeInTheDocument();
+
+    act(() => {
+      bridge.emitLocalLlmStatus(testLocalLlmStatus({
+        progress: {
+          downloadedBytes: 42,
+          label: 'Downloading local AI',
+          percent: 42,
+          phase: 'model',
+          totalBytes: 100
+        },
+        status: 'downloading'
+      }));
+    });
+
+    expect(await screen.findByText('Local AI is downloading before AI responses can work.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    expect(await screen.findByText('Downloading local AI model · 42% · 42 B of 100 B')).toBeInTheDocument();
+
+    act(() => {
+      resolveDownload(testReadyLocalLlmStatus());
+    });
+
+    await waitFor(() => {
+      expect(bridge.localLlmDownloads).toBe(1);
+      expect(screen.queryByText('Local AI needs setup before AI responses can work.')).not.toBeInTheDocument();
+    });
+  });
+
+  it('offers to swap to Cloud when Local AI is unavailable and Cloud is ready', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge({
+      localLlmStatus: testLocalLlmStatus(),
+      piStatus: testPiStatus({
+        connected: true,
+        selectedModel: 'gpt-5.4',
+        status: 'ready'
+      })
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText('Local AI needs setup before AI responses can work.')).toBeInTheDocument();
+    const localSetup = screen.getByRole('group', { name: 'Local AI setup' });
+    expect(within(localSetup).getByRole('button', { name: 'Download local AI' })).toBeInTheDocument();
+    expect(within(localSetup).getByRole('button', { name: 'Local AI recommendation details' })).toBeInTheDocument();
+    await user.hover(within(localSetup).getByRole('button', { name: 'Local AI recommendation details' }));
+    expect((await screen.findAllByText('Why Local')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Local AI keeps prompts and transcript context on this computer, but it needs a model download and may be slower than Cloud.').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Local AI tradeoff details' })).not.toBeInTheDocument();
+    expect(within(localSetup).queryByText('Not downloaded yet')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Swap to Cloud' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cloud AI tradeoff details' })).toBeInTheDocument();
+    expect(screen.getByText('or')).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Local' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Cloud' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Swap to Cloud' }));
+
+    await waitFor(() => {
+      expect(bridge.selectedAiProviders).toEqual(['cloud']);
+      expect(screen.queryByText('Local AI needs setup before AI responses can work.')).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: 'Auto Send' })).toBeEnabled();
+    expect(screen.getByLabelText('Ask AI')).not.toBeDisabled();
+  });
+
+  it('hides the Cloud swap while local AI is downloading from the issue panel', async () => {
+    const user = userEvent.setup();
+    let resolveDownload!: (status: LocalLlmStatus) => void;
+    installTestBridge({
+      downloadLocalAi: () => new Promise((resolve) => {
+        resolveDownload = resolve;
+      }),
+      localLlmStatus: testLocalLlmStatus(),
+      piStatus: testPiStatus({
+        connected: true,
+        selectedModel: 'gpt-5.4',
+        status: 'ready'
+      })
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText('Local AI needs setup before AI responses can work.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Swap to Cloud' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Download local AI' }));
+
+    expect(await screen.findByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Swap to Cloud' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Local AI tradeoff details' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Cloud AI tradeoff details' })).not.toBeInTheDocument();
+    expect(screen.queryByText('or')).not.toBeInTheDocument();
+    expect(await screen.findByText('Requesting local AI download...')).toBeInTheDocument();
+
+    act(() => {
+      resolveDownload(testReadyLocalLlmStatus());
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Local AI needs setup before AI responses can work.')).not.toBeInTheDocument();
+    });
+  });
+
+  it('offers to swap to Local when Cloud AI is unavailable and Local is ready', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge({
+      llmReady: false,
+      localLlmStatus: testReadyLocalLlmStatus(),
+      portablePreferences: {
+        selectedAiProvider: 'cloud'
+      }
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText('Cloud AI needs sign-in before AI responses can work.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Swap to Local' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Swap to Local' }));
+
+    await waitFor(() => {
+      expect(bridge.selectedAiProviders).toEqual(['local']);
+      expect(screen.queryByText('Cloud AI needs sign-in before AI responses can work.')).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: 'Auto Send' })).toBeEnabled();
+    expect(screen.getByLabelText('Ask AI')).not.toBeDisabled();
+  });
+
+  it('shows local AI warm-up status above the AI placeholder', async () => {
+    const bridge = installTestBridge({
+      localLlmStatus: testLocalLlmStatus()
+    });
+
+    render(<App />);
+
+    await screen.findByText('Local AI needs setup before AI responses can work.');
 
     act(() => {
       bridge.emitLocalLlmStatus(testReadyLocalLlmStatus({ status: 'warming' }));
@@ -4532,7 +5118,9 @@ describe('App', () => {
   });
 
   it('updates the local AI placeholder status when warm-up completes', async () => {
-    const bridge = installTestBridge();
+    const bridge = installTestBridge({
+      localLlmStatus: testReadyLocalLlmStatus({ status: 'warming' })
+    });
 
     render(<App />);
 
@@ -4666,8 +5254,12 @@ async function openSettings(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByRole('navigation', { name: 'Settings sections' });
 }
 
-async function openSettingsSection(user: ReturnType<typeof userEvent.setup>, section: 'General' | 'Models' | 'Updates' | 'Storage' | 'Permissions') {
+async function openSettingsSection(user: ReturnType<typeof userEvent.setup>, section: 'General' | 'Transcription' | 'AI responses') {
   await user.click(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: section }));
+}
+
+async function openOnboardingStep(user: ReturnType<typeof userEvent.setup>, step: 'Permissions' | 'Local transcription' | 'AI responses') {
+  await user.click(await screen.findByRole('button', { name: new RegExp(`^Step \\d: ${step}$`) }));
 }
 
 async function openHome(user: ReturnType<typeof userEvent.setup>) {
@@ -4717,7 +5309,9 @@ function installTestBridge(overrides: {
   portablePreferences?: PortablePreferences;
   updateStatus?: UpdateStatus;
   historyStatus?: HistoryStatus;
+  localLlmStatus?: LocalLlmStatus;
   downloadLocalAi?: (modelId?: string) => Promise<LocalLlmStatus>;
+  onSetAiProvider?: (provider: AiProvider) => LocalLlmStatus | void;
   completeOnboarding?: () => Promise<OnboardingStatus>;
   openChatGptLogin?: () => Promise<{ ok: boolean; message?: string }>;
   requestLlm?: (options: {
@@ -4730,6 +5324,7 @@ function installTestBridge(overrides: {
   runtimeContext?: RuntimeContext;
   setSelectedPromptTemplate?: (ids: string[], state: PromptTemplateState) => Promise<PromptTemplateState>;
   stop?: (emit: (event: TranscriptionBridgeEvent) => void) => Promise<{ ok: boolean }> | { ok: boolean };
+  resetSettings?: () => Promise<{ ok: boolean }>;
 } = {}) {
   let emitTranscriptionEvent: ((event: TranscriptionBridgeEvent) => void) | null = null;
   const starts: Array<{
@@ -4766,8 +5361,28 @@ function installTestBridge(overrides: {
   const removedLocalTranscriptionModels: string[] = [];
   let parakeetStatus = overrides.parakeetStatus ?? testParakeetStatus();
   let piStatus = overrides.piStatus ?? testPiStatus();
+  let permissions = overrides.permissions ?? [
+    {
+      description: 'Required when listening to speaker audio output.',
+      id: 'screen-recording',
+      label: 'Screen & System Audio Recording',
+      status: 'granted'
+    },
+    {
+      description: 'Required when listening to audio from other apps.',
+      id: 'system-audio',
+      label: 'System Audio',
+      status: 'granted'
+    },
+    {
+      description: 'Required when listening to your microphone.',
+      id: 'microphone',
+      label: 'Microphone',
+      status: 'granted'
+    }
+  ];
   let selectedAiProvider: AiProvider = overrides.onboardingStatus?.ai.provider ?? 'local';
-  let localLlmStatus = getCaulLocalLlmStatusForTest(overrides.onboardingStatus) ?? testLocalLlmStatus();
+  let localLlmStatus = overrides.localLlmStatus ?? getCaulLocalLlmStatusForTest(overrides.onboardingStatus) ?? testReadyLocalLlmStatus();
   let emitLocalLlmStatus: ((status: LocalLlmStatus) => void) | null = null;
   let selectedLocalTranscriptionModel: LocalTranscriptionModelId | null = Object.hasOwn(overrides, 'selectedLocalTranscriptionModel')
     ? overrides.selectedLocalTranscriptionModel ?? null
@@ -4792,6 +5407,12 @@ function installTestBridge(overrides: {
   let historyStatus = overrides.historyStatus ?? testHistoryStatus();
   let updateChecks = 0;
   let updateFrequencyChanges: UpdateFrequency[] = [];
+  let modelCatalogueRefreshStatus: ModelCatalogueRefreshStatus = {
+    enabled: true,
+    frequency: 'monthly' as UpdateFrequency,
+    lastCheckedAt: null
+  };
+  let modelCatalogueRefreshFrequencyChanges: UpdateFrequency[] = [];
   let emitUpdateStatus: ((status: UpdateStatus) => void) | null = null;
   let historyFolderOpens = 0;
   let historyFolderChooses = 0;
@@ -4836,7 +5457,10 @@ function installTestBridge(overrides: {
     );
     const permissions = await window.caul!.permissions!.status();
     const permissionsReady = permissions.permissions.every((permission) => permission.status === 'granted');
-    const complete = permissionsReady && transcriptionReady;
+    const localAiReady = Boolean(localLlmStatus.runtime.installed && localLlmStatus.model?.installed);
+    const cloudAiReady = Boolean(piStatus.connected);
+    const aiReady = selectedAiProvider === 'cloud' ? cloudAiReady : localAiReady;
+    const complete = permissionsReady && transcriptionReady && aiReady;
 
     return {
       ...current,
@@ -4875,31 +5499,20 @@ function installTestBridge(overrides: {
       },
       request: async (permission) => {
         requestedPermissions.push(permission);
+        permissions = permissions.map((item) => (
+          item.id === permission && item.status !== 'denied' && item.status !== 'restricted'
+            ? {
+              ...item,
+              status: 'granted'
+            }
+            : item
+        ));
 
         return { ok: true };
       },
       status: async () => ({
         ok: true,
-        permissions: overrides.permissions ?? [
-          {
-            description: 'Required when listening to speaker audio output.',
-            id: 'screen-recording',
-            label: 'Screen & System Audio Recording',
-            status: 'granted'
-          },
-          {
-            description: 'Required when listening to audio from other apps.',
-            id: 'system-audio',
-            label: 'System Audio',
-            status: 'granted'
-          },
-          {
-            description: 'Required when listening to your microphone.',
-            id: 'microphone',
-            label: 'Microphone',
-            status: 'granted'
-          }
-        ],
+        permissions,
         platform: 'darwin'
       })
     },
@@ -5110,6 +5723,10 @@ function installTestBridge(overrides: {
         openModel: async () => ({ ok: true }),
         refreshCatalogue: async () => {
           modelCatalogueRefreshes += 1;
+          modelCatalogueRefreshStatus = {
+            ...modelCatalogueRefreshStatus,
+            lastCheckedAt: '2026-06-08T00:00:00.000Z'
+          };
           return {
             ok: true,
             reviewedAt: '2026-06-08',
@@ -5130,14 +5747,27 @@ function installTestBridge(overrides: {
             status: await getCurrentOnboardingStatus()
           };
         },
+        refreshCatalogueStatus: async () => modelCatalogueRefreshStatus,
         saveModel: async (model) => {
           savedPiModels.push(model);
           piStatus = testPiStatus({ connected: true, selectedModel: model, status: 'ready' });
           return piStatus;
         },
+        setRefreshCatalogueFrequency: async (frequency) => {
+          modelCatalogueRefreshFrequencyChanges = [...modelCatalogueRefreshFrequencyChanges, frequency];
+          modelCatalogueRefreshStatus = {
+            ...modelCatalogueRefreshStatus,
+            frequency
+          };
+          return modelCatalogueRefreshStatus;
+        },
         setProvider: async (provider) => {
           selectedAiProvider = provider;
           selectedAiProviders.push(provider);
+          const nextLocalLlmStatus = overrides.onSetAiProvider?.(provider);
+          if (nextLocalLlmStatus) {
+            localLlmStatus = nextLocalLlmStatus;
+          }
           return getCurrentOnboardingStatus();
         },
         status: async () => piStatus
@@ -5233,7 +5863,7 @@ function installTestBridge(overrides: {
         list: async () => promptTemplateState,
         reset: async () => {
           promptTemplateState = testPromptTemplateState({
-            templates: preserveCustomisedStarterTestPromptTemplates(promptTemplateState.templates)
+            templates: starterTestPromptTemplates()
           });
 
           return promptTemplateState;
@@ -5243,9 +5873,9 @@ function installTestBridge(overrides: {
           promptTemplateState = {
             ok: true,
             selectedTemplateIds: promptTemplateState.selectedTemplateIds,
-            templates: promptTemplateState.templates.some((item) => item.id === templateToSave.id)
+            templates: resolveTestPromptTemplateNameCollisions(promptTemplateState.templates.some((item) => item.id === templateToSave.id)
               ? promptTemplateState.templates.map((item) => (item.id === templateToSave.id ? templateToSave : item))
-              : [...promptTemplateState.templates, templateToSave]
+              : [...promptTemplateState.templates, templateToSave])
           };
 
           return promptTemplateState;
@@ -5332,8 +5962,11 @@ function installTestBridge(overrides: {
       },
       reset: async () => {
         settingsResets += 1;
+        if (overrides.resetSettings) {
+          return overrides.resetSettings();
+        }
         promptTemplateState = testPromptTemplateState({
-          templates: preserveCustomisedStarterTestPromptTemplates(promptTemplateState.templates)
+          templates: starterTestPromptTemplates()
         });
 
         return { ok: true };
@@ -5415,6 +6048,9 @@ function installTestBridge(overrides: {
     get modelCatalogueRefreshes() {
       return modelCatalogueRefreshes;
     },
+    get chatGptLoginOpens() {
+      return chatGptLoginOpens;
+    },
     onboardingStatusOptions,
     starts,
     get portablePreferences() {
@@ -5475,9 +6111,6 @@ function installTestBridge(overrides: {
     get promptTemplateState() {
       return promptTemplateState;
     },
-    get chatGptLoginOpens() {
-      return chatGptLoginOpens;
-    },
     get onboardingCompletes() {
       return onboardingCompletes;
     },
@@ -5495,6 +6128,9 @@ function installTestBridge(overrides: {
     },
     get updateFrequencyChanges() {
       return updateFrequencyChanges;
+    },
+    get modelCatalogueRefreshFrequencyChanges() {
+      return modelCatalogueRefreshFrequencyChanges;
     },
     get historyFolderOpens() {
       return historyFolderOpens;
@@ -5616,21 +6252,15 @@ function getAvailableTestPromptTemplateName(name: string, templates: PromptTempl
     return baseName;
   }
 
-  const customName = `${baseName} custom`;
-
-  if (!usedNames.has(customName.toLocaleLowerCase())) {
-    return customName;
-  }
-
   for (let index = 2; index < 1000; index += 1) {
-    const candidate = `${customName} ${index}`;
+    const candidate = `${baseName} ${index}`;
 
     if (!usedNames.has(candidate.toLocaleLowerCase())) {
       return candidate;
     }
   }
 
-  return `${customName} ${Date.now()}`;
+  return `${baseName} ${Date.now()}`;
 }
 
 function resolveTestPromptTemplateNameCollisions(templates: PromptTemplate[]) {

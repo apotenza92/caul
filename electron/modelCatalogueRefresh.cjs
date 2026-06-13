@@ -144,6 +144,7 @@ const liveModelSources = [
       platforms: ['darwin', 'win32', 'linux'],
       quantisation: ['Q4_K_M'],
       reasoningSupport: true,
+      thinkingControl: 'qwen-slash-no-think',
       runtime: 'llama.cpp',
       toolSupport: false
     },
@@ -331,6 +332,7 @@ async function maybeAddDiscoveredGgufModel(catalogue, repoId, { fetchFn, reviewe
       providerModelId: repoId,
       quantisation: [quantisation.name],
       reasoningSupport: /\b(r1|reasoning|qwen3|deepseek)\b/i.test(`${repoId} ${ggufFile.rfilename}`),
+      ...(/\bqwen3\b/i.test(`${repoId} ${ggufFile.rfilename}`) ? { thinkingControl: 'qwen-slash-no-think' } : {}),
       reviewedAt,
       runtime: 'llama.cpp',
       toolSupport: false
@@ -448,6 +450,7 @@ async function maybeAddDiscoveredMlxModel(catalogue, repoId, { fetchFn, reviewed
     providerModelId: repoId,
     quantisation: [quantisation],
     reasoningSupport: /\b(r1|reasoning|qwen3|deepseek)\b/i.test(repoId),
+    ...(/\bqwen3\b/i.test(repoId) ? { thinkingControl: 'qwen-slash-no-think' } : {}),
     reviewedAt,
     runtime: 'mlx-lm',
     toolSupport: false

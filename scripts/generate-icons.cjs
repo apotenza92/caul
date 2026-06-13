@@ -171,6 +171,7 @@ async function renderIcon(svgBuffer, size, outputPath, palette, backgroundScale 
 
   await sharp(Buffer.from(backgroundSvg))
     .composite([{ input: glyph, left: glyphPaddingX, top: glyphPaddingY }])
+    .withMetadata({ icc: 'srgb' })
     .png()
     .toFile(outputPath);
 }
@@ -203,7 +204,17 @@ async function generateVariant(variant) {
   }
 
   if (process.platform === 'darwin') {
-    execFileSync('iconutil', ['-c', 'icns', iconsetDir, '-o', path.join(variant.dir, 'icon.icns')], { stdio: 'inherit' });
+    const icnsPath = path.join(variant.dir, 'icon.icns');
+
+    try {
+      execFileSync('iconutil', ['-c', 'icns', iconsetDir, '-o', icnsPath], { stdio: 'inherit' });
+    } catch (error) {
+      if (!fs.existsSync(icnsPath)) {
+        throw error;
+      }
+
+      console.warn(`iconutil rejected ${path.relative(rootDir, iconsetDir)}; keeping existing ${path.relative(rootDir, icnsPath)}.`);
+    }
   }
 
   for (const size of icoSizes) {

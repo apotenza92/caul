@@ -9,13 +9,14 @@ const lastUpdateCheckFileName = 'last-update-check.json';
 const githubOwner = 'apotenza92';
 const githubRepo = 'caul';
 const releasesApiUrl = `https://api.github.com/repos/${githubOwner}/${githubRepo}/releases?per_page=20`;
-const updateFrequencies = ['never', 'startup', 'hourly', 'sixHours', 'twelveHours', 'daily', 'weekly'];
+const updateFrequencies = ['never', 'startup', 'hourly', 'sixHours', 'twelveHours', 'daily', 'weekly', 'monthly'];
 const updateFrequencyMs = {
   hourly: 60 * 60 * 1000,
   sixHours: 6 * 60 * 60 * 1000,
   twelveHours: 12 * 60 * 60 * 1000,
   daily: 24 * 60 * 60 * 1000,
-  weekly: 7 * 24 * 60 * 60 * 1000
+  weekly: 7 * 24 * 60 * 60 * 1000,
+  monthly: 30 * 24 * 60 * 60 * 1000
 };
 
 function createUpdaterService({

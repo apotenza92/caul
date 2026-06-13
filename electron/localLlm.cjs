@@ -5,6 +5,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn: nodeSpawn, spawnSync: nodeSpawnSync } = require('node:child_process');
 
+const DOWNLOAD_CANCELLED_MESSAGE = 'Local AI download cancelled.';
+
 function createLocalLlmService({
   app,
   catalogue,
@@ -21,6 +23,7 @@ function createLocalLlmService({
   let serverProcess = null;
   let serverPort = null;
   let serverModelPath = null;
+  let serverReasoning = 'off';
   let serverStartedAt = 0;
   let warmState = {
     error: null,
@@ -168,6 +171,9 @@ function createLocalLlmService({
     }
 
     const downloadState = {
+      cancelled: false,
+      cleanupPaths: [],
+      command: null,
       modelId: model.id,
       progress: {
         downloadedBytes: 0,
@@ -186,6 +192,7 @@ function createLocalLlmService({
 
     try {
       if (needsRuntime) {
+        trackDownloadCleanupPath(downloadState, getRuntimeRoot());
         await downloadRuntime(runtimeAsset, downloadState, {
           end: needsModel ? 24 : 100,
           start: 0
@@ -193,12 +200,14 @@ function createLocalLlmService({
       }
 
       if (needsModel) {
+        trackDownloadCleanupPath(downloadState, getModelPath(model));
         await downloadModel(model, downloadState, {
           end: 100,
           start: needsRuntime ? 25 : 0
         });
       }
     } finally {
+      cleanupCancelledDownload(downloadState);
       activeDownload = null;
       emitStatus(status(model.id));
     }
@@ -208,14 +217,53 @@ function createLocalLlmService({
 
   function cancelDownload() {
     const cancelledModelId = activeDownload?.modelId ?? null;
+    if (activeDownload) {
+      activeDownload.cancelled = true;
+    }
     if (activeDownload?.request) {
-      activeDownload.request.destroy(new Error('Local AI download cancelled.'));
+      activeDownload.request.destroy(new Error(DOWNLOAD_CANCELLED_MESSAGE));
+    }
+    if (activeDownload?.command) {
+      activeDownload.command.kill();
+    }
+    if (activeDownload) {
+      cleanupCancelledDownload(activeDownload);
     }
 
     activeDownload = null;
     emitStatus(status(cancelledModelId));
 
     return status(cancelledModelId);
+  }
+
+  function trackDownloadCleanupPath(downloadState, targetPath, { removeEvenIfExisted = false } = {}) {
+    if (!targetPath) {
+      return;
+    }
+
+    downloadState.cleanupPaths.push({
+      existedBefore: fs.existsSync(targetPath),
+      path: targetPath,
+      removeEvenIfExisted
+    });
+  }
+
+  function cleanupCancelledDownload(downloadState) {
+    if (!downloadState?.cancelled) {
+      return;
+    }
+
+    for (const item of [...downloadState.cleanupPaths].reverse()) {
+      if (!item.removeEvenIfExisted && item.existedBefore) {
+        continue;
+      }
+
+      try {
+        fs.rmSync(item.path, { force: true, recursive: true });
+      } catch {
+        // Cancellation cleanup is best effort. Retry downloads clear stale temporary files too.
+      }
+    }
   }
 
   function getMlxStatus(model = resolveModel()) {
@@ -316,6 +364,9 @@ function createLocalLlmService({
     }
 
     const downloadState = {
+      cancelled: false,
+      cleanupPaths: [],
+      command: null,
       modelId: model.id,
       progress: {
         downloadedBytes: 0,
@@ -334,6 +385,7 @@ function createLocalLlmService({
       const needsModel = !hasMlxSnapshot(getModelPath(model));
 
       if (needsRuntime) {
+        trackDownloadCleanupPath(downloadState, getMlxToolRoot());
         await installMlxRuntime(downloadState, {
           end: needsModel ? 25 : 100,
           start: 0
@@ -341,12 +393,14 @@ function createLocalLlmService({
       }
 
       if (needsModel) {
+        trackDownloadCleanupPath(downloadState, getModelPath(model));
         await downloadMlxModel(model, {
           end: 100,
           start: needsRuntime ? 26 : 0
         }, downloadState);
       }
     } finally {
+      cleanupCancelledDownload(downloadState);
       activeDownload = null;
       emitStatus(status(model.id));
     }
@@ -369,7 +423,7 @@ function createLocalLlmService({
       'venv',
       '--clear',
       getMlxToolRoot()
-    ], 'Failed to prepare MLX local AI runtime.', { env: getMlxEnv() });
+    ], 'Failed to prepare MLX local AI runtime.', { downloadState, env: getMlxEnv() });
     setDownloadProgress(downloadState, {
       downloadedBytes: 0,
       label: 'Installing local AI runtime',
@@ -384,7 +438,7 @@ function createLocalLlmService({
       '--python',
       getMlxPythonPath(),
       'mlx-lm'
-    ], 'Failed to install MLX local AI runtime.', { env: getMlxEnv() });
+    ], 'Failed to install MLX local AI runtime.', { downloadState, env: getMlxEnv() });
     setDownloadProgress(downloadState, {
       downloadedBytes: 0,
       label: 'Installed local AI runtime',
@@ -412,7 +466,7 @@ function createLocalLlmService({
       await runCommand(getMlxHfPath(), [
         'download',
         model.providerModelId
-      ], 'Failed to download MLX local AI model.', { env: getMlxEnv() });
+      ], 'Failed to download MLX local AI model.', { downloadState, env: getMlxEnv() });
       setDownloadProgress(downloadState, {
         downloadedBytes: totalBytes ?? downloadState.progress.downloadedBytes,
         label: 'Finalising local AI model',
@@ -546,6 +600,8 @@ function createLocalLlmService({
     fs.mkdirSync(getRuntimeRoot(), { recursive: true });
     const archivePath = pathModule.join(getRuntimeRoot(), runtimeAsset.archiveName);
     const temporaryPath = `${archivePath}.download`;
+    trackDownloadCleanupPath(downloadState, archivePath);
+    trackDownloadCleanupPath(downloadState, temporaryPath, { removeEvenIfExisted: true });
 
     await downloadFile(runtimeAsset.url, temporaryPath, downloadState, {
       label: 'Downloading local AI runtime',
@@ -564,7 +620,7 @@ function createLocalLlmService({
       totalBytes: runtimeAsset.sizeBytes ?? null
     });
     emitStatus(status(downloadState.modelId));
-    await extractArchive(archivePath, getRuntimeRoot());
+    await extractArchive(archivePath, getRuntimeRoot(), downloadState);
     fs.rmSync(archivePath, { force: true });
     const serverPath = getServerPath();
 
@@ -589,6 +645,7 @@ function createLocalLlmService({
     fs.mkdirSync(getModelRoot(), { recursive: true });
     const modelPath = getModelPath(model);
     const temporaryPath = `${modelPath}.download`;
+    trackDownloadCleanupPath(downloadState, temporaryPath, { removeEvenIfExisted: true });
 
     await downloadFile(model.downloadUrl, temporaryPath, downloadState, {
       label: 'Downloading local AI model',
@@ -704,9 +761,9 @@ function createLocalLlmService({
       || /qwen\d*(?:\.\d+)?[-_\s]?coder/i.test(text);
   }
 
-  function extractArchive(archivePath, destinationPath) {
+  function extractArchive(archivePath, destinationPath, downloadState) {
     if (archivePath.endsWith('.tar.gz')) {
-      return runCommand('tar', ['-xzf', archivePath, '-C', destinationPath], 'Failed to extract local AI runtime.');
+      return runCommand('tar', ['-xzf', archivePath, '-C', destinationPath], 'Failed to extract local AI runtime.', { downloadState });
     }
 
     if (archivePath.endsWith('.zip')) {
@@ -715,19 +772,27 @@ function createLocalLlmService({
           '-NoProfile',
           '-Command',
           `Expand-Archive -Force ${JSON.stringify(archivePath)} ${JSON.stringify(destinationPath)}`
-        ], 'Failed to extract local AI runtime.');
+        ], 'Failed to extract local AI runtime.', { downloadState });
       }
 
-      return runCommand('unzip', ['-o', archivePath, '-d', destinationPath], 'Failed to extract local AI runtime.');
+      return runCommand('unzip', ['-o', archivePath, '-d', destinationPath], 'Failed to extract local AI runtime.', { downloadState });
     }
 
     return Promise.reject(new Error('Unsupported local AI runtime archive format.'));
   }
 
-  function runCommand(command, args, message, { env = process.env, timeoutMs = 0, allowTimeout = false } = {}) {
+  function runCommand(command, args, message, { downloadState = null, env = process.env, timeoutMs = 0, allowTimeout = false } = {}) {
     return new Promise((resolve, reject) => {
+      if (downloadState?.cancelled) {
+        reject(new Error(DOWNLOAD_CANCELLED_MESSAGE));
+        return;
+      }
+
       const child = spawn(command, args, { env, stdio: ['ignore', 'ignore', 'pipe'] });
       const errors = [];
+      if (downloadState) {
+        downloadState.command = child;
+      }
       const timer = timeoutMs > 0
         ? setTimeout(() => {
           child.kill();
@@ -739,11 +804,25 @@ function createLocalLlmService({
         }, timeoutMs)
         : null;
 
+      function clearActiveCommand() {
+        if (downloadState?.command === child) {
+          downloadState.command = null;
+        }
+      }
+
       child.stderr.on('data', (chunk) => errors.push(chunk.toString()));
-      child.once('error', reject);
+      child.once('error', (error) => {
+        clearActiveCommand();
+        reject(error);
+      });
       child.once('exit', (code) => {
+        clearActiveCommand();
         if (timer) {
           clearTimeout(timer);
+        }
+        if (downloadState?.cancelled) {
+          reject(new Error(DOWNLOAD_CANCELLED_MESSAGE));
+          return;
         }
         if (code === 0) {
           resolve();
@@ -754,10 +833,11 @@ function createLocalLlmService({
     });
   }
 
-  async function request(prompt, { modelId = null, onDelta = () => undefined, signal } = {}) {
+  async function request(prompt, { modelId = null, onDelta = () => undefined, reasoning = 'off', signal } = {}) {
     const model = resolveModel(modelId);
+    const localReasoning = normaliseLocalReasoning(reasoning);
     if (model?.runtime === 'mlx-lm') {
-      return requestMlx(prompt, model, { onDelta, signal });
+      return requestMlx(prompt, model, { onDelta, reasoning: localReasoning, signal });
     }
 
     const modelPath = getModelPath(model);
@@ -766,9 +846,12 @@ function createLocalLlmService({
       throw new Error('Local AI is not ready. Download the local AI runtime and model in onboarding or Settings.');
     }
 
-    const port = await ensureServer(modelPath);
+    const port = await ensureServer(modelPath, localReasoning, model);
 
-    return requestChatCompletion(port, prompt, { onDelta, signal });
+    return requestChatCompletion(port, prompt, {
+      onDelta,
+      signal
+    });
   }
 
   async function warm(modelId = null) {
@@ -802,7 +885,7 @@ function createLocalLlmService({
         if (model.runtime === 'mlx-lm') {
           await ensureMlxServer(model);
         } else {
-          await ensureServer(modelPath);
+          await ensureServer(modelPath, 'off', model);
         }
 
         warmState = {
@@ -898,24 +981,29 @@ function createLocalLlmService({
     }
   }
 
-  async function ensureServer(modelPath) {
-    if (serverProcess && serverModelPath === modelPath && serverPort) {
+  async function ensureServer(modelPath, reasoning = 'off', model = null) {
+    const localReasoning = normaliseLocalReasoning(reasoning);
+
+    if (serverProcess && serverModelPath === modelPath && serverPort && serverReasoning === localReasoning) {
       return serverPort;
     }
 
     stop();
+    cleanupManagedServerProcesses();
 
     const selectedPort = await getAvailablePort();
     serverPort = selectedPort;
     serverModelPath = modelPath;
+    serverReasoning = localReasoning;
     serverStartedAt = Date.now();
     serverProcess = spawn(getServerPath(), [
       '--host', '127.0.0.1',
       '--port', String(selectedPort),
       '--model', modelPath,
-      '--ctx-size', '8192',
-      '--threads', String(Math.max(2, Math.min(8, osModule.cpus().length))),
+      '--ctx-size', String(getLocalLlmContextSize(model)),
+      '--threads', String(getLocalLlmThreadCount()),
       '--jinja',
+      ...getLocalReasoningServerArgs(localReasoning),
       '--no-webui'
     ], {
       cwd: getRoot(),
@@ -927,11 +1015,11 @@ function createLocalLlmService({
       }
     });
     serverProcess.stderr.unref?.();
-    serverProcess.unref?.();
     serverProcess.once('exit', () => {
       serverProcess = null;
       serverPort = null;
       serverModelPath = null;
+      serverReasoning = 'off';
     });
 
     await waitForServer(selectedPort, Math.max(10_000, Number(process.env.CAUL_LOCAL_LLM_START_TIMEOUT_MS ?? 90_000)));
@@ -939,23 +1027,90 @@ function createLocalLlmService({
     return selectedPort;
   }
 
-  async function requestMlx(prompt, model, { onDelta, signal }) {
+  function getLocalLlmContextSize(model) {
+    const explicitContextSize = Number(process.env.CAUL_LOCAL_LLM_CONTEXT_TOKENS);
+    if (Number.isFinite(explicitContextSize) && explicitContextSize > 0) {
+      return Math.floor(explicitContextSize);
+    }
+
+    const catalogueContextSize = Number(model?.contextWindowTokens ?? 0);
+    const defaultContextSize = Number(process.env.CAUL_LOCAL_LLM_DEFAULT_CONTEXT_TOKENS ?? 8192);
+    const maxContextSize = Number(process.env.CAUL_LOCAL_LLM_MAX_CONTEXT_TOKENS ?? defaultContextSize);
+    const contextSize = Number.isFinite(catalogueContextSize) && catalogueContextSize > 0
+      ? Math.min(catalogueContextSize, maxContextSize)
+      : defaultContextSize;
+
+    return Math.max(512, Math.floor(contextSize));
+  }
+
+  function getLocalLlmThreadCount() {
+    const explicitThreads = Number(process.env.CAUL_LOCAL_LLM_THREADS);
+    if (Number.isFinite(explicitThreads) && explicitThreads > 0) {
+      return Math.floor(explicitThreads);
+    }
+
+    const maxThreads = Number(process.env.CAUL_LOCAL_LLM_MAX_THREADS ?? 8);
+    const threadLimit = Number.isFinite(maxThreads) && maxThreads > 0 ? Math.floor(maxThreads) : 8;
+
+    return Math.max(2, Math.min(threadLimit, osModule.cpus().length));
+  }
+
+  function normaliseLocalReasoning(reasoning) {
+    return ['minimal', 'low', 'medium', 'high', 'xhigh'].includes(reasoning)
+      ? reasoning
+      : 'off';
+  }
+
+  function getLocalReasoningBudget(reasoning) {
+    if (reasoning === 'minimal') {
+      return 32;
+    }
+
+    if (reasoning === 'low') {
+      return 64;
+    }
+
+    if (reasoning === 'medium') {
+      return 256;
+    }
+
+    if (reasoning === 'high') {
+      return 768;
+    }
+
+    if (reasoning === 'xhigh') {
+      return 1536;
+    }
+
+    return 0;
+  }
+
+  function getLocalReasoningServerArgs(reasoning) {
+    if (reasoning === 'off') {
+      return ['--reasoning', 'off'];
+    }
+
+    return [
+      '--reasoning', 'on',
+      '--reasoning-budget', String(getLocalReasoningBudget(reasoning))
+    ];
+  }
+
+  async function requestMlx(prompt, model, { onDelta, reasoning, signal }) {
     if (!getMlxServerPath() || !hasMlxSnapshot(getModelPath(model))) {
       throw new Error('MLX local AI is not ready. Download the local AI runtime and model in onboarding or Settings.');
     }
 
     const port = await ensureMlxServer(model);
-    const requestPrompt = shouldDisableThinkingForModel(model) && !prompt.includes('/no_think')
+    const requestPrompt = reasoning === 'off' && shouldAppendNoThinkPrompt(model) && !prompt.includes('/no_think')
       ? `${prompt}\n\n/no_think`
       : prompt;
 
     return requestChatCompletion(port, requestPrompt, { modelId: model.providerModelId, onDelta, signal });
   }
 
-  function shouldDisableThinkingForModel(model) {
-    const modelId = `${model?.id ?? ''} ${model?.providerModelId ?? ''}`.toLowerCase();
-
-    return modelId.includes('qwen3');
+  function shouldAppendNoThinkPrompt(model) {
+    return model?.thinkingControl === 'qwen-slash-no-think';
   }
 
   async function ensureMlxServer(model) {
@@ -1002,12 +1157,12 @@ function createLocalLlmService({
     if (serverProcess) {
       serverProcess.kill();
       serverProcess.stderr.unref?.();
-      serverProcess.unref?.();
     }
 
     serverProcess = null;
     serverPort = null;
     serverModelPath = null;
+    serverReasoning = 'off';
     warmState = {
       error: null,
       modelId: null,
@@ -1015,6 +1170,101 @@ function createLocalLlmService({
       promise: null,
       status: null
     };
+  }
+
+  function cleanupManagedServerProcesses({ keepPid = null } = {}) {
+    if (process.platform === 'win32') {
+      cleanupManagedWindowsServerProcesses({ keepPid });
+      return;
+    }
+
+    const runtimeRoot = getRuntimeRoot();
+    const serverPath = getServerPath();
+    const result = spawnSync('ps', ['-axo', 'pid=', '-o', 'command='], {
+      encoding: 'utf8'
+    });
+
+    if (result.status !== 0 || !result.stdout) {
+      return;
+    }
+
+    for (const line of result.stdout.split('\n')) {
+      const match = line.trim().match(/^(\d+)\s+(.+)$/);
+
+      if (!match) {
+        continue;
+      }
+
+      const pid = Number(match[1]);
+      const command = match[2];
+
+      if (!shouldStopManagedServerProcess({ command, keepPid, pid, runtimeRoot, serverPath })) {
+        continue;
+      }
+
+      stopProcess(pid);
+    }
+  }
+
+  function cleanupManagedWindowsServerProcesses({ keepPid = null } = {}) {
+    const runtimeRoot = getRuntimeRoot();
+    const serverPath = getServerPath();
+    const result = spawnSync('wmic', [
+      'process',
+      'where',
+      "name='llama-server.exe'",
+      'get',
+      'ProcessId,CommandLine',
+      '/FORMAT:CSV'
+    ], {
+      encoding: 'utf8'
+    });
+
+    if (result.status !== 0 || !result.stdout) {
+      return;
+    }
+
+    for (const line of result.stdout.split('\n')) {
+      const trimmed = line.trim();
+      const match = trimmed.match(/^(?:[^,]*),(.*),(\d+)$/);
+
+      if (!match) {
+        continue;
+      }
+
+      const command = match[1];
+      const pid = Number(match[2]);
+
+      if (!shouldStopManagedServerProcess({ command, keepPid, pid, runtimeRoot, serverPath })) {
+        continue;
+      }
+
+      stopProcess(pid);
+    }
+  }
+
+  function shouldStopManagedServerProcess({ command, keepPid, pid, runtimeRoot, serverPath }) {
+    if (!pid || pid === process.pid || pid === keepPid) {
+      return false;
+    }
+
+    const isLlamaServer = /(?:^|\s|\/|\\)llama-server(?:\.exe)?(?:\s|$)/.test(command);
+
+    if (!isLlamaServer) {
+      return false;
+    }
+
+    return Boolean(
+      serverPath && command.includes(serverPath)
+    ) || command.includes(runtimeRoot);
+  }
+
+  function stopProcess(pid) {
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {
+      // Stale process cleanup is best effort.
+    }
   }
 
   function getAvailablePort() {
@@ -1121,18 +1371,12 @@ function createLocalLlmService({
       request.end(JSON.stringify({
         messages: [
           {
-            role: 'system',
-            content: 'Answer concisely and helpfully for a live call assistant.'
-          },
-          {
             role: 'user',
             content: prompt
           }
         ],
         model: modelId,
-        max_tokens: 64,
-        stream: true,
-        temperature: 0.3
+        stream: true
       }));
     });
   }

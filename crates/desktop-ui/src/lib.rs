@@ -41,7 +41,6 @@ pub struct NativeUiModel {
     pub system_level: AudioLevel,
     pub audio_frame_count: u64,
     pub transcript: String,
-    pub partial_transcript: String,
     status_message: String,
 }
 
@@ -56,7 +55,6 @@ impl Default for NativeUiModel {
                 .expect("zero system level is valid"),
             audio_frame_count: 0,
             transcript: String::new(),
-            partial_transcript: String::new(),
             status_message: "Native Rust UI is ready. Capture starts through the macOS helper."
                 .to_string(),
         }
@@ -73,7 +71,6 @@ impl NativeUiModel {
             self.session_state = SessionState::Starting;
             self.audio_frame_count = 0;
             self.transcript.clear();
-            self.partial_transcript.clear();
             self.status_message = "Starting macOS system audio capture.".to_string();
         }
     }
@@ -83,11 +80,6 @@ impl NativeUiModel {
         self.audio_frame_count = 0;
         self.system_level =
             AudioLevel::new(AudioSource::System, 0.0, 0.0).expect("zero system level is valid");
-
-        if !self.partial_transcript.is_empty() {
-            self.transcript.clone_from(&self.partial_transcript);
-            self.partial_transcript.clear();
-        }
 
         self.status_message = "System audio capture is stopped.".to_string();
     }
@@ -130,7 +122,6 @@ impl NativeUiModel {
                     }
 
                     self.transcript.push_str(text);
-                    self.partial_transcript.clear();
                     self.status_message = "Confirmed local transcript received.".to_string();
                 }
             }
@@ -138,8 +129,7 @@ impl NativeUiModel {
                 let text = text.trim();
 
                 if !text.is_empty() {
-                    self.partial_transcript = text.to_string();
-                    self.status_message = "Live transcript updated.".to_string();
+                    self.status_message = "Transcribing local audio.".to_string();
                 }
             }
             CaptureUpdate::SpeechStarted => {
@@ -170,10 +160,6 @@ impl NativeUiModel {
     }
 
     pub fn visible_transcript(&self) -> &str {
-        if !self.partial_transcript.is_empty() {
-            return &self.partial_transcript;
-        }
-
         &self.transcript
     }
 }
@@ -236,28 +222,27 @@ mod tests {
     }
 
     #[test]
-    fn visible_transcript_prefers_live_partial() {
+    fn visible_transcript_keeps_confirmed_text_when_partial_arrives() {
         let mut model = NativeUiModel::default();
         model.apply_capture_update(CaptureUpdate::TranscriptionCompleted(
-            "bad final text".to_string(),
+            "confirmed text".to_string(),
         ));
         model.apply_capture_update(CaptureUpdate::TranscriptionPartial(
-            "better live text".to_string(),
+            "diagnostic live text".to_string(),
         ));
 
-        assert_eq!(model.visible_transcript(), "better live text");
+        assert_eq!(model.visible_transcript(), "confirmed text");
     }
 
     #[test]
-    fn stopping_commits_live_partial_to_transcript() {
+    fn stopping_does_not_commit_live_partial_to_transcript() {
         let mut model = NativeUiModel::default();
         model.apply_capture_update(CaptureUpdate::TranscriptionPartial(
-            "best live text".to_string(),
+            "diagnostic live text".to_string(),
         ));
 
         model.reset_session();
 
-        assert_eq!(model.visible_transcript(), "best live text");
-        assert!(model.partial_transcript.is_empty());
+        assert_eq!(model.visible_transcript(), "");
     }
 }

@@ -1,14 +1,23 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 const durationMs = Number(process.env.CAUL_LOCAL_PARAKEET_SMOKE_MS ?? 60_000);
+const parakeetModelDirName = 'parakeet-tdt-0.6b-v3-int8';
+const parakeetRequiredFiles = [
+  'encoder-model.int8.onnx',
+  'decoder_joint-model.int8.onnx',
+  'nemo128.onnx',
+  'vocab.txt'
+];
 const devServerPort = await getAvailablePort();
 const devServerUrl = `http://127.0.0.1:${devServerPort}`;
 const userDataDir = mkdtempSync(path.join(tmpdir(), 'caul-electron-smoke-'));
 let output = '';
+
+seedParakeetModelForSmoke(userDataDir);
 
 const vite = spawn('node', ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', String(devServerPort)], {
   stdio: ['ignore', 'pipe', 'pipe']
@@ -121,4 +130,42 @@ function getAvailablePort() {
       });
     });
   });
+}
+
+function seedParakeetModelForSmoke(targetUserDataDir) {
+  const source = process.env.CAUL_LOCAL_PARAKEET_MODEL_SOURCE;
+
+  if (!source) {
+    return;
+  }
+
+  const sourceDir = resolveParakeetSourceDir(source);
+
+  if (!sourceDir) {
+    throw new Error(`CAUL_LOCAL_PARAKEET_MODEL_SOURCE does not contain a complete ${parakeetModelDirName} model.`);
+  }
+
+  const destination = path.join(targetUserDataDir, 'models', parakeetModelDirName);
+  rmSync(destination, { force: true, recursive: true });
+  cpSync(sourceDir, destination, { recursive: true });
+  console.log(`[caul] Seeded local Parakeet model for smoke from ${sourceDir}`);
+}
+
+function resolveParakeetSourceDir(source) {
+  const direct = path.resolve(source);
+  const nested = path.join(direct, parakeetModelDirName);
+
+  if (isCompleteParakeetModelDir(direct)) {
+    return direct;
+  }
+
+  if (isCompleteParakeetModelDir(nested)) {
+    return nested;
+  }
+
+  return null;
+}
+
+function isCompleteParakeetModelDir(modelDir) {
+  return parakeetRequiredFiles.every((fileName) => existsSync(path.join(modelDir, fileName)));
 }

@@ -96,6 +96,13 @@ function validateModelCatalogue(catalogue) {
         throw new Error(`Model catalogue entry is missing ${key}.`);
       }
     }
+
+    if (
+      typeof model.thinkingControl !== 'undefined'
+      && model.thinkingControl !== 'qwen-slash-no-think'
+    ) {
+      throw new Error(`Model catalogue entry ${model.id} has unsupported thinkingControl.`);
+    }
   }
 }
 

@@ -256,6 +256,28 @@ describe('history service', () => {
       expect(readFileSync(newHistoryPath, 'utf8')).toContain('old history');
       expect(existsSync(oldHistoryPath)).toBe(false);
       expect(readFileSync(unrelatedPath, 'utf8')).toBe('leave me');
+      expect(existsSync(oldDefaultFolder)).toBe(true);
+    } finally {
+      test.cleanup();
+    }
+  });
+
+  it('removes the old History subfolder when migration leaves it empty', () => {
+    const test = createTestService();
+
+    try {
+      const oldDefaultFolder = join(test.documents, 'Caul', 'History');
+      const oldMonthFolder = join(oldDefaultFolder, '2026-06');
+      const oldHistoryPath = join(oldMonthFolder, '2026-06-06.html');
+      mkdirpSync(oldMonthFolder);
+      writeFileSync(oldHistoryPath, '<!doctype html><title>old history</title>');
+
+      const status = test.service.getStatus();
+      const newHistoryPath = join(test.documents, 'Caul', '2026-06', '2026-06-06.html');
+
+      expect(status.folder).toBe(join(test.documents, 'Caul'));
+      expect(readFileSync(newHistoryPath, 'utf8')).toContain('old history');
+      expect(existsSync(oldDefaultFolder)).toBe(false);
     } finally {
       test.cleanup();
     }

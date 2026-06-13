@@ -27,6 +27,15 @@ describe('createStopFlushController', () => {
     vi.useRealTimers();
   });
 
+  it('reports a cancelled wait reason', async () => {
+    const controller = createStopFlushController();
+    const wait = controller.wait();
+
+    controller.cancel('process-exit');
+
+    await expect(wait).resolves.toEqual({ reason: 'process-exit' });
+  });
+
   it('cancels stale pending waits when a new stop wait replaces them', async () => {
     const controller = createStopFlushController();
     const first = controller.wait();

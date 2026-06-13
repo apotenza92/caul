@@ -1,4 +1,5 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode, type RefObject, type WheelEvent } from 'react';
+import { cloneElement, isValidElement, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode, type RefObject, type WheelEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { Checkbox, CheckboxDisplay } from '@/components/ui/checkbox';
 import {
@@ -12,6 +13,8 @@ import {
 } from '@/components/ui/dialog';
 import {
   Field,
+  FieldContent,
+  FieldDescription,
   FieldGroup,
   FieldLabel
 } from '@/components/ui/field';
@@ -36,7 +39,7 @@ import {
   TooltipTrigger
 } from '@/components/ui/tooltip';
 import { Textarea } from '@/components/ui/textarea';
-import { ArrowUpIcon, BellIcon, CheckCircle2Icon, ChevronDownIcon, ChevronRightIcon, CircleAlertIcon, CopyIcon, DownloadIcon, FastForwardIcon, FileIcon, FileInputIcon, FileTextIcon, FolderOpenIcon, HistoryIcon, ImageIcon, InfoIcon, ListChecksIcon, LoaderCircleIcon, LogOutIcon, MicIcon, MicOffIcon, PaperclipIcon, PencilIcon, PlayIcon, PowerIcon, SearchIcon, SendIcon, SettingsIcon, SquareIcon, Trash2Icon, Volume2Icon, VolumeXIcon, XCircleIcon, XIcon } from 'lucide-react';
+import { ArrowUpIcon, BellIcon, CheckCircle2Icon, ChevronDownIcon, ChevronRightIcon, CircleAlertIcon, CopyIcon, DownloadIcon, FastForwardIcon, FileIcon, FileInputIcon, FileTextIcon, FolderOpenIcon, HistoryIcon, ImageIcon, InfoIcon, ListChecksIcon, LoaderCircleIcon, LogOutIcon, MicIcon, MicOffIcon, PaperclipIcon, PencilIcon, PlayIcon, PowerIcon, RotateCcwIcon, SearchIcon, SendIcon, SettingsIcon, SquareIcon, StarIcon, Trash2Icon, Volume2Icon, VolumeXIcon, XCircleIcon, XIcon } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import caulAppIconUrl from '../assets/icons/icon-rounded.png?url';
 import caulBetaAppIconUrl from '../assets/icons/beta/icon-rounded.png?url';
@@ -55,6 +58,7 @@ import {
   type LlmModel,
   type LlmReasoning,
   type ModelCatalogueRefreshResult,
+  type ModelCatalogueRefreshStatus,
   type OnboardingStatus,
   type ParakeetStatus,
   type PermissionItem,
@@ -72,6 +76,7 @@ import {
 import { useLiveTranscription, type AiResponseSession, type TranscriptSession } from './hooks/useLiveTranscription';
 import { useRuntimeContext } from './hooks/useRuntimeContext';
 import { useSystemColourScheme } from './hooks/useSystemColourScheme';
+import cloudLlmConfig from '../electron/llmConfig.json';
 
 const layout = {
   overlayWindowOuter: 'relative h-screen w-screen bg-transparent p-2 text-foreground',
@@ -149,7 +154,7 @@ const layout = {
   settingsPageStack: 'gap-6',
   settingsSection: 'gap-2',
   settingsSectionBody: 'gap-3',
-  settingsDescription: 'text-sm leading-5 text-muted-foreground',
+  settingsDescription: 'w-full max-w-xl text-sm leading-5 text-muted-foreground',
   settingsPermissionActions: 'flex flex-wrap items-center gap-2',
   transcriptPrimaryActions: 'flex min-w-0 flex-1 items-center justify-between gap-2',
   transcriptSourceActions: 'flex min-w-0 flex-1 items-center justify-center gap-2',
@@ -245,19 +250,23 @@ const defaultListenToMicrophone = false;
 const defaultListenToSystemAudio = true;
 const defaultSendToAiWhenListeningStops = true;
 const defaultAutoCollapse = true;
-const defaultLlmModel: LlmModel = 'openai-codex/gpt-5.4-mini';
-const defaultLlmReasoning: LlmReasoning = 'off';
+const defaultLlmModel: LlmModel = cloudLlmConfig.defaultModel;
+const defaultLlmReasoning: LlmReasoning = cloudLlmConfig.defaultReasoning as LlmReasoning;
+const defaultLocalLlmReasoning: LlmReasoning = cloudLlmConfig.defaultLocalReasoning as LlmReasoning;
 const autoCollapsePreferenceKey = 'caul.auto-collapse';
+const autoCollapseAiResponsesPreferenceKey = 'caul.auto-collapse.ai-responses';
+const autoCollapseTranscriptionPreferenceKey = 'caul.auto-collapse.transcription';
 const generalInstructionsPreferenceKey = 'caul.general-instructions';
 const defaultGeneralInstructions = '';
 const generalInstructionsPlaceholder = 'e.g. Always answer in British English.';
-const recommendedPillClassName = 'shrink-0 rounded-full border border-primary/35 bg-primary/10 px-2 py-0.5 text-sm font-medium text-primary shadow-sm dark:border-primary/45 dark:bg-primary/15 dark:text-primary';
-const selectedRecommendedPillClassName = 'shrink-0 rounded-full border border-primary-foreground/40 bg-primary-foreground/15 px-2 py-0.5 text-sm font-medium text-primary-foreground shadow-sm';
+const recommendedMarkerClassName = 'inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-current/30 bg-current/10 text-current opacity-95 shadow-sm hover:bg-current/15';
+const selectedRecommendedMarkerClassName = 'inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-current/45 bg-current/15 text-current opacity-100 shadow-sm hover:bg-current/20';
 const recommendedPillTitle = 'Recommended based on this computer’s power, memory and supported local AI runtimes.';
 const recommendedLocalAiPillMessage = 'Based on this computer’s power, Caul recommends Local because you should still get acceptable private AI results on this machine.';
 const recommendedCloudAiPillMessage = 'Based on this computer’s power, Caul recommends Cloud because local AI probably will not give acceptable results on this machine.';
 const recommendedPillLabel = 'Recommended';
 const handleDragThresholdPx = 6;
+const handlePressVisualDurationMs = 520;
 const handleSnapVisualDurationMs = 280;
 const overlayOpenTooltipSuppressionMs = 700;
 const privateOverlayHandleSizePixels: Record<PrivateOverlayHandleSize, number> = {
@@ -275,13 +284,20 @@ const handleIconStyle = {
 } as React.CSSProperties;
 
 type OverlayEdge = 'bottom' | 'left' | 'right' | 'top';
-type SettingsSection = 'general' | 'models' | 'updates' | 'storage' | 'permissions';
+type SettingsSection = 'general' | 'transcription' | 'ai';
+type SettingsTarget = SettingsSection | 'models:transcription' | 'models:ai' | 'permissions';
 type TooltipSide = NonNullable<React.ComponentProps<typeof TooltipContent>['side']>;
 type MainNotification = {
   id: string;
   label: string;
-  section: SettingsSection;
+  target: SettingsTarget;
   tone: 'action' | 'error' | 'progress';
+};
+type PanelIssue = {
+  id: string;
+  kind: 'cloud-ai' | 'local-ai' | 'permissions' | 'transcription-model';
+  message: string;
+  target: SettingsTarget;
 };
 
 const starterPromptTemplates: PromptTemplate[] = [
@@ -303,21 +319,9 @@ const starterPromptTemplates: PromptTemplate[] = [
 ];
 const defaultSelectedPromptTemplateIds: string[] = [];
 
-const llmModels: Array<{ label: string; value: LlmModel }> = [
-  { label: '5.4 mini (Default)', value: 'openai-codex/gpt-5.4-mini' },
-  { label: '5.4', value: 'openai-codex/gpt-5.4' },
-  { label: '5.5', value: 'openai-codex/gpt-5.5' },
-  { label: '5.2', value: 'openai-codex/gpt-5.2' }
-];
+const llmModels: Array<{ label: string; value: LlmModel }> = cloudLlmConfig.models;
 
-const llmReasoningLevels: Array<{ label: string; value: LlmReasoning }> = [
-  { label: 'Off (Default)', value: 'off' },
-  { label: 'Minimal', value: 'minimal' },
-  { label: 'Low', value: 'low' },
-  { label: 'Medium', value: 'medium' },
-  { label: 'High', value: 'high' },
-  { label: 'Extra high', value: 'xhigh' }
-];
+const llmReasoningLevels: Array<{ label: string; value: LlmReasoning }> = cloudLlmConfig.reasoningLevels as Array<{ label: string; value: LlmReasoning }>;
 
 const llmModelValues = new Set<LlmModel>(llmModels.map((model) => model.value));
 const llmReasoningValues = new Set<LlmReasoning>(llmReasoningLevels.map((reasoning) => reasoning.value));
@@ -442,18 +446,31 @@ export function App() {
   const transcription = useLiveTranscription();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general');
+  const [settingsTarget, setSettingsTarget] = useState<SettingsTarget>('general');
   const [listenToMicrophone, setListenToMicrophone] = useState(defaultListenToMicrophone);
   const [listenToSystemAudio, setListenToSystemAudio] = useState(defaultListenToSystemAudio);
   const [sendToAiWhenListeningStops, setSendToAiWhenListeningStops] = useState(defaultSendToAiWhenListeningStops);
-  const [autoCollapse, setAutoCollapseState] = useState(() => readBooleanPreference(autoCollapsePreferenceKey, defaultAutoCollapse));
+  const [autoCollapseAiResponses, setAutoCollapseAiResponsesState] = useState(() => readBooleanPreference(
+    autoCollapseAiResponsesPreferenceKey,
+    readBooleanPreference(autoCollapsePreferenceKey, defaultAutoCollapse)
+  ));
+  const [autoCollapseTranscription, setAutoCollapseTranscriptionState] = useState(() => readBooleanPreference(
+    autoCollapseTranscriptionPreferenceKey,
+    readBooleanPreference(autoCollapsePreferenceKey, defaultAutoCollapse)
+  ));
   const [llmModel, setLlmModel] = useState<LlmModel>(defaultLlmModel);
   const [llmReasoning, setLlmReasoning] = useState<LlmReasoning>(defaultLlmReasoning);
+  const [localLlmReasoning, setLocalLlmReasoning] = useState<LlmReasoning>(defaultLocalLlmReasoning);
   const [selectedAiProvider, setSelectedAiProvider] = useState<AiProvider>('local');
   const [isLlmReady, setIsLlmReady] = useState(false);
   const [localLlmStatus, setLocalLlmStatus] = useState<LocalLlmStatus | null>(null);
+  const [localAiSetupPhase, setLocalAiSetupPhase] = useState<'requesting' | 'downloading' | 'idle'>('idle');
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [permissionsStatus, setPermissionsStatus] = useState<PermissionsStatus | null>(null);
   const [parakeetStatus, setParakeetStatus] = useState<ParakeetStatus | null>(null);
+  const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatus | null>(null);
+  const [selectedTranscriptionModelId, setSelectedTranscriptionModelId] = useState<LocalTranscriptionModelId>('parakeet');
+  const [isChatGptSigningIn, setIsChatGptSigningIn] = useState(false);
   const [promptTemplates, setPromptTemplates] = useState<PromptTemplate[]>(starterPromptTemplates);
   const [selectedPromptTemplateIds, setSelectedPromptTemplateIds] = useState<string[]>([]);
   const [isPromptTemplateDialogOpen, setIsPromptTemplateDialogOpen] = useState(false);
@@ -465,6 +482,8 @@ export function App() {
   const overlayEdge = getPrivateOverlayHandleEdge(privateOverlayStatus);
   const outputRef = useRef<HTMLDivElement>(null);
   const llmOutputRef = useRef<HTMLDivElement>(null);
+  const hasInitialisedTranscriptionModelRef = useRef(false);
+  const autoSelectingReadyModelRef = useRef<LocalTranscriptionModelId | null>(null);
 
   const isListening = transcription.isListening;
   const isBusy = transcription.isStarting;
@@ -474,8 +493,25 @@ export function App() {
     listenToSystemAudio,
     permissionsStatus
   });
-  const isSelectedAiProviderReadyForListening = selectedAiProvider === 'local' || isLlmReady;
-  const canStartListening = hasAudioSource && isSelectedAiProviderReadyForListening && (parakeetStatus?.installed ?? true) && missingSelectedPermissions.length === 0;
+  const transcriptIssue = getTranscriptPanelIssue({
+    missingSelectedPermissions,
+    parakeetStatus
+  });
+  const recommendedLocalAiModel = onboardingStatus?.ai.recommended === 'local' ? onboardingStatus.ai.recommendedModel : null;
+  const recommendedLocalAiModelReady = Boolean(
+    localLlmStatus?.runtime.installed
+    && localLlmStatus.model?.installed
+    && (!recommendedLocalAiModel || localLlmStatus.model.id === recommendedLocalAiModel.id)
+  );
+  const isCloudAiReady = isLlmReady || Boolean(onboardingStatus?.pi.connected);
+  const aiIssue = getAiPanelIssue({
+    isCloudAiReady,
+    isLocalAiReady: recommendedLocalAiModelReady,
+    localLlmStatus,
+    selectedAiProvider
+  });
+  const canUseAi = !aiIssue;
+  const canStartListening = hasAudioSource && !transcriptIssue;
   const isTranscriptPlaceholder = transcription.output === transcriptPlaceholder;
   const isAiResponsePlaceholder = transcription.llmOutput === aiResponsePlaceholder
     || transcription.llmOutput === legacyAiResponsePlaceholder
@@ -490,11 +526,12 @@ export function App() {
   const selectedPromptTemplatePrompt = selectedPromptTemplates.map((template) => template.prompt).join('\n\n');
   const selectedPromptTemplateAttachments = selectedPromptTemplates.flatMap((template) => template.attachments ?? []);
   const mainNotifications = getMainNotifications({
-    localLlmStatus,
-    selectedAiProvider,
+    aiIssue,
+    missingSelectedPermissions,
+    parakeetStatus,
+    transcriptIssue,
     updateStatus
   });
-
   useSuppressTooltipsAfterOverlayOpen(Boolean(privateOverlayStatus?.overlay.visible || privateOverlayStatus?.overlayWindowVisible));
 
   useLayoutEffect(() => {
@@ -572,6 +609,13 @@ export function App() {
 
     const unsubscribe = bridge.onLocalStatus((status) => {
       setLocalLlmStatus(status);
+      setLocalAiSetupPhase((current) => {
+        if (status.status === 'downloading') {
+          return 'downloading';
+        }
+
+        return current === 'downloading' || current === 'requesting' ? 'idle' : current;
+      });
     });
 
     return () => {
@@ -607,6 +651,10 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    void refreshOnboardingStatus();
+  }, []);
+
+  useEffect(() => {
     void refreshPermissionsStatus();
   }, []);
 
@@ -615,8 +663,35 @@ export function App() {
 
     return getSettingsBridge()?.parakeet?.onStatus?.((status) => {
       setParakeetStatus(status);
+      setOnboardingStatus((current) => current ? {
+        ...current,
+        parakeet: status
+      } : current);
     });
   }, []);
+
+  useEffect(() => {
+    if (
+      !onboardingStatus
+      || onboardingStatus.parakeet.status !== 'installed'
+      || onboardingStatus.parakeet.modelId !== selectedTranscriptionModelId
+      || onboardingStatus.selectedLocalTranscriptionModel === selectedTranscriptionModelId
+      || autoSelectingReadyModelRef.current === selectedTranscriptionModelId
+    ) {
+      return;
+    }
+
+    autoSelectingReadyModelRef.current = selectedTranscriptionModelId;
+
+    void getSettingsBridge()?.parakeet?.setModel(selectedTranscriptionModelId)
+      .then(() => refreshOnboardingStatus())
+      .catch((error) => {
+        console.error('Failed to use ready transcription model:', error);
+      })
+      .finally(() => {
+        autoSelectingReadyModelRef.current = null;
+      });
+  }, [selectedTranscriptionModelId, onboardingStatus]);
 
   useEffect(() => {
     void loadPromptTemplates();
@@ -668,6 +743,107 @@ export function App() {
     }
   }
 
+  async function refreshOnboardingStatus() {
+    const nextStatus = await getSettingsBridge()?.onboarding?.status();
+
+    if (!nextStatus) {
+      return;
+    }
+
+    setOnboardingStatus(nextStatus);
+    setLocalLlmStatus(getCaulLocalLlmStatus(nextStatus));
+
+    if (!hasInitialisedTranscriptionModelRef.current) {
+      hasInitialisedTranscriptionModelRef.current = true;
+      setSelectedTranscriptionModelId(getInitialTranscriptionModelId(nextStatus));
+    }
+  }
+
+  async function downloadTranscriptionModel(modelId: LocalTranscriptionModelId) {
+    try {
+      const nextStatus = await getSettingsBridge()?.parakeet?.download(modelId);
+      if (nextStatus) {
+        setParakeetStatus(nextStatus);
+        setOnboardingStatus((current) => current ? {
+          ...current,
+          parakeet: nextStatus
+        } : current);
+      }
+      await refreshOnboardingStatus();
+    } catch (error) {
+      console.error('Failed to download transcription model:', error);
+    }
+  }
+
+  async function cancelTranscriptionModelDownload() {
+    try {
+      const nextStatus = await getSettingsBridge()?.parakeet?.cancelDownload?.();
+      if (nextStatus) {
+        setParakeetStatus(nextStatus);
+        setOnboardingStatus((current) => current ? {
+          ...current,
+          parakeet: nextStatus
+        } : current);
+      }
+      await refreshOnboardingStatus();
+    } catch (error) {
+      console.error('Failed to cancel transcription model download:', error);
+    }
+  }
+
+  async function downloadLocalAi(modelId?: string) {
+    try {
+      setLocalAiSetupPhase('requesting');
+      const nextStatus = await getSettingsBridge()?.ai?.downloadLocal?.(modelId);
+      if (nextStatus) {
+        setLocalLlmStatus(nextStatus);
+      }
+      await refreshOnboardingStatus();
+    } catch (error) {
+      console.error('Failed to download local AI:', error);
+    } finally {
+      setLocalAiSetupPhase('idle');
+    }
+  }
+
+  async function cancelLocalAiDownload() {
+    try {
+      const nextStatus = await getSettingsBridge()?.ai?.cancelLocalDownload?.();
+      if (nextStatus) {
+        setLocalLlmStatus(nextStatus);
+      }
+      await refreshOnboardingStatus();
+    } catch (error) {
+      console.error('Failed to cancel local AI download:', error);
+    }
+  }
+
+  async function selectAiProvider(provider: AiProvider) {
+    setSelectedAiProvider(provider);
+
+    try {
+      const nextStatus = await getSettingsBridge()?.ai?.setProvider?.(provider);
+      if (nextStatus) {
+        setOnboardingStatus(nextStatus);
+        setLocalLlmStatus(getCaulLocalLlmStatus(nextStatus));
+      }
+      await refreshOnboardingStatus();
+    } catch (error) {
+      console.error('Failed to update AI provider:', error);
+    }
+  }
+
+  async function signInWithChatGpt() {
+    setIsChatGptSigningIn(true);
+
+    try {
+      await getSettingsBridge()?.ai?.openChatGptLogin?.();
+      await refreshOnboardingStatus();
+    } finally {
+      setIsChatGptSigningIn(false);
+    }
+  }
+
   async function requestPermission(permission: PermissionItem['id']) {
     const bridge = getPermissionsBridge();
 
@@ -689,8 +865,11 @@ export function App() {
   }
 
   async function loadPortablePreferences() {
+    const legacyAutoCollapse = readBooleanPreference(autoCollapsePreferenceKey, defaultAutoCollapse);
     const legacyPreferences: PortablePreferences = {
-      autoCollapse: readBooleanPreference(autoCollapsePreferenceKey, defaultAutoCollapse),
+      autoCollapse: legacyAutoCollapse,
+      autoCollapseAiResponses: readBooleanPreference(autoCollapseAiResponsesPreferenceKey, legacyAutoCollapse),
+      autoCollapseTranscription: readBooleanPreference(autoCollapseTranscriptionPreferenceKey, legacyAutoCollapse),
       generalInstructions: window.localStorage.getItem(generalInstructionsPreferenceKey) ?? defaultGeneralInstructions
     };
 
@@ -705,9 +884,20 @@ export function App() {
   }
 
   function applyPortablePreferences(preferences: PortablePreferences) {
-    if (typeof preferences.autoCollapse === 'boolean') {
-      setAutoCollapseState(preferences.autoCollapse);
-    }
+    const legacyAutoCollapse = typeof preferences.autoCollapse === 'boolean'
+      ? preferences.autoCollapse
+      : undefined;
+
+    setAutoCollapseAiResponsesState(
+      typeof preferences.autoCollapseAiResponses === 'boolean'
+        ? preferences.autoCollapseAiResponses
+        : legacyAutoCollapse ?? defaultAutoCollapse
+    );
+    setAutoCollapseTranscriptionState(
+      typeof preferences.autoCollapseTranscription === 'boolean'
+        ? preferences.autoCollapseTranscription
+        : legacyAutoCollapse ?? defaultAutoCollapse
+    );
 
     if (typeof preferences.generalInstructions === 'string') {
       setGeneralInstructions(preferences.generalInstructions);
@@ -719,6 +909,10 @@ export function App() {
 
     if (preferences.llmReasoning && llmReasoningValues.has(preferences.llmReasoning)) {
       setLlmReasoning(preferences.llmReasoning);
+    }
+
+    if (preferences.localLlmReasoning && llmReasoningValues.has(preferences.localLlmReasoning)) {
+      setLocalLlmReasoning(preferences.localLlmReasoning);
     }
 
     if (preferences.selectedAiProvider === 'cloud' || preferences.selectedAiProvider === 'local') {
@@ -740,10 +934,17 @@ export function App() {
       const templateToSave = starterTemplate && isStarterPromptTemplateCustomised(template, starterTemplate)
         ? asCustomStarterPromptTemplate(template, promptTemplates)
         : template;
+      const uniqueTemplateToSave = {
+        ...templateToSave,
+        name: getAvailablePromptTemplateName(
+          templateToSave.name,
+          promptTemplates.filter((item) => item.id !== templateToSave.id)
+        )
+      };
       const templates = promptTemplates.some((item) => item.id === templateToSave.id)
-        ? promptTemplates.map((item) => (item.id === templateToSave.id ? templateToSave : item))
-        : [...promptTemplates, templateToSave];
-      setPromptTemplates(templates);
+        ? promptTemplates.map((item) => (item.id === uniqueTemplateToSave.id ? uniqueTemplateToSave : item))
+        : [...promptTemplates, uniqueTemplateToSave];
+      setPromptTemplates(resolvePromptTemplateNameCollisions(templates));
       return;
     }
 
@@ -796,19 +997,19 @@ export function App() {
   }
 
   async function copyTranscript() {
-    if (!isTranscriptTextCopyable(transcription.output)) {
+    if (!isTranscriptTextCopyable(transcription.confirmedOutput)) {
       return;
     }
 
-    await navigator.clipboard?.writeText(transcription.output);
+    await navigator.clipboard?.writeText(transcription.confirmedOutput);
   }
 
   function downloadTranscript(format: TranscriptDownloadFormat) {
-    if (!isTranscriptTextCopyable(transcription.output)) {
+    if (!isTranscriptTextCopyable(transcription.confirmedOutput)) {
       return;
     }
 
-    downloadTranscriptFile(transcription.output, format);
+    downloadTranscriptFile(transcription.confirmedOutput, format);
   }
 
   async function copyAiResponse() {
@@ -835,9 +1036,14 @@ export function App() {
     transcription.clearAiResponses();
   }
 
-  function setAutoCollapse(autoCollapse: boolean) {
-    setAutoCollapseState(autoCollapse);
-    void getSettingsBridge()?.preferences?.save({ autoCollapse });
+  function setAutoCollapseAiResponses(autoCollapseAiResponses: boolean) {
+    setAutoCollapseAiResponsesState(autoCollapseAiResponses);
+    void getSettingsBridge()?.preferences?.save({ autoCollapseAiResponses });
+  }
+
+  function setAutoCollapseTranscription(autoCollapseTranscription: boolean) {
+    setAutoCollapseTranscriptionState(autoCollapseTranscription);
+    void getSettingsBridge()?.preferences?.save({ autoCollapseTranscription });
   }
 
   function saveGeneralInstructions(instructions: string) {
@@ -856,11 +1062,24 @@ export function App() {
     void getSettingsBridge()?.preferences?.save({ llmReasoning: reasoning });
   }
 
+  function saveLocalLlmReasoning(reasoning: LlmReasoning) {
+    setLocalLlmReasoning(reasoning);
+    void getSettingsBridge()?.preferences?.save({ localLlmReasoning: reasoning });
+  }
+
+  function getSelectedLlmReasoning() {
+    return selectedAiProvider === 'local' ? localLlmReasoning : llmReasoning;
+  }
+
   function askAiFromTranscript() {
+    if (!canUseAi) {
+      return;
+    }
+
     void transcription.ask({
       generalInstructionsText: generalInstructions,
       llmModel,
-      llmReasoning,
+      llmReasoning: getSelectedLlmReasoning(),
       aiProvider: selectedAiProvider,
       promptTemplateAttachments: selectedPromptTemplateAttachments,
       promptTemplateText: selectedPromptTemplatePrompt
@@ -868,10 +1087,14 @@ export function App() {
   }
 
   function askAiFromSpecificTranscript(transcript: string) {
+    if (!canUseAi) {
+      return;
+    }
+
     void transcription.ask({
       generalInstructionsText: generalInstructions,
       llmModel,
-      llmReasoning,
+      llmReasoning: getSelectedLlmReasoning(),
       aiProvider: selectedAiProvider,
       promptTemplateAttachments: selectedPromptTemplateAttachments,
       promptTemplateText: selectedPromptTemplatePrompt,
@@ -880,10 +1103,14 @@ export function App() {
   }
 
   function askAiFromManualPrompt(prompt: string) {
+    if (!canUseAi) {
+      return;
+    }
+
     void transcription.ask({
       generalInstructionsText: generalInstructions,
       llmModel,
-      llmReasoning,
+      llmReasoning: getSelectedLlmReasoning(),
       aiProvider: selectedAiProvider,
       promptTemplateAttachments: selectedPromptTemplateAttachments,
       promptTemplateText: selectedPromptTemplatePrompt,
@@ -896,11 +1123,11 @@ export function App() {
       void transcription.stop({
         generalInstructionsText: generalInstructions,
         llmModel,
-        llmReasoning,
+        llmReasoning: getSelectedLlmReasoning(),
         aiProvider: selectedAiProvider,
         promptTemplateAttachments: selectedPromptTemplateAttachments,
         promptTemplateText: selectedPromptTemplatePrompt,
-        sendToLlm: sendToAiWhenListeningStops
+        sendToLlm: sendToAiWhenListeningStops && canUseAi
       });
       return;
     }
@@ -919,16 +1146,18 @@ export function App() {
     setListenToMicrophone(defaultListenToMicrophone);
     setListenToSystemAudio(defaultListenToSystemAudio);
     setSendToAiWhenListeningStops(defaultSendToAiWhenListeningStops);
-    setAutoCollapseState(defaultAutoCollapse);
+    setAutoCollapseAiResponsesState(defaultAutoCollapse);
+    setAutoCollapseTranscriptionState(defaultAutoCollapse);
     setLlmModel(defaultLlmModel);
     setLlmReasoning(defaultLlmReasoning);
-    setPromptTemplates((templates) => preserveCustomisedStarterPromptTemplates(templates));
-    setSelectedPromptTemplateIds(defaultSelectedPromptTemplateIds);
+    setLocalLlmReasoning(defaultLocalLlmReasoning);
     setGeneralInstructions(defaultGeneralInstructions);
     window.localStorage.clear();
     await getSettingsBridge()?.preferences?.save({
-      autoCollapse: defaultAutoCollapse,
+      autoCollapseAiResponses: defaultAutoCollapse,
+      autoCollapseTranscription: defaultAutoCollapse,
       generalInstructions: defaultGeneralInstructions,
+      localLlmReasoning: defaultLocalLlmReasoning,
       llmModel: defaultLlmModel,
       llmReasoning: defaultLlmReasoning
     });
@@ -941,7 +1170,7 @@ export function App() {
       applyPromptTemplateState({
         ok: true,
         selectedTemplateIds: defaultSelectedPromptTemplateIds,
-        templates: preserveCustomisedStarterPromptTemplates(promptTemplates)
+        templates: starterPromptTemplates
       });
     }
   }
@@ -952,7 +1181,9 @@ export function App() {
     return nextStatus;
   }
 
-  function openSettings(section: SettingsSection = 'general') {
+  function openSettings(target: SettingsTarget = 'general') {
+    const section = getSettingsSectionForTarget(target);
+    setSettingsTarget(target);
     setSettingsSection(section);
     setIsSettingsOpen(true);
   }
@@ -971,7 +1202,7 @@ export function App() {
           isSettingsOpen={isSettingsOpen}
           notifications={mainNotifications}
           onOpenHistoryFolder={openHistoryFolder}
-          onOpenSettingsSection={openSettings}
+          onOpenSettingsTarget={openSettings}
           onToggleSettings={() => {
             setSettingsSection('general');
             setIsSettingsOpen((isOpen) => !isOpen);
@@ -983,17 +1214,20 @@ export function App() {
         >
           <form className={layout.page} aria-label="Caul setup">
             <HomePage
-              autoCollapse={autoCollapse}
+              autoCollapseAiResponses={autoCollapseAiResponses}
+              autoCollapseTranscription={autoCollapseTranscription}
               canStartListening={canStartListening}
               edge={overlayEdge}
               isAiResponsePlaceholder={isAiResponsePlaceholder}
               isBusy={isBusy}
               isListening={isListening}
-              isLlmReady={isSelectedAiProviderReadyForListening}
+              aiIssue={aiIssue}
+              canUseAi={canUseAi}
               isTranscriptPlaceholder={isTranscriptPlaceholder}
               listenToMicrophone={listenToMicrophone}
               listenToSystemAudio={listenToSystemAudio}
               localLlmStatus={localLlmStatus}
+              localAiSetupPhase={localAiSetupPhase}
               llmOutputRef={llmOutputRef}
               missingSelectedPermissions={missingSelectedPermissions}
               onAskAiFromTranscript={askAiFromTranscript}
@@ -1005,19 +1239,32 @@ export function App() {
               onCopyTranscript={copyTranscript}
               onDownloadAiResponse={downloadAiResponse}
               onDownloadTranscript={downloadTranscript}
+              onCancelLocalAiDownload={() => void cancelLocalAiDownload()}
+              onCancelTranscriptionModelDownload={() => void cancelTranscriptionModelDownload()}
+              onDownloadLocalAi={() => void downloadLocalAi(recommendedLocalAiModel?.id)}
+              onDownloadTranscriptionModel={(modelId) => void downloadTranscriptionModel(modelId)}
               onOpenGeneralInstructions={() => setIsGeneralInstructionsDialogOpen(true)}
               onOpenPromptTemplateSettings={() => setIsPromptTemplateDialogOpen(true)}
-              onOpenPermissionSettings={() => openSettings('permissions')}
+              onRequestPermission={requestPermission}
               onSelectPromptTemplates={(ids) => void selectPromptTemplates(ids)}
+              onSelectAiProvider={(provider) => void selectAiProvider(provider)}
+              onSelectTranscriptionModel={setSelectedTranscriptionModelId}
               onSetListenToMicrophone={setListenToMicrophone}
               onSetListenToSystemAudio={setListenToSystemAudio}
+              onSignInWithChatGpt={() => void signInWithChatGpt()}
+              onboardingStatus={onboardingStatus}
               outputRef={outputRef}
               promptTemplates={promptTemplates}
+              recommendedLocalAiModelReady={recommendedLocalAiModelReady}
+              isCloudAiReady={isCloudAiReady}
               sendToAiWhenListeningStops={sendToAiWhenListeningStops}
               selectedAiProvider={selectedAiProvider}
               selectedPromptTemplateIds={selectedPromptTemplateIds}
+              selectedTranscriptionModelId={selectedTranscriptionModelId}
               setSendToAiWhenListeningStops={setSendToAiWhenListeningStops}
+              isChatGptSigningIn={isChatGptSigningIn}
               toggleListening={toggleListening}
+              transcriptIssue={transcriptIssue}
               transcription={transcription}
             />
             {isSettingsOpen ? (
@@ -1025,7 +1272,9 @@ export function App() {
                 isBusy={isBusy}
                 isListening={isListening}
                 initialSection={settingsSection}
+                initialTarget={settingsTarget}
                 listenToMicrophone={listenToMicrophone}
+                localLlmReasoning={localLlmReasoning}
                 llmModel={llmModel}
                 llmReasoning={llmReasoning}
                 onSelectedAiProviderChange={setSelectedAiProvider}
@@ -1034,13 +1283,16 @@ export function App() {
                 onQuit={() => void getSettingsBridge()?.quit?.()}
                 onRequestPermission={requestPermission}
                 onSetPrivateOverlayHandleSize={(size) => void setPrivateOverlayHandleSize(size)}
-                autoCollapse={autoCollapse}
+                autoCollapseAiResponses={autoCollapseAiResponses}
+                autoCollapseTranscription={autoCollapseTranscription}
                 permissionsStatus={permissionsStatus}
                 privateOverlayStatus={privateOverlayStatus}
                 resetSettings={resetSettings}
-                setAutoCollapse={setAutoCollapse}
+                setAutoCollapseAiResponses={setAutoCollapseAiResponses}
+                setAutoCollapseTranscription={setAutoCollapseTranscription}
                 setLlmModel={saveLlmModel}
                 setLlmReasoning={saveLlmReasoning}
+                setLocalLlmReasoning={saveLocalLlmReasoning}
               />
             ) : null}
           </form>
@@ -1084,21 +1336,40 @@ function getCaulSurface(): CaulSurface {
 }
 
 type OnboardingStep = 'permissions' | 'parakeet' | 'ai';
+type OnboardingPage = {
+  id: OnboardingStep;
+  stepLabel: string;
+  title: string;
+};
+const onboardingMeasurementWidth = 560;
+
+function copyDocumentStylesToShadowRoot(shadowRoot: ShadowRoot) {
+  shadowRoot.querySelectorAll('[data-onboarding-measure-style]').forEach((node) => node.remove());
+
+  document.querySelectorAll('style, link[rel="stylesheet"]').forEach((node) => {
+    const clone = node.cloneNode(true) as HTMLElement;
+    clone.setAttribute('data-onboarding-measure-style', '');
+    shadowRoot.appendChild(clone);
+  });
+}
 
 function OnboardingSurface() {
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [localLlmStatus, setLocalLlmStatus] = useState<LocalLlmStatus | null>(null);
   const [localAiSetupPhase, setLocalAiSetupPhase] = useState<'requesting' | 'downloading' | 'idle'>('idle');
   const [selectedAiProvider, setSelectedAiProviderState] = useState<AiProvider>('local');
+  const [selectedTranscriptionModelId, setSelectedTranscriptionModelId] = useState<LocalTranscriptionModelId>('parakeet');
+  const [activePageId, setActivePageId] = useState<OnboardingStep>('permissions');
   const [isChatGptSigningIn, setIsChatGptSigningIn] = useState(false);
   const [isCompleting, setIsCompleting] = useState(false);
   const permissionsRef = useRef<HTMLElement | null>(null);
   const parakeetRef = useRef<HTMLElement | null>(null);
   const aiRef = useRef<HTMLElement | null>(null);
-  const hasAutoStartedParakeetDownloadRef = useRef(false);
+  const activeShellRef = useRef<HTMLDivElement | null>(null);
   const hasInitialisedAiProviderRef = useRef(false);
+  const hasInitialisedTranscriptionModelRef = useRef(false);
   const hasUserSelectedAiProviderRef = useRef(false);
-  const autoSelectingReadyModelRef = useRef<LocalTranscriptionModelId | null>(null);
+  const [measurementRoot, setMeasurementRoot] = useState<ShadowRoot | null>(null);
   const runtimeContext = useRuntimeContext();
   const appName = runtimeContext?.appName ?? 'Caul';
   const appIconUrl = runtimeContext?.appChannel === 'beta' || runtimeContext?.appChannel === 'dev'
@@ -1128,14 +1399,7 @@ function OnboardingSurface() {
       const detail = (event as CustomEvent).detail;
 
       if (detail === 'permissions' || detail === 'parakeet' || detail === 'ai') {
-        const step = detail as OnboardingStep;
-        const target = {
-          ai: aiRef,
-          parakeet: parakeetRef,
-          permissions: permissionsRef
-        }[step];
-
-        target.current?.scrollIntoView({ block: 'start' });
+        setActivePageId(detail as OnboardingStep);
       }
     };
 
@@ -1169,6 +1433,10 @@ function OnboardingSurface() {
 
     if (nextStatus) {
       setStatus(nextStatus);
+      if (!hasInitialisedTranscriptionModelRef.current) {
+        hasInitialisedTranscriptionModelRef.current = true;
+        setSelectedTranscriptionModelId(getInitialTranscriptionModelId(nextStatus));
+      }
       if (!hasInitialisedAiProviderRef.current) {
         hasInitialisedAiProviderRef.current = true;
         const recommendedProvider = getOnboardingDefaultAiProvider(nextStatus);
@@ -1208,10 +1476,51 @@ function OnboardingSurface() {
 
   async function downloadParakeet(modelId: LocalTranscriptionModelId) {
     try {
-      await getSettingsBridge()?.parakeet?.download(modelId);
+      const nextParakeetStatus = await getSettingsBridge()?.parakeet?.download(modelId);
+      if (nextParakeetStatus) {
+        setStatus((current) => current ? {
+          ...current,
+          parakeet: nextParakeetStatus
+        } : current);
+      }
       await refresh();
     } catch (error) {
       console.error('Failed to download transcription model:', error);
+    }
+  }
+
+  async function selectTranscriptionModel(modelId: LocalTranscriptionModelId) {
+    setSelectedTranscriptionModelId(modelId);
+
+    if (
+      !status
+      || status.parakeet.status !== 'installed'
+      || status.parakeet.modelId !== modelId
+      || status.selectedLocalTranscriptionModel === modelId
+    ) {
+      return;
+    }
+
+    try {
+      await getSettingsBridge()?.parakeet?.setModel(modelId);
+      await refresh();
+    } catch (error) {
+      console.error('Failed to use ready transcription model:', error);
+    }
+  }
+
+  async function cancelParakeetDownload() {
+    try {
+      const nextParakeetStatus = await getSettingsBridge()?.parakeet?.cancelDownload?.();
+      if (nextParakeetStatus) {
+        setStatus((current) => current ? {
+          ...current,
+          parakeet: nextParakeetStatus
+        } : current);
+      }
+      await refresh();
+    } catch (error) {
+      console.error('Failed to cancel transcription model download:', error);
     }
   }
 
@@ -1306,60 +1615,83 @@ function OnboardingSurface() {
     }
   }
 
-  const missingItems = getMissingOnboardingItems(status);
+  const missingItems = getMissingOnboardingItems({
+    localLlmStatus,
+    selectedAiProvider,
+    selectedTranscriptionModelId,
+    status
+  });
   const visiblePermissions = getOnboardingVisiblePermissionItems(status?.permissions);
   const onboardingPermissionRows = getOnboardingPermissionRows(visiblePermissions);
-  const contentRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const recommendedModelId = status?.transcription.recommendedModel?.id;
-
-    if (
-      hasAutoStartedParakeetDownloadRef.current
-      || !status
-      || status.transcription.recommended === 'cloud'
-      || !recommendedModelId
-      || status.transcription.autoDownloadModel === false
-      || status.transcription.autoDownloadParakeet === false
-      || status.parakeet.status !== 'missing'
-    ) {
-      return;
+  const showPermissionsStep = onboardingPermissionRows.length > 0;
+  const pages: OnboardingPage[] = [
+    ...(showPermissionsStep ? [{ id: 'permissions' as const, stepLabel: 'Step 1', title: 'Permissions' }] : []),
+    {
+      id: 'parakeet',
+      stepLabel: showPermissionsStep ? 'Step 2' : 'Step 1',
+      title: 'Local transcription'
+    },
+    {
+      id: 'ai',
+      stepLabel: showPermissionsStep ? 'Step 3' : 'Step 2',
+      title: 'AI responses'
     }
-
-    hasAutoStartedParakeetDownloadRef.current = true;
-    void downloadParakeet(recommendedModelId);
-  }, [status]);
+  ];
+  const activePage = pages.find((page) => page.id === activePageId) ?? pages[0]!;
+  const activePageIndex = pages.findIndex((page) => page.id === activePage.id);
+  const isFirstPage = activePageIndex <= 0;
+  const isLastPage = activePageIndex === pages.length - 1;
 
   useEffect(() => {
-    const readyModelId = status?.parakeet.modelId;
-
-    if (
-      !status
-      || status.parakeet.status !== 'installed'
-      || !readyModelId
-      || status.selectedLocalTranscriptionModel === readyModelId
-      || autoSelectingReadyModelRef.current === readyModelId
-    ) {
-      return;
+    if (status && !showPermissionsStep && activePageId === 'permissions') {
+      setActivePageId('parakeet');
     }
+  }, [activePageId, showPermissionsStep, status]);
 
-    autoSelectingReadyModelRef.current = readyModelId;
+  function goToPreviousPage() {
+    const previousPage = pages[Math.max(0, activePageIndex - 1)];
+    if (previousPage) {
+      setActivePageId(previousPage.id);
+    }
+  }
 
-    void getSettingsBridge()?.parakeet?.setModel(readyModelId)
-      .then(() => refresh())
-      .catch((error) => {
-        console.error('Failed to use ready transcription model:', error);
-      })
-      .finally(() => {
-        autoSelectingReadyModelRef.current = null;
-      });
-  }, [status]);
+  function goToNextPage() {
+    const nextPage = pages[Math.min(pages.length - 1, activePageIndex + 1)];
+    if (nextPage) {
+      setActivePageId(nextPage.id);
+    }
+  }
 
   useEffect(() => {
-    const element = contentRef.current;
     const fitContent = getSettingsBridge()?.onboarding?.fitContent;
 
-    if (!element || !fitContent) {
+    if (!fitContent || typeof document === 'undefined') {
+      return;
+    }
+
+    const host = document.createElement('div');
+    host.setAttribute('aria-hidden', 'true');
+    host.style.position = 'fixed';
+    host.style.inset = '0 auto auto -10000px';
+    host.style.width = `${onboardingMeasurementWidth}px`;
+    host.style.visibility = 'hidden';
+    host.style.pointerEvents = 'none';
+    host.style.zIndex = '-1';
+    const shadowRoot = host.attachShadow({ mode: 'open' });
+    copyDocumentStylesToShadowRoot(shadowRoot);
+    document.body.appendChild(host);
+    setMeasurementRoot(shadowRoot);
+
+    return () => {
+      setMeasurementRoot(null);
+      host.remove();
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    const fitContent = getSettingsBridge()?.onboarding?.fitContent;
+
+    if (!fitContent || !measurementRoot) {
       return;
     }
 
@@ -1368,125 +1700,283 @@ function OnboardingSurface() {
     const reportSize = () => {
       window.cancelAnimationFrame(animationFrame);
       animationFrame = window.requestAnimationFrame(() => {
-        const rect = element.getBoundingClientRect();
+        const shells = Array.from(measurementRoot.querySelectorAll<HTMLElement>('[data-onboarding-measure-shell]'));
+
+        const measured = shells
+          .map((shell) => ({
+            height: Math.ceil(Math.max(shell.scrollHeight, shell.getBoundingClientRect().height)),
+            width: Math.ceil(Math.max(shell.scrollWidth, shell.getBoundingClientRect().width))
+          }))
+          .filter((size) => size.height > 0 && size.width > 0);
+
+        if (measured.length === 0) {
+          return;
+        }
 
         void fitContent({
-          height: Math.ceil(rect.height),
-          width: Math.ceil(rect.width)
+          height: Math.max(...measured.map((size) => size.height)),
+          width: Math.max(...measured.map((size) => size.width))
         });
       });
     };
 
-    const resizeObserver = new ResizeObserver(reportSize);
-    resizeObserver.observe(element);
+    const resizeObserver = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(reportSize);
+    const observedShells = Array.from(measurementRoot.querySelectorAll<HTMLElement>('[data-onboarding-measure-shell]'));
+
+    observedShells.forEach((element) => resizeObserver?.observe(element));
     reportSize();
 
     return () => {
       window.cancelAnimationFrame(animationFrame);
-      resizeObserver.disconnect();
+      resizeObserver?.disconnect();
     };
-  }, []);
+  }, [
+    activePage.id,
+    isChatGptSigningIn,
+    isCompleting,
+    localAiSetupPhase,
+    localLlmStatus,
+    measurementRoot,
+    pages.length,
+    selectedAiProvider,
+    selectedTranscriptionModelId,
+    status
+  ]);
 
-  return (
-    <TooltipProvider>
-      <main className="h-screen overflow-y-auto bg-background text-foreground">
-        <div ref={contentRef} className="grid w-full gap-2 px-3 py-3">
-        <header className="mb-2 flex flex-col items-center gap-2 pt-1 text-center">
-          <img alt={appName} className="size-32 rounded-3xl" src={appIconUrl} />
-          <h1 className="text-lg font-semibold">Welcome to {appName}</h1>
-        </header>
+  function renderOnboardingPanel(page: OnboardingPage, options: { measurement?: boolean } = {}) {
+    const sectionRef = options.measurement
+      ? undefined
+      : page.id === 'permissions'
+        ? permissionsRef
+        : page.id === 'parakeet'
+          ? parakeetRef
+          : aiRef;
 
-        <OnboardingPanel sectionRef={parakeetRef} title="Local transcription">
-          <p className="text-sm text-muted-foreground">Local and private. Audio is transcribed on this computer. Nothing is sent to the internet.</p>
-          <OnboardingTranscriptionStatus status={status} />
+    if (page.id === 'permissions') {
+      return (
+        <OnboardingPanel sectionRef={sectionRef} stepLabel={page.stepLabel} title="Permissions">
+          <div className="grid">
+            {onboardingPermissionRows.map((permission) => (
+              <PermissionSetupRow
+                key={permission.id}
+                actionSize="default"
+                issuePanel
+                onChange={() => void requestOnboardingPermission(permission.id)}
+                permission={permission}
+              />
+            ))}
+          </div>
         </OnboardingPanel>
+      );
+    }
 
-        <OnboardingPanel sectionRef={aiRef} title="AI responses">
-          <OnboardingAiModelSetup
-            isChatGptSigningIn={isChatGptSigningIn}
-            localLlmStatus={localLlmStatus}
-            localAiSetupPhase={localAiSetupPhase}
-            onCancelLocalDownload={() => void cancelLocalAiDownload()}
-            onDownloadLocalAi={(modelId) => void downloadLocalAi(modelId)}
-            onSelectProvider={(provider) => void selectAiProvider(provider)}
-            onSignInWithChatGpt={() => void signInWithChatGpt()}
-            selectedProvider={selectedAiProvider}
+    if (page.id === 'parakeet') {
+      return (
+        <OnboardingPanel sectionRef={sectionRef} stepLabel={page.stepLabel} title="Local transcription">
+          <p className="text-sm text-muted-foreground">Local and private. Audio is transcribed on this computer.</p>
+          <TranscriptionModelRow
+            onCancel={() => void cancelParakeetDownload()}
+            onDownload={(modelId) => void downloadParakeet(modelId)}
+            onSelectModel={(modelId) => void selectTranscriptionModel(modelId)}
+            selectedModelId={selectedTranscriptionModelId}
             status={status}
           />
         </OnboardingPanel>
+      );
+    }
 
-        {onboardingPermissionRows.length > 0 ? (
-          <OnboardingPanel sectionRef={permissionsRef} title="Permissions">
-            <div className="grid">
-              {onboardingPermissionRows.map((permission) => (
-                <PermissionSetupRow
-                  key={permission.id}
-                  onChange={() => void requestOnboardingPermission(permission.id)}
-                  permission={permission}
-                />
+    return (
+      <OnboardingPanel sectionRef={sectionRef} stepLabel={page.stepLabel} title="AI responses">
+        <AiProviderSetup
+          isChatGptSigningIn={isChatGptSigningIn}
+          isCloudAiReady={Boolean(status?.pi.connected)}
+          localLlmStatus={localLlmStatus}
+          localAiSetupPhase={localAiSetupPhase}
+          onCancelLocalDownload={() => void cancelLocalAiDownload()}
+          onDownloadLocalAi={(modelId) => void downloadLocalAi(modelId)}
+          onSelectProvider={(provider) => void selectAiProvider(provider)}
+          onSignInWithChatGpt={() => void signInWithChatGpt()}
+          selectedProvider={selectedAiProvider}
+          status={status}
+        />
+      </OnboardingPanel>
+    );
+  }
+
+  return (
+    <TooltipProvider>
+      <main aria-label="Caul setup" className="h-screen overflow-hidden bg-background text-foreground">
+        <div ref={activeShellRef} className="mx-auto grid h-full w-full max-w-[38rem] grid-rows-[auto_auto_minmax(0,1fr)_auto] gap-4 px-6 py-6">
+          <header className="flex flex-col items-center gap-2 text-center">
+            <img alt={appName} className="size-20 rounded-[1.1rem]" src={appIconUrl} />
+            <h1 className="text-xl font-semibold">Welcome to {appName}</h1>
+          </header>
+
+          <nav aria-label="Onboarding steps" className="grid gap-2">
+            <div className="flex items-center justify-center gap-2">
+              {pages.map((page, index) => (
+                <button
+                  key={page.id}
+                  aria-current={page.id === activePage.id ? 'step' : undefined}
+                  aria-label={`${page.stepLabel}: ${page.title}`}
+                  className={`h-2.5 rounded-full transition-all ${page.id === activePage.id ? 'w-8 bg-primary' : 'w-2.5 bg-muted-foreground/30 hover:bg-muted-foreground/45'}`}
+                  onClick={() => setActivePageId(page.id)}
+                  type="button"
+                >
+                  <span className="sr-only">{index + 1}</span>
+                </button>
               ))}
             </div>
-          </OnboardingPanel>
-        ) : null}
+            <p className="text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              {activePage.stepLabel} of {pages.length}
+            </p>
+          </nav>
 
-        <OnboardingStartButton
-          isCompleting={isCompleting}
-          missingItems={missingItems}
-          onClick={() => void finish()}
-        />
+          <div className="min-h-0">
+            {renderOnboardingPanel(activePage)}
+          </div>
+
+          <OnboardingFooter
+            isCompleting={isCompleting}
+            isFirstPage={isFirstPage}
+            isLastPage={isLastPage}
+            missingItems={missingItems}
+            onBack={goToPreviousPage}
+            onFinish={() => void finish()}
+            onNext={goToNextPage}
+          />
         </div>
+        {measurementRoot ? createPortal(
+          <TooltipProvider>
+            <div className="grid gap-4">
+              {pages.map((page, index) => (
+                <div key={page.id} className="mx-auto grid w-full max-w-[38rem] grid-rows-[auto_auto_auto_auto] gap-4 px-6 py-6" data-onboarding-measure-shell="">
+                  <header className="flex flex-col items-center gap-2 text-center">
+                    <img alt="" aria-hidden="true" className="size-20 rounded-[1.1rem]" src={appIconUrl} />
+                    <h1 className="text-xl font-semibold">Welcome to {appName}</h1>
+                  </header>
+
+                  <nav aria-label="Onboarding steps" className="grid gap-2">
+                    <div className="flex items-center justify-center gap-2">
+                      {pages.map((stepPage, stepIndex) => (
+                        <button
+                          key={stepPage.id}
+                          aria-current={stepPage.id === page.id ? 'step' : undefined}
+                          aria-label={`${stepPage.stepLabel}: ${stepPage.title}`}
+                          className={`h-2.5 rounded-full transition-all ${stepPage.id === page.id ? 'w-8 bg-primary' : 'w-2.5 bg-muted-foreground/30'}`}
+                          type="button"
+                        >
+                          <span className="sr-only">{stepIndex + 1}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      {page.stepLabel} of {pages.length}
+                    </p>
+                  </nav>
+
+                  <div>
+                    {renderOnboardingPanel(page, { measurement: true })}
+                  </div>
+
+                  <OnboardingFooter
+                    isCompleting={isCompleting}
+                    isFirstPage={index === 0}
+                    isLastPage={index === pages.length - 1}
+                    missingItems={missingItems}
+                    onBack={() => undefined}
+                    onFinish={() => undefined}
+                    onNext={() => undefined}
+                  />
+                </div>
+              ))}
+            </div>
+          </TooltipProvider>,
+          measurementRoot
+        ) : null}
       </main>
     </TooltipProvider>
   );
 }
 
-function OnboardingStartButton({
+function OnboardingFooter({
   isCompleting,
+  isFirstPage,
+  isLastPage,
   missingItems,
-  onClick
+  onBack,
+  onFinish,
+  onNext
 }: {
   isCompleting: boolean;
+  isFirstPage: boolean;
+  isLastPage: boolean;
   missingItems: string[];
-  onClick: () => void;
+  onBack: () => void;
+  onFinish: () => void;
+  onNext: () => void;
 }) {
   const disabled = isCompleting || missingItems.length > 0;
 
   return (
-    <div className="flex w-full justify-center py-6">
-      <span className={disabled ? 'group relative inline-flex cursor-not-allowed' : 'inline-flex'}>
-        <Button
-          className={disabled
-            ? 'h-10 pointer-events-none px-5 text-sm'
-            : 'h-10 bg-[#34424A] px-5 text-sm text-white hover:bg-[#8EA6AD] focus-visible:border-[#8EA6AD] focus-visible:ring-[#34424A]/30 dark:bg-[#8EA6AD] dark:text-[#101619] dark:hover:bg-[#B8A46A]'}
-          disabled={disabled}
-          onClick={onClick}
-          type="button"
-        >
-          {isCompleting ? 'Starting Caul' : 'Start using Caul'}
-        </Button>
-        {disabled && !isCompleting ? (
-          <div
-            className="pointer-events-none absolute bottom-full left-1/2 z-[2147483647] mb-2 hidden w-max max-w-64 -translate-x-1/2 rounded-md bg-primary px-2 py-1.5 text-left text-xs leading-4 text-primary-foreground shadow-md group-hover:block group-focus-within:block"
-            role="tooltip"
+    <div className="relative min-h-11">
+      <Button className={`absolute bottom-0 left-0 h-11 min-w-24 px-5 text-sm ${isFirstPage ? 'invisible' : ''}`} disabled={isCompleting || isFirstPage} onClick={onBack} size="default" type="button" variant="outline">
+        Back
+      </Button>
+
+      {isLastPage ? (
+        <span className={disabled ? 'group absolute bottom-0 left-1/2 inline-flex -translate-x-1/2 cursor-not-allowed' : 'absolute bottom-0 left-1/2 inline-flex -translate-x-1/2'}>
+          <Button
+            className={disabled
+              ? 'h-10 pointer-events-none px-5 text-sm'
+              : 'h-10 bg-[#34424A] px-5 text-sm text-white hover:bg-[#8EA6AD] focus-visible:border-[#8EA6AD] focus-visible:ring-[#34424A]/30 dark:bg-[#8EA6AD] dark:text-[#101619] dark:hover:bg-[#B8A46A]'}
+            disabled={disabled}
+            onClick={onFinish}
+            size="lg"
+            type="button"
           >
-            <div className="font-medium">Still needed</div>
-            <ul className="mt-1 list-disc pl-4">
-              {missingItems.map((item) => <li key={item}>{item}</li>)}
-            </ul>
-            <span className="absolute left-1/2 top-full size-2.5 -translate-x-1/2 -translate-y-[calc(50%_-_2px)] rotate-45 rounded-[2px] bg-primary" />
-          </div>
-        ) : null}
-      </span>
+            {isCompleting ? 'Starting Caul' : 'Start using Caul'}
+          </Button>
+          {disabled && !isCompleting ? (
+            <div
+              className="pointer-events-none absolute bottom-full left-1/2 z-[2147483647] mb-2 hidden w-max max-w-64 -translate-x-1/2 rounded-md bg-primary px-2 py-1.5 text-left text-xs leading-4 text-primary-foreground shadow-md group-hover:block group-focus-within:block"
+              role="tooltip"
+            >
+              <div className="font-medium">Still needed</div>
+              <ul className="mt-1 list-disc pl-4">
+                {missingItems.map((item) => <li key={item}>{item}</li>)}
+              </ul>
+              <span className="absolute left-1/2 top-full size-2.5 -translate-x-1/2 -translate-y-[calc(50%_-_2px)] rotate-45 rounded-[2px] bg-primary" />
+            </div>
+          ) : null}
+        </span>
+      ) : (
+        <Button className="absolute right-0 bottom-0 h-11 min-w-24 px-5 text-sm" disabled={isCompleting} onClick={onNext} size="lg" type="button">
+          Next
+        </Button>
+      )}
     </div>
   );
 }
 
-function getMissingOnboardingItems(status: OnboardingStatus | null) {
+function getMissingOnboardingItems({
+  localLlmStatus,
+  selectedAiProvider,
+  selectedTranscriptionModelId,
+  status
+}: {
+  localLlmStatus: LocalLlmStatus | null;
+  selectedAiProvider: AiProvider;
+  selectedTranscriptionModelId: LocalTranscriptionModelId;
+  status: OnboardingStatus | null;
+}) {
   if (!status) {
     return ['Setup checks'];
   }
 
-  const missing = [];
+  const missing: string[] = [];
   const missingPermissions = getOnboardingRequiredPermissionItems(status.permissions).filter((permission) => (
     permission.status !== 'granted' && permission.status !== 'unsupported'
   ));
@@ -1495,8 +1985,16 @@ function getMissingOnboardingItems(status: OnboardingStatus | null) {
     missing.push(...missingPermissions.map((permission) => permission.label));
   }
 
-  if (!isOnboardingTranscriptionModelReady(status)) {
+  if (!isOnboardingSelectedTranscriptionModelReady(status, selectedTranscriptionModelId)) {
     missing.push('Local transcription');
+  }
+
+  if (!isOnboardingSelectedAiProviderReady({
+    localLlmStatus,
+    selectedAiProvider,
+    status
+  })) {
+    missing.push(selectedAiProvider === 'cloud' ? 'ChatGPT sign in' : 'Local AI');
   }
 
   return missing;
@@ -1518,24 +2016,62 @@ function isOnboardingTranscriptionModelReady(status: OnboardingStatus) {
   );
 }
 
+function isOnboardingSelectedTranscriptionModelReady(status: OnboardingStatus, selectedModelId: LocalTranscriptionModelId) {
+  return Boolean(
+    status.selectedLocalTranscriptionModel === selectedModelId
+    && status.parakeet.status === 'installed'
+    && status.parakeet.modelId === selectedModelId
+  );
+}
+
+function isOnboardingSelectedAiProviderReady({
+  localLlmStatus,
+  selectedAiProvider,
+  status
+}: {
+  localLlmStatus: LocalLlmStatus | null;
+  selectedAiProvider: AiProvider;
+  status: OnboardingStatus;
+}) {
+  if (selectedAiProvider === 'cloud') {
+    return Boolean(status.pi.connected);
+  }
+
+  const localRecommendedModel = status.ai?.recommended === 'local' ? status.ai.recommendedModel : null;
+  const caulLocalStatus = localLlmStatus ?? getCaulLocalLlmStatus(status);
+
+  return Boolean(
+    caulLocalStatus?.runtime.installed
+    && caulLocalStatus.model?.installed
+    && (!localRecommendedModel || caulLocalStatus.model.id === localRecommendedModel.id)
+  );
+}
+
 function OnboardingPanel({
   children,
   description,
   sectionRef,
+  stepLabel,
   title
 }: {
   children: ReactNode;
   description?: string;
   sectionRef?: RefObject<HTMLElement | null>;
+  stepLabel?: string;
   title: string;
 }) {
   const titleId = useId();
 
   return (
-    <section ref={sectionRef} aria-labelledby={titleId} className="rounded-lg border border-border bg-card/55 px-3 py-2 shadow-sm">
-      <h2 id={titleId} className="mb-2 text-base font-semibold">{title}</h2>
-      {description ? <p className="mb-2 text-xs text-muted-foreground">{description}</p> : null}
-      {children}
+    <section ref={sectionRef} aria-labelledby={titleId} className="grid h-full grid-rows-[auto_minmax(0,1fr)] gap-3 rounded-xl border border-border bg-card/55 p-4 shadow-sm">
+      <div className="grid gap-1">
+        {stepLabel ? <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{stepLabel}</p> : null}
+        <h2 id={titleId} className="text-base font-semibold">{title}</h2>
+      </div>
+      {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
+      <div className="grid content-start gap-3">
+        {children}
+      </div>
     </section>
   );
 }
@@ -1552,9 +2088,9 @@ function StatusRow({
   value?: string;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-border/70 py-1.5 text-sm last:border-b-0">
-      <div>
-        <h3 className="text-sm font-medium">{label}</h3>
+    <div className="flex min-h-10 items-center justify-between gap-3 border-b border-border/70 py-2 text-sm last:border-b-0">
+      <div className="min-w-0">
+        <div className="text-sm font-medium">{label}</div>
         {value ? <div aria-live="polite" className="text-xs text-muted-foreground">{value}</div> : null}
       </div>
       {action ?? (ready ? <CheckCircle2Icon className="size-4 text-[#34424A]" /> : <XCircleIcon className="size-4 text-muted-foreground" />)}
@@ -1562,8 +2098,11 @@ function StatusRow({
   );
 }
 
-function OnboardingAiModelSetup({
+function AiProviderSetup({
   isChatGptSigningIn,
+  isCloudAiReady,
+  llmModel = defaultLlmModel,
+  llmReasoning = defaultLlmReasoning,
   localAiSetupPhase,
   localLlmStatus,
   onCancelLocalDownload,
@@ -1574,6 +2113,9 @@ function OnboardingAiModelSetup({
   status
 }: {
   isChatGptSigningIn: boolean;
+  isCloudAiReady: boolean;
+  llmModel?: LlmModel;
+  llmReasoning?: LlmReasoning;
   localAiSetupPhase: 'requesting' | 'downloading' | 'idle';
   localLlmStatus: LocalLlmStatus | null;
   onCancelLocalDownload: () => void;
@@ -1584,31 +2126,34 @@ function OnboardingAiModelSetup({
   status: OnboardingStatus | null;
 }) {
   const ai = status?.ai;
-  const piReady = Boolean(status?.pi.connected);
   const localRecommendedModel = ai?.recommended === 'local' ? ai.recommendedModel : null;
   const caulLocalStatus = localLlmStatus ?? getCaulLocalLlmStatus(status);
   const localModelInstalled = Boolean(
     caulLocalStatus?.runtime.installed
     && caulLocalStatus.model?.installed
-    && localRecommendedModel
-    && caulLocalStatus.model.id === localRecommendedModel.id
+    && (!localRecommendedModel || caulLocalStatus.model.id === localRecommendedModel.id)
   );
+  const localAiInfo = localRecommendedModel || caulLocalStatus?.model
+    ? <LocalAiRecommendationInfoButton embedded recommendation={ai} status={caulLocalStatus} />
+    : null;
+  const cloudAiInfo = <CloudAiInfoButton llmModel={llmModel} llmReasoning={llmReasoning} />;
+
   return (
-    <div className="grid gap-1.5">
+    <div className="grid gap-3">
       <div className="inline-flex w-full rounded-md border border-border bg-muted/30 p-0.5" role="tablist" aria-label="AI provider">
         {(['local', 'cloud'] as AiProvider[]).map((provider) => (
           <button
             key={provider}
             aria-label={provider === 'local' ? 'Local' : 'Cloud'}
             aria-selected={selectedProvider === provider}
-            className={`inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-[6px] px-2 text-sm font-medium transition-colors ${selectedProvider === provider ? '!bg-primary !text-primary-foreground shadow-sm hover:!bg-primary/90 dark:!bg-primary dark:!text-primary-foreground dark:hover:!bg-primary/90' : 'text-muted-foreground hover:text-foreground'}`}
+            className={`inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-[6px] px-3 text-sm font-medium transition-colors ${selectedProvider === provider ? '!bg-primary !text-primary-foreground shadow-sm hover:!bg-primary/90 dark:!bg-primary dark:!text-primary-foreground dark:hover:!bg-primary/90' : 'text-muted-foreground hover:text-foreground'}`}
             onClick={() => onSelectProvider(provider)}
             role="tab"
             type="button"
           >
             <span>{provider === 'local' ? 'Local' : 'Cloud'}</span>
             {ai?.recommended === provider ? (
-              <RecommendedPill
+              <RecommendedMarker
                 message={getAiProviderRecommendationMessage(provider)}
                 selected={selectedProvider === provider}
               />
@@ -1618,13 +2163,13 @@ function OnboardingAiModelSetup({
       </div>
 
       {selectedProvider === 'local' ? (
-        <div role="tabpanel" className="grid gap-1.5 text-left">
-          <p className="text-xs leading-5 text-muted-foreground">
+        <div role="tabpanel" className="grid gap-3 text-left">
+          <p className="text-sm leading-5 text-muted-foreground">
             Data stays local and private. Slower and less intelligent than Cloud.
           </p>
           <LocalAiDownloadControl
             align="start"
-            info={localRecommendedModel ? <LocalAiRecommendationInfoButton recommendation={ai} /> : null}
+            info={localAiInfo}
             isInstalled={localModelInstalled}
             localAiSetupPhase={localAiSetupPhase}
             onCancel={onCancelLocalDownload}
@@ -1635,13 +2180,14 @@ function OnboardingAiModelSetup({
           />
         </div>
       ) : (
-        <div role="tabpanel" className="grid gap-1.5 text-left">
-          <p className="text-xs leading-5 text-muted-foreground">
+        <div role="tabpanel" className="grid gap-3 text-left">
+          <p className="text-sm leading-5 text-muted-foreground">
             Sends to a cloud model like ChatGPT. Faster and smarter than Local.
           </p>
           <CloudSignInControl
             align="start"
-            isReady={piReady}
+            info={cloudAiInfo}
+            isReady={isCloudAiReady}
             isSigningIn={isChatGptSigningIn}
             onSignIn={onSignInWithChatGpt}
             setupLabel="Cloud AI setup"
@@ -1661,6 +2207,7 @@ function LocalAiDownloadControl({
   onCancel,
   onDownload,
   setupLabel,
+  showIdleStatus = true,
   statusPlacement = 'below',
   status
 }: {
@@ -1671,6 +2218,7 @@ function LocalAiDownloadControl({
   onCancel: () => void;
   onDownload: () => void;
   setupLabel?: string;
+  showIdleStatus?: boolean;
   statusPlacement?: 'below' | 'inline';
   status: LocalLlmStatus | null;
 }) {
@@ -1687,26 +2235,24 @@ function LocalAiDownloadControl({
     : progress;
   const alignmentClassName = align === 'start' ? 'justify-items-start text-left' : 'justify-items-center text-center';
   const progressClassName = align === 'start'
-    ? 'max-w-sm text-xs leading-5 text-muted-foreground'
-    : 'max-w-sm text-center text-xs leading-5 text-muted-foreground';
+    ? 'max-w-sm text-sm leading-5 text-muted-foreground'
+    : 'max-w-sm text-center text-sm leading-5 text-muted-foreground';
   const actionClassName = `inline-flex items-center gap-1.5 ${align === 'start' ? '' : 'justify-center'}`;
   const rootClassName = statusPlacement === 'inline'
-    ? 'flex min-h-9 w-full items-center justify-between gap-3'
-    : `grid min-h-9 gap-1 ${alignmentClassName}`;
-  const inlineProgressClassName = 'ml-auto min-w-0 text-right text-xs leading-5 text-muted-foreground';
+    ? `flex min-h-10 flex-wrap items-center gap-3 ${align === 'start' ? 'justify-start text-left' : 'justify-center text-center'}`
+    : !showIdleStatus && !isDownloading && !isInstalled && status?.runtime.supported !== false
+      ? `inline-flex min-h-10 items-center ${align === 'start' ? '' : 'justify-center'}`
+    : `grid min-h-10 gap-1 ${alignmentClassName}`;
+  const inlineProgressClassName = align === 'start'
+    ? 'min-w-0 text-sm leading-5 text-muted-foreground'
+    : 'min-w-0 text-center text-sm leading-5 text-muted-foreground';
 
   if (isInstalled) {
     return (
       <div aria-label={setupLabel} className={rootClassName} role={setupLabel ? 'group' : undefined}>
         <div className={actionClassName}>
-          <Button disabled size="sm" type="button">
-            Download local AI
-          </Button>
-          {info}
+          <ReadySetupPill info={info} />
         </div>
-        <p aria-live="polite" className={statusPlacement === 'inline' ? inlineProgressClassName : progressClassName}>
-          Ready
-        </p>
       </div>
     );
   }
@@ -1715,14 +2261,8 @@ function LocalAiDownloadControl({
     return (
       <div aria-label={setupLabel} className={rootClassName} role={setupLabel ? 'group' : undefined}>
         <div className={actionClassName}>
-          <Button disabled size="sm" type="button">
-            Download local AI
-          </Button>
-          {info}
+          <UnavailableSetupPill info={info} />
         </div>
-        <p aria-live="polite" className={statusPlacement === 'inline' ? inlineProgressClassName : progressClassName}>
-          Unavailable on this computer
-        </p>
       </div>
     );
   }
@@ -1731,7 +2271,7 @@ function LocalAiDownloadControl({
     return (
       <div aria-label={setupLabel} className={rootClassName} role={setupLabel ? 'group' : undefined}>
         <div className={actionClassName}>
-          <Button onClick={onCancel} size="sm" type="button" variant="outline">
+          <Button onClick={onCancel} size="default" type="button" variant="outline">
             Cancel
           </Button>
           {info}
@@ -1750,15 +2290,157 @@ function LocalAiDownloadControl({
   return (
     <div aria-label={setupLabel} className={rootClassName} role={setupLabel ? 'group' : undefined}>
       <div className={actionClassName}>
-        <Button disabled={!status?.runtime.supported && Boolean(status)} onClick={onDownload} size="sm" type="button">
-          Download local AI
-        </Button>
-        {info}
+        <LocalAiDownloadAction
+          disabled={!status?.runtime.supported && Boolean(status)}
+          info={info}
+          onDownload={onDownload}
+          tradeoffInfo={!showIdleStatus ? {
+            label: 'Local AI tradeoff details',
+            message: 'Local AI keeps prompts and transcript context on this computer, but it needs a model download and may be slower than Cloud.'
+          } : undefined}
+        />
       </div>
-      <p aria-live="polite" className={statusPlacement === 'inline' ? inlineProgressClassName : progressClassName}>
-        Not downloaded yet
-      </p>
+      {showIdleStatus ? (
+        <p aria-live="polite" className={statusPlacement === 'inline' ? inlineProgressClassName : progressClassName}>
+          Not downloaded yet
+        </p>
+      ) : null}
     </div>
+  );
+}
+
+function LocalAiDownloadAction({
+  disabled = false,
+  info,
+  onDownload,
+  tradeoffInfo
+}: {
+  disabled?: boolean;
+  info?: ReactNode;
+  onDownload?: () => void;
+  tradeoffInfo?: {
+    label: string;
+    message: string;
+  };
+}) {
+  const combinedInfo = getCombinedLocalAiDownloadInfo(info, tradeoffInfo);
+
+  return (
+    <div className="relative inline-flex shrink-0">
+      <Button
+        aria-label="Download local AI"
+        className={combinedInfo ? 'gap-2' : undefined}
+        disabled={disabled}
+        onClick={onDownload}
+        type="button"
+      >
+        <span>Download local AI</span>
+        {combinedInfo}
+        {!combinedInfo && tradeoffInfo ? (
+          <IssueActionInfoIcon label={tradeoffInfo.label} message={tradeoffInfo.message} />
+        ) : null}
+      </Button>
+    </div>
+  );
+}
+
+function getCombinedLocalAiDownloadInfo(
+  info: ReactNode,
+  tradeoffInfo?: {
+    label: string;
+    message: string;
+  }
+) {
+  if (!tradeoffInfo) {
+    return info;
+  }
+
+  if (isValidElement<{ extraContent?: ReactNode }>(info) && info.type === LocalAiRecommendationInfoButton) {
+    return cloneElement(info, {
+      extraContent: (
+        <LocalAiTradeoffInfoContent
+          label="Why Local"
+          message={tradeoffInfo.message}
+        />
+      )
+    });
+  }
+
+  return info;
+}
+
+function LocalAiIssueRecovery({
+  localAiSetupPhase,
+  localLlmStatus,
+  onCancelLocalDownload,
+  onDownloadLocalAi,
+  status
+}: {
+  localAiSetupPhase: 'requesting' | 'downloading' | 'idle';
+  localLlmStatus: LocalLlmStatus | null;
+  onCancelLocalDownload: () => void;
+  onDownloadLocalAi: () => void;
+  status: OnboardingStatus | null;
+}) {
+  const localRecommendedModel = status?.ai?.recommended === 'local' ? status.ai.recommendedModel : null;
+  const caulLocalStatus = localLlmStatus ?? getCaulLocalLlmStatus(status);
+  const localModelInstalled = Boolean(
+    caulLocalStatus?.runtime.installed
+    && caulLocalStatus.model?.installed
+    && (!localRecommendedModel || caulLocalStatus.model.id === localRecommendedModel.id)
+  );
+  const localAiInfo = localRecommendedModel || caulLocalStatus?.model
+    ? <LocalAiRecommendationInfoButton embedded recommendation={status?.ai} status={caulLocalStatus} />
+    : null;
+
+  return (
+    <LocalAiDownloadControl
+      align="center"
+      info={localAiInfo}
+      isInstalled={localModelInstalled}
+      localAiSetupPhase={localAiSetupPhase}
+      onCancel={onCancelLocalDownload}
+      onDownload={onDownloadLocalAi}
+      setupLabel="Local AI setup"
+      showIdleStatus={false}
+      status={caulLocalStatus}
+    />
+  );
+}
+
+function IssueActionInfoIcon({
+  label,
+  message
+}: {
+  label: string;
+  message: string;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          aria-label={label}
+          className="inline-flex size-4 shrink-0 items-center justify-center rounded-full text-primary-foreground/85 hover:bg-primary-foreground/15 hover:text-primary-foreground"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onKeyDown={(event) => {
+            event.stopPropagation();
+          }}
+          onPointerDown={(event) => {
+            event.stopPropagation();
+          }}
+          role="button"
+          tabIndex={0}
+        >
+          <InfoIcon className="size-3" />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="w-72 px-3 py-2 text-left text-sm leading-5" side="top">
+        {message}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -1783,26 +2465,22 @@ function CloudSignInControl({
 }) {
   const alignmentClassName = align === 'start' ? 'justify-items-start text-left' : 'justify-items-center text-center';
   const statusClassName = align === 'start'
-    ? 'max-w-sm text-xs leading-5 text-muted-foreground'
-    : 'max-w-sm text-center text-xs leading-5 text-muted-foreground';
+    ? 'max-w-sm text-sm leading-5 text-muted-foreground'
+    : 'max-w-sm text-center text-sm leading-5 text-muted-foreground';
   const actionClassName = `inline-flex items-center gap-1.5 ${align === 'start' ? '' : 'justify-center'}`;
   const rootClassName = statusPlacement === 'inline'
-    ? 'flex min-h-9 w-full items-center justify-between gap-3'
-    : `grid min-h-9 gap-1 ${alignmentClassName}`;
-  const inlineStatusClassName = 'ml-auto min-w-0 text-right text-xs leading-5 text-muted-foreground';
+    ? `flex min-h-10 flex-wrap items-center gap-3 ${align === 'start' ? 'justify-start text-left' : 'justify-center text-center'}`
+    : `grid min-h-10 gap-1 ${alignmentClassName}`;
+  const inlineStatusClassName = align === 'start'
+    ? 'min-w-0 text-sm leading-5 text-muted-foreground'
+    : 'min-w-0 text-center text-sm leading-5 text-muted-foreground';
 
   if (isReady) {
     return (
       <div aria-label={setupLabel} className={rootClassName} role={setupLabel ? 'group' : undefined}>
         <div className={actionClassName}>
-          <Button disabled size="sm" type="button">
-            Sign in with ChatGPT
-          </Button>
-          {info}
+          <ReadySetupPill info={info} />
         </div>
-        <p aria-live="polite" className={statusPlacement === 'inline' ? inlineStatusClassName : statusClassName}>
-          Ready
-        </p>
       </div>
     );
   }
@@ -1810,7 +2488,7 @@ function CloudSignInControl({
   return (
     <div aria-label={setupLabel} className={rootClassName} role={setupLabel ? 'group' : undefined}>
       <div className={actionClassName}>
-        <Button disabled={disabled || isSigningIn} onClick={onSignIn} size="sm" type="button">
+        <Button disabled={disabled || isSigningIn} onClick={onSignIn} type="button">
           {isSigningIn ? <LoaderCircleIcon className="mr-1.5 size-3.5 animate-spin" /> : null}
           {isSigningIn ? 'Opening' : 'Sign in with ChatGPT'}
         </Button>
@@ -1827,47 +2505,127 @@ function ModelAutoUpdateCheckbox({
   checked,
   description,
   id,
+  info,
+  label,
   onCheckedChange
 }: {
   checked: boolean;
-  description: string;
+  description?: string;
   id: string;
+  info?: string;
+  label: string;
   onCheckedChange: (enabled: boolean) => void;
 }) {
   return (
-    <Field className="w-auto self-start gap-2" orientation="horizontal">
+    <Field className="w-auto self-start" orientation="horizontal">
       <Checkbox
         id={id}
         checked={checked}
         onCheckedChange={(nextChecked) => onCheckedChange(nextChecked === true)}
       />
-      <div className="grid gap-0.5">
-        <FieldLabel htmlFor={id}>Auto update model</FieldLabel>
-        <p className="max-w-2xl text-xs leading-4 text-muted-foreground">
-          {description}
-        </p>
-      </div>
+      <FieldContent>
+        <div className="flex items-center gap-1.5">
+          <FieldLabel htmlFor={id}>{label}</FieldLabel>
+          {info ? <SettingInfoButton label={`${label} info`} message={info} /> : null}
+        </div>
+        {description ? (
+          <FieldDescription className="max-w-xl">
+            {description}
+          </FieldDescription>
+        ) : null}
+      </FieldContent>
     </Field>
   );
 }
 
-function RecommendedPill({
+function SettingInfoButton({
+  label,
+  message
+}: {
+  label: string;
+  message: string;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          aria-label={label}
+          className="inline-flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          type="button"
+        >
+          <InfoIcon className="size-3.5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent className="w-64 px-3 py-2 text-left font-normal leading-5" side="bottom">
+        {message}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function EmbeddedInfoTooltip({
+  children,
+  label,
+  side = 'top'
+}: {
+  children: ReactNode;
+  label: string;
+  side?: TooltipSide;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          aria-label={label}
+          className="inline-flex size-5 shrink-0 items-center justify-center rounded-full text-current opacity-85 hover:bg-current/10 hover:opacity-100"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onKeyDown={(event) => {
+            event.stopPropagation();
+          }}
+          onPointerDown={(event) => event.stopPropagation()}
+          role="button"
+          tabIndex={0}
+        >
+          <InfoIcon className="size-3.5" />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="w-72 p-3" side={side}>
+        {children}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function RecommendedMarker({
+  className,
+  infoAsButton = true,
+  infoIconClassName,
   message = recommendedPillTitle,
   selected = false
 }: {
+  className?: string;
+  infoAsButton?: boolean;
+  infoIconClassName?: string;
   message?: string;
   selected?: boolean;
 }) {
+  const infoButtonProps = infoAsButton ? {
+    role: 'button',
+    tabIndex: 0
+  } : {};
+
   return (
     <span
-      className={`${selected ? selectedRecommendedPillClassName : recommendedPillClassName} relative inline-flex items-center gap-1`}
+      className="relative inline-flex shrink-0 items-center"
     >
-      <span>{recommendedPillLabel}</span>
       <Tooltip>
         <TooltipTrigger asChild>
           <span
             aria-label="Why this is recommended"
-            className={`inline-flex size-3.5 shrink-0 items-center justify-center rounded-full ${selected ? 'text-primary-foreground hover:bg-primary-foreground/15' : 'text-primary hover:bg-primary/10'}`}
+            className={className ?? (selected ? selectedRecommendedMarkerClassName : recommendedMarkerClassName)}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -1876,57 +2634,204 @@ function RecommendedPill({
               event.stopPropagation();
             }}
             onPointerDown={(event) => event.stopPropagation()}
-            role="button"
-            tabIndex={0}
+            {...infoButtonProps}
           >
-            <InfoIcon className="size-3" />
+            <StarIcon aria-hidden="true" className={infoIconClassName ?? 'size-3.5'} fill="currentColor" />
           </span>
         </TooltipTrigger>
-        <TooltipContent className="w-64 bg-popover px-3 py-2 text-left font-normal leading-5 text-popover-foreground" side="bottom">
-          {message}
+        <TooltipContent className="w-64 px-3 py-2 text-left font-normal leading-5" side="bottom">
+          <div className="grid gap-1">
+            <div className="font-medium">Recommended</div>
+            <div>{message}</div>
+          </div>
         </TooltipContent>
       </Tooltip>
     </span>
   );
 }
+
+function TruncatedTextTooltip({
+  children,
+  className,
+  tooltip
+}: {
+  children: ReactNode;
+  className?: string;
+  tooltip: string;
+}) {
+  const textRef = useRef<HTMLSpanElement>(null);
+  const [isTruncated, setIsTruncated] = useState(false);
+
+  function updateTruncation() {
+    const element = textRef.current;
+
+    if (!element) {
+      return;
+    }
+
+    setIsTruncated(element.scrollWidth > element.clientWidth + 1);
+  }
+
+  useLayoutEffect(() => {
+    const element = textRef.current;
+
+    if (!element) {
+      return;
+    }
+
+    updateTruncation();
+
+    const resizeObserver = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(updateTruncation);
+    resizeObserver?.observe(element);
+    window.addEventListener('resize', updateTruncation);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', updateTruncation);
+    };
+  }, [children]);
+
+  const label = (
+    <span
+      ref={textRef}
+      className={className}
+      onFocus={updateTruncation}
+      onMouseEnter={updateTruncation}
+      onPointerEnter={updateTruncation}
+    >
+      {children}
+    </span>
+  );
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {label}
+      </TooltipTrigger>
+      {isTruncated ? (
+        <TooltipContent className="max-w-64 truncate" side="bottom">
+          {tooltip}
+        </TooltipContent>
+      ) : null}
+    </Tooltip>
+  );
+}
+
 function getAiProviderRecommendationMessage(provider: AiProvider) {
   return provider === 'local' ? recommendedLocalAiPillMessage : recommendedCloudAiPillMessage;
 }
 
 function LocalAiRecommendationInfoButton({
-  recommendation
+  embedded = false,
+  extraContent,
+  recommendation,
+  status
 }: {
+  embedded?: boolean;
+  extraContent?: ReactNode;
   recommendation: AiRecommendation | null | undefined;
+  status?: LocalLlmStatus | null;
 }) {
   const model = recommendation?.recommended === 'local' ? recommendation.recommendedModel : null;
-  const runtime = recommendation?.resources.localRuntimes?.caulLlamaCpp ?? recommendation?.localRuntime;
-  const sizeGb = model?.downloadSizeGb ?? runtime?.model?.sizeGb;
+  const runtime = recommendation?.resources.localRuntimes?.caulLlamaCpp ?? recommendation?.localRuntime ?? status;
+  const modelName = model?.name ?? runtime?.model?.name ?? status?.model?.name ?? 'Recommended local AI';
+  const sizeGb = model?.downloadSizeGb ?? runtime?.model?.sizeGb ?? status?.model?.sizeGb;
+  const trigger = embedded ? (
+    null
+  ) : (
+    <Button
+      aria-label="Local AI recommendation details"
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onKeyDown={(event) => {
+        event.stopPropagation();
+      }}
+      onPointerDown={(event) => {
+        event.stopPropagation();
+      }}
+      size="icon"
+      type="button"
+      variant="ghost"
+    >
+      <InfoIcon />
+    </Button>
+  );
+  const content = (
+    <dl className="grid gap-2 text-xs">
+      <div className="grid gap-0.5">
+        <dt className="font-medium text-primary-foreground">Model</dt>
+        <dd className="text-primary-foreground/80">{modelName}</dd>
+      </div>
+      <div className="grid gap-0.5">
+        <dt className="font-medium text-primary-foreground">Download size</dt>
+        <dd className="text-primary-foreground/80">{typeof sizeGb === 'number' ? `About ${sizeGb.toFixed(1)} GB` : 'Shown when available'}</dd>
+      </div>
+      {extraContent}
+    </dl>
+  );
+
+  if (embedded) {
+    return (
+      <EmbeddedInfoTooltip label="Local AI recommendation details" side="top">
+        {content}
+      </EmbeddedInfoTooltip>
+    );
+  }
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button
-          aria-label="Local AI recommendation details"
-          size="icon"
-          type="button"
-          variant="ghost"
-        >
-          <InfoIcon />
-        </Button>
+        {trigger}
       </TooltipTrigger>
-      <TooltipContent align="end" className="w-72 bg-popover p-3 text-popover-foreground" side="top">
-        <dl className="grid gap-2 text-xs">
-          <div className="grid gap-0.5">
-            <dt className="font-medium text-foreground">Model</dt>
-            <dd className="text-muted-foreground">{model?.name ?? runtime?.model?.name ?? 'Recommended local AI'}</dd>
-          </div>
-          <div className="grid gap-0.5">
-            <dt className="font-medium text-foreground">Download size</dt>
-            <dd className="text-muted-foreground">{typeof sizeGb === 'number' ? `About ${sizeGb.toFixed(1)} GB` : 'Shown when available'}</dd>
-          </div>
-        </dl>
+      <TooltipContent align="end" className="w-72 p-3" side="top">
+        {content}
       </TooltipContent>
     </Tooltip>
+  );
+}
+
+function LocalAiTradeoffInfoContent({
+  label,
+  message
+}: {
+  label: string;
+  message: string;
+}) {
+  return (
+    <div className="grid gap-0.5">
+      <dt className="font-medium text-primary-foreground">{label}</dt>
+      <dd className="text-primary-foreground/80">{message}</dd>
+    </div>
+  );
+}
+
+function CloudAiInfoButton({
+  llmModel,
+  llmReasoning
+}: {
+  llmModel: LlmModel;
+  llmReasoning: LlmReasoning;
+}) {
+  const modelLabel = llmModels.find((model) => model.value === llmModel)?.label ?? llmModel;
+  const reasoningLabel = llmReasoningLevels.find((reasoning) => reasoning.value === llmReasoning)?.label ?? llmReasoning;
+
+  return (
+    <EmbeddedInfoTooltip label="Cloud AI model details" side="top">
+      <dl className="grid gap-2 text-xs">
+        <div className="grid gap-0.5">
+          <dt className="font-medium text-primary-foreground">Model</dt>
+          <dd className="text-primary-foreground/80">{modelLabel}</dd>
+        </div>
+        <div className="grid gap-0.5">
+          <dt className="font-medium text-primary-foreground">Reasoning</dt>
+          <dd className="text-primary-foreground/80">{reasoningLabel}</dd>
+        </div>
+      </dl>
+    </EmbeddedInfoTooltip>
   );
 }
 
@@ -1946,7 +2851,7 @@ function formatReviewedDate(value: string) {
 
 function formatCatalogueRefreshStatus(result: ModelCatalogueRefreshResult | null) {
   if (!result) {
-    return 'Check for newer AI recommendations.';
+    return 'Refresh available local transcription and local AI model recommendations.';
   }
 
   const failedSources = result.sourceReports.filter((report) => !report.ok).length;
@@ -1956,7 +2861,7 @@ function formatCatalogueRefreshStatus(result: ModelCatalogueRefreshResult | null
     ? `, ${failedSources} could not be reached`
     : '';
 
-  return `AI recommendations refreshed ${formatReviewedDate(result.reviewedAt)}. ${sourceText}${failureText}.`;
+  return `Local AI Catalogue refreshed ${formatReviewedDate(result.reviewedAt)}. ${sourceText}${failureText}.`;
 }
 
 function getCaulLocalLlmStatus(status: OnboardingStatus | null): LocalLlmStatus | null {
@@ -2010,7 +2915,8 @@ function OnboardingTranscriptionStatus({ status }: { status: OnboardingStatus | 
   if (isReady) {
     return (
       <StatusRow
-        label="Ready"
+        action={<ReadySetupPill size="action" />}
+        label="Local transcription"
         ready
       />
     );
@@ -2044,24 +2950,47 @@ function OnboardingTranscriptionStatus({ status }: { status: OnboardingStatus | 
     <StatusRow
       action={canAutoDownload
         ? <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />
-        : <StatusPill ready={false}>Not ready</StatusPill>}
+        : <StatusPill ready={false} size="action">Not ready</StatusPill>}
       label={canAutoDownload ? 'Preparing local transcription' : 'Transcription setup needs attention'}
       ready={false}
     />
   );
 }
 
-const localTranscriptionModelOptions: Array<{ label: string; title: string; value: LocalTranscriptionModelId }> = [
-  { label: 'Best accuracy', title: 'Best accuracy - Parakeet v3', value: 'parakeet' },
-  { label: 'Lower memory use', title: 'Lower memory use - Moonshine tiny', value: 'moonshine-tiny' }
+const transcriptionModelRecommendationMessage = 'Recommended for this computer based on accuracy, memory use and supported local audio models.';
+
+const localTranscriptionModelOptions: Array<{
+  detail: string;
+  label: string;
+  modelDetail: string;
+  modelName: string;
+  title: string;
+  value: LocalTranscriptionModelId;
+}> = [
+  {
+    detail: 'Uses more memory and processing power.',
+    label: 'Best accuracy',
+    modelDetail: 'Parakeet v3 is best when accuracy matters most. It can be harder on your computer because it uses more memory and processing power.',
+    modelName: 'Parakeet v3',
+    title: 'Best accuracy - harder on your computer',
+    value: 'parakeet'
+  },
+  {
+    detail: 'Lighter load. May be less accurate.',
+    label: 'Lower memory use',
+    modelDetail: 'Moonshine tiny is best when you want lower memory use or a lighter load on your computer. It may be less accurate than Parakeet v3.',
+    modelName: 'Moonshine tiny',
+    title: 'Lower memory use - easier on your computer',
+    value: 'moonshine-tiny'
+  }
 ];
 
 function getInitialTranscriptionModelId(status: OnboardingStatus): LocalTranscriptionModelId {
   return status.selectedLocalTranscriptionModel ?? status.parakeet.modelId ?? status.transcription.recommendedModel?.id ?? 'parakeet';
 }
 
-function getLocalTranscriptionModelTitle(modelId: LocalTranscriptionModelId) {
-  return localTranscriptionModelOptions.find((option) => option.value === modelId)?.title ?? 'Best accuracy - Parakeet v3';
+function getLocalTranscriptionModelOption(modelId: LocalTranscriptionModelId) {
+  return localTranscriptionModelOptions.find((option) => option.value === modelId) ?? localTranscriptionModelOptions[0]!;
 }
 
 function TranscriptionModelRow({
@@ -2069,82 +2998,160 @@ function TranscriptionModelRow({
   onDownload,
   onSelectModel,
   selectedModelId,
-  status
+  status,
+  variant = 'compact'
 }: {
   onCancel: () => void;
   onDownload: (modelId: LocalTranscriptionModelId) => void;
   onSelectModel: (modelId: LocalTranscriptionModelId) => void;
   selectedModelId: LocalTranscriptionModelId;
   status: OnboardingStatus | null;
+  variant?: 'compact' | 'settings';
 }) {
   const isDownloading = status?.parakeet.status === 'downloading';
   const isSelectedModelReady = status?.parakeet.status === 'installed' && status.parakeet.modelId === selectedModelId;
   const isSelectedModelInUse = isSelectedModelReady && status?.selectedLocalTranscriptionModel === selectedModelId;
   const canDownload = Boolean(status && !isDownloading && status.transcription.recommended !== 'cloud');
-  const canUse = canDownload && !isSelectedModelReady && !isSelectedModelInUse;
   const recommendedModelId = status?.transcription.recommendedModel?.id;
-  const showRecommendedBadge = selectedModelId === recommendedModelId;
-  const selectedModelTitle = getLocalTranscriptionModelTitle(selectedModelId);
+  const selectedModel = getLocalTranscriptionModelOption(selectedModelId);
   const downloadProgress = getLocalModelDownloadProgressLabel(status?.parakeet.progress);
-  const renderRecommendedBadge = () => (
-    <span className={`${recommendedPillClassName} inline-flex items-center gap-1`}>
-      <span>{recommendedPillLabel}</span>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span
-            aria-label="Why this transcription model is recommended"
-            className="inline-flex size-3.5 shrink-0 items-center justify-center rounded-full text-primary hover:bg-primary/10"
-            role="button"
-            tabIndex={0}
-          >
-            <InfoIcon className="size-3" />
-          </span>
-        </TooltipTrigger>
-        <TooltipContent className="w-64 bg-popover px-3 py-2 text-left font-normal leading-5 text-popover-foreground">
-          {recommendedPillTitle}
-        </TooltipContent>
-      </Tooltip>
-    </span>
+  const rootGapClassName = variant === 'settings' ? 'gap-4' : 'gap-3';
+  const widthClassName = variant === 'settings' ? 'max-w-xl' : 'max-w-sm';
+  const controlWidthClassName = variant === 'settings' ? 'w-fit max-w-full' : 'w-full max-w-full';
+  const controlWrapperClassName = variant === 'settings'
+    ? `grid ${controlWidthClassName} items-center gap-2`
+    : `grid min-h-10 ${controlWidthClassName} items-center gap-2`;
+  const optionButtonClassName = variant === 'settings'
+    ? 'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[6px] px-3 text-sm font-medium whitespace-nowrap transition-colors'
+    : 'inline-flex h-9 min-w-0 flex-1 items-center justify-center gap-1.5 overflow-hidden rounded-[6px] px-3 text-sm font-medium whitespace-nowrap transition-colors';
+  const optionLabelClassName = variant === 'settings'
+    ? 'block shrink-0 whitespace-nowrap'
+    : 'block min-w-0 truncate';
+  const downloadButtonSize = 'default';
+  const downloadRowClassName = variant === 'settings'
+    ? 'flex min-w-0 flex-wrap items-center gap-3'
+    : 'flex min-w-0 items-center gap-2';
+  const selectedModelInfo = (
+    <TranscriptionModelInfoButton
+      detail={selectedModel.modelDetail}
+      modelName={selectedModel.modelName}
+    />
   );
 
   return (
-    <div className="grid min-h-10 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
-      <div className="flex min-w-0 items-center gap-2">
-        <select
-          aria-label="Transcription model"
-          className="h-8 w-[15.25rem] max-w-full min-w-0 appearance-auto rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
-          name="transcription-model"
-          value={selectedModelId}
-          onChange={(event) => onSelectModel(event.currentTarget.value as LocalTranscriptionModelId)}
-          title={selectedModelTitle}
-        >
-          {localTranscriptionModelOptions.map((option) => (
-            <option key={option.value} title={option.title} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-        {showRecommendedBadge ? renderRecommendedBadge() : null}
+    <div className={`grid ${rootGapClassName}`}>
+      <div className={controlWrapperClassName}>
+        <div className={`inline-flex ${controlWidthClassName} min-w-0 rounded-md border border-border bg-muted/30 p-0.5`} role="tablist" aria-label="Transcription model">
+          {localTranscriptionModelOptions.map((option) => {
+            const isSelected = selectedModelId === option.value;
+            const isRecommended = recommendedModelId === option.value;
+
+            return (
+              <button
+                key={option.value}
+                aria-label={`${option.label}${isRecommended ? ` ${recommendedPillLabel}` : ''}`}
+                aria-selected={isSelected}
+                className={`${optionButtonClassName} ${isSelected ? '!bg-primary !text-primary-foreground shadow-sm hover:!bg-primary/90 dark:!bg-primary dark:!text-primary-foreground dark:hover:!bg-primary/90' : 'text-muted-foreground hover:text-foreground'}`}
+                onClick={() => onSelectModel(option.value)}
+                role="tab"
+                type="button"
+              >
+                <TruncatedTextTooltip className={optionLabelClassName} tooltip={option.label}>
+                  {option.label}
+                </TruncatedTextTooltip>
+                {isRecommended ? (
+                  <RecommendedMarker
+                    message={transcriptionModelRecommendationMessage}
+                    selected={isSelected}
+                  />
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+        <input name="transcription-model" readOnly type="hidden" value={selectedModelId} />
       </div>
-      <div className="flex min-w-0 items-center justify-end gap-2">
-        {isDownloading ? (
-          <span aria-label={downloadProgress.accessibleLabel} aria-live="polite" className="min-w-0 flex-1 truncate text-right text-xs tabular-nums text-muted-foreground" title={downloadProgress.accessibleLabel}>
-            {downloadProgress.label}
-          </span>
-        ) : isSelectedModelReady ? (
-          <span aria-live="polite" className="inline-flex w-20 items-center justify-end gap-1 text-xs font-medium text-[#34424A] dark:text-[#8EA6AD]">
-            <CheckCircle2Icon className="size-3.5" />
-            Ready
-          </span>
-        ) : null}
-        {isDownloading ? (
-          <Button onClick={onCancel} size="sm" type="button" variant="outline">Cancel</Button>
-        ) : isSelectedModelReady ? null : (
-          <Button disabled={!canUse} onClick={() => onDownload(selectedModelId)} size="sm" type="button">
-            Use
-          </Button>
-        )}
+      <div role="tabpanel" className={`grid ${widthClassName} ${rootGapClassName} text-left`}>
+        <p className={layout.settingsDescription}>{selectedModel.detail}</p>
+        <div className={downloadRowClassName}>
+          {isDownloading ? (
+            <>
+              <Button onClick={onCancel} size={downloadButtonSize} type="button" variant="outline">Cancel</Button>
+              <span aria-label={downloadProgress.accessibleLabel} aria-live="polite" className="min-w-0 truncate text-sm tabular-nums text-muted-foreground" title={downloadProgress.accessibleLabel}>
+                {downloadProgress.label}
+              </span>
+            </>
+          ) : isSelectedModelReady || isSelectedModelInUse ? (
+            <ReadySetupPill info={selectedModelInfo} />
+          ) : (
+            <>
+              <Button aria-label="Download" className="gap-2" disabled={!canDownload} onClick={() => onDownload(selectedModelId)} size={downloadButtonSize} type="button">
+                Download
+                {selectedModelInfo}
+              </Button>
+              <span aria-live="polite" className="text-sm text-muted-foreground">Not downloaded yet</span>
+            </>
+          )}
+        </div>
       </div>
+    </div>
+  );
+}
+
+function TranscriptionModelInfoButton({
+  detail,
+  modelName
+}: {
+  detail: string;
+  modelName: string;
+}) {
+  return (
+    <EmbeddedInfoTooltip label={`${modelName} details`} side="top">
+      <dl className="grid gap-2 text-xs">
+        <div className="grid gap-0.5">
+          <dt className="font-medium text-primary-foreground">Model</dt>
+          <dd className="text-primary-foreground/80">{modelName}</dd>
+        </div>
+        <div className="grid gap-0.5">
+          <dt className="font-medium text-primary-foreground">Tradeoff</dt>
+          <dd className="text-primary-foreground/80">{detail}</dd>
+        </div>
+      </dl>
+    </EmbeddedInfoTooltip>
+  );
+}
+
+function ReadySetupPill({
+  info,
+  label = 'Ready',
+  size = 'action'
+}: {
+  info?: ReactNode;
+  label?: string;
+  size?: 'action' | 'default';
+}) {
+  return (
+    <div className="inline-flex shrink-0 items-center gap-1.5">
+      <StatusPill ready size={size}>
+        <span className="inline-flex items-center gap-1">
+          <CheckCircle2Icon className="size-3.5" />
+          {label}
+          {info}
+        </span>
+      </StatusPill>
+    </div>
+  );
+}
+
+function UnavailableSetupPill({
+  info
+}: {
+  info?: ReactNode;
+}) {
+  return (
+    <div className="inline-flex shrink-0 items-center gap-1.5">
+      <StatusPill ready={false}>Unavailable</StatusPill>
+      {info}
     </div>
   );
 }
@@ -2226,13 +3233,19 @@ function getLocalAiDownloadProgressLabel(
 
 function StatusPill({
   children,
-  ready
+  ready,
+  size = 'default'
 }: {
   children: ReactNode;
   ready: boolean;
+  size?: 'action' | 'default';
 }) {
+  const sizeClassName = size === 'action'
+    ? 'inline-flex h-8 items-center rounded-lg px-2.5 text-sm'
+    : 'rounded-full px-2 py-1 text-xs';
+
   return (
-    <span className={`rounded-full border px-2 py-1 text-xs font-medium ${ready ? 'border-[#34424A]/35 text-[#34424A] dark:text-[#8EA6AD]' : 'border-destructive/35 text-destructive'}`}>
+    <span className={`border font-medium ${sizeClassName} ${ready ? 'border-primary bg-primary text-primary-foreground' : 'border-destructive/35 text-destructive'}`}>
       {children}
     </span>
   );
@@ -2243,22 +3256,27 @@ function getOnboardingPermissionRows(permissions: PermissionItem[]) {
 }
 
 function PermissionSetupRow({
+  actionSize,
   contextLabel,
+  issuePanel = false,
   onChange,
   permission,
   showDivider = true
 }: {
+  actionSize?: 'default' | 'sm';
   contextLabel?: string;
+  issuePanel?: boolean;
   onChange: () => void;
   permission: PermissionItem;
   showDivider?: boolean;
 }) {
-  const [restartHintVisible, setRestartHintVisible] = useState(false);
   const ready = permission.status === 'granted' || permission.status === 'unsupported';
-  const needsRestart = permission.status === 'denied' || permission.status === 'restricted';
-  const showRestart = needsRestart && restartHintVisible;
   const statusLabel = getPermissionStatusLabel(permission.status);
   const macosPermissionName = getMacosPermissionName(permission.id);
+  const statusClassName = issuePanel
+    ? 'rounded-full border px-2.5 py-1 text-sm font-medium'
+    : 'rounded-full border px-2 py-1 text-xs font-medium';
+  const permissionButtonSize = actionSize ?? (issuePanel ? 'default' : 'sm');
 
   return (
     <div className={`${showDivider ? 'border-b border-border/70 last:border-b-0' : ''} text-sm`.trim()}>
@@ -2288,26 +3306,17 @@ function PermissionSetupRow({
           </Tooltip>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className={`rounded-full border px-2 py-1 text-xs font-medium ${ready ? 'border-[#34424A]/35 text-[#34424A] dark:text-[#8EA6AD]' : 'border-destructive/35 text-destructive'}`}>
+          <span className={`${statusClassName} ${ready ? 'border-[#34424A]/35 text-[#34424A] dark:text-[#8EA6AD]' : 'border-destructive/35 text-destructive'}`}>
             {statusLabel}
           </span>
           {!ready ? (
             <Button
-              aria-label={`${showRestart ? 'Restart' : 'Grant'} ${permission.label}`}
-              onClick={() => {
-                if (showRestart) {
-                  void getSettingsBridge()?.relaunch?.();
-                  return;
-                }
-                onChange();
-                if (needsRestart) {
-                  setRestartHintVisible(true);
-                }
-              }}
-              size="sm"
+              aria-label={`Grant ${permission.label}`}
+              onClick={onChange}
+              size={permissionButtonSize}
               type="button"
             >
-              {showRestart ? 'Restart' : 'Grant'}
+              Grant
             </Button>
           ) : null}
         </div>
@@ -2569,7 +3578,7 @@ function PrivateOverlayWindowTitleBar({
   isSettingsOpen,
   notifications,
   onOpenHistoryFolder,
-  onOpenSettingsSection,
+  onOpenSettingsTarget,
   onToggleSettings
 }: {
   appTitle: string;
@@ -2577,7 +3586,7 @@ function PrivateOverlayWindowTitleBar({
   isSettingsOpen: boolean;
   notifications: MainNotification[];
   onOpenHistoryFolder: () => void;
-  onOpenSettingsSection: (section: SettingsSection) => void;
+  onOpenSettingsTarget: (target: SettingsTarget) => void;
   onToggleSettings: () => void;
 }) {
   const [isQuitConfirmationOpen, setIsQuitConfirmationOpen] = useState(false);
@@ -2791,7 +3800,7 @@ function PrivateOverlayWindowTitleBar({
           <MainNotificationButton
             className={`${layout.windowTitleBarSettingsButton} ${isMac ? layout.windowTitleBarNotificationButtonMac : layout.windowTitleBarNotificationButtonDesktop}`}
             notifications={notifications}
-            onOpenSettingsSection={onOpenSettingsSection}
+            onOpenSettingsTarget={onOpenSettingsTarget}
           />
         ) : null}
         <Tooltip>
@@ -2816,13 +3825,14 @@ function PrivateOverlayWindowTitleBar({
 function MainNotificationButton({
   className,
   notifications,
-  onOpenSettingsSection
+  onOpenSettingsTarget
 }: {
   className: string;
   notifications: MainNotification[];
-  onOpenSettingsSection: (section: SettingsSection) => void;
+  onOpenSettingsTarget: (target: SettingsTarget) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const hasError = notifications.some((notification) => notification.tone === 'error');
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -2830,10 +3840,11 @@ function MainNotificationButton({
         <button
           aria-label="Caul notifications"
           className={className}
+          data-notification-tone={hasError ? 'error' : 'attention'}
           type="button"
         >
           <BellIcon className="mx-auto size-4" />
-          <span className="absolute right-1 top-1 size-1.5 rounded-full bg-primary" />
+          <span className={`absolute right-1 top-1 size-1.5 rounded-full ${hasError ? 'bg-destructive' : 'bg-primary'}`} />
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-64 gap-2" side="bottom" sideOffset={8}>
@@ -2845,7 +3856,7 @@ function MainNotificationButton({
               className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               onClick={() => {
                 setOpen(false);
-                onOpenSettingsSection(notification.section);
+                onOpenSettingsTarget(notification.target);
               }}
               type="button"
             >
@@ -2870,7 +3881,7 @@ function isNavigatorMac() {
 function PrivateOverlayHandleSurface() {
   const privateOverlayStatus = usePrivateOverlayStatus();
   const isOverlayOpen = Boolean(privateOverlayStatus?.overlay.visible || privateOverlayStatus?.overlayWindowVisible);
-  const [handleMotion, setHandleMotion] = useState<'dragging' | 'idle' | 'snapping'>('idle');
+  const [handleMotion, setHandleMotion] = useState<'dragging' | 'idle' | 'pressing' | 'snapping'>('idle');
   const dragStateRef = useRef<{
     didStartDrag: boolean;
     isDragging: boolean;
@@ -2903,13 +3914,21 @@ function PrivateOverlayHandleSurface() {
     }, handleSnapVisualDurationMs);
   }
 
+  function schedulePressVisualReset() {
+    clearSnapVisualTimer();
+    snapVisualTimerRef.current = window.setTimeout(() => {
+      snapVisualTimerRef.current = null;
+      setHandleMotion('idle');
+    }, handlePressVisualDurationMs);
+  }
+
   function handlePointerDown(event: PointerEvent<HTMLButtonElement>) {
     if (event.button !== 0) {
       return;
     }
 
     clearSnapVisualTimer();
-    setHandleMotion('idle');
+    setHandleMotion('pressing');
     event.currentTarget.setPointerCapture(event.pointerId);
     dragStateRef.current = {
       didStartDrag: false,
@@ -2992,7 +4011,8 @@ function PrivateOverlayHandleSurface() {
       return;
     }
 
-    setHandleMotion('idle');
+    setHandleMotion('pressing');
+    schedulePressVisualReset();
     void bridge.toggle();
   }
 
@@ -3021,78 +4041,110 @@ function PrivateOverlayHandleSurface() {
 }
 
 function HomePage({
-  autoCollapse,
+  autoCollapseAiResponses,
+  autoCollapseTranscription,
+  aiIssue,
   canStartListening,
+  canUseAi,
   edge,
   isAiResponsePlaceholder,
   isBusy,
+  isChatGptSigningIn,
+  isCloudAiReady,
   isListening,
-  isLlmReady,
   isTranscriptPlaceholder,
   listenToMicrophone,
   listenToSystemAudio,
+  localAiSetupPhase,
   localLlmStatus,
   llmOutputRef,
   missingSelectedPermissions,
   onAskAiFromTranscript,
   onAskAiFromManualPrompt,
   onAskAiFromSpecificTranscript,
+  onCancelLocalAiDownload,
+  onCancelTranscriptionModelDownload,
   onClearAiResponses,
   onClearTranscript,
   onCopyAiResponse,
   onCopyTranscript,
   onDownloadAiResponse,
+  onDownloadLocalAi,
   onDownloadTranscript,
+  onDownloadTranscriptionModel,
   onOpenGeneralInstructions,
-  onOpenPermissionSettings,
   onOpenPromptTemplateSettings,
+  onRequestPermission,
+  onSelectAiProvider,
   onSelectPromptTemplates,
+  onSelectTranscriptionModel,
   onSetListenToMicrophone,
   onSetListenToSystemAudio,
+  onSignInWithChatGpt,
+  onboardingStatus,
   outputRef,
   promptTemplates,
+  recommendedLocalAiModelReady,
   sendToAiWhenListeningStops,
   selectedAiProvider,
   selectedPromptTemplateIds,
+  selectedTranscriptionModelId,
   setSendToAiWhenListeningStops,
   toggleListening,
+  transcriptIssue,
   transcription
 }: {
-  autoCollapse: boolean;
+  autoCollapseAiResponses: boolean;
+  autoCollapseTranscription: boolean;
+  aiIssue: PanelIssue | null;
   canStartListening: boolean;
+  canUseAi: boolean;
   edge: OverlayEdge;
   isAiResponsePlaceholder: boolean;
   isBusy: boolean;
+  isChatGptSigningIn: boolean;
+  isCloudAiReady: boolean;
   isListening: boolean;
-  isLlmReady: boolean;
   isTranscriptPlaceholder: boolean;
   listenToMicrophone: boolean;
   listenToSystemAudio: boolean;
+  localAiSetupPhase: 'requesting' | 'downloading' | 'idle';
   localLlmStatus: LocalLlmStatus | null;
   llmOutputRef: RefObject<HTMLDivElement | null>;
   missingSelectedPermissions: PermissionItem[];
   onAskAiFromTranscript: () => void;
   onAskAiFromManualPrompt: (prompt: string) => void;
   onAskAiFromSpecificTranscript: (transcript: string) => void;
+  onCancelLocalAiDownload: () => void;
+  onCancelTranscriptionModelDownload: () => void;
   onClearAiResponses: () => void;
   onClearTranscript: () => void;
   onCopyAiResponse: () => void;
   onCopyTranscript: () => void;
   onDownloadAiResponse: (format: TranscriptDownloadFormat) => void;
+  onDownloadLocalAi: () => void;
   onDownloadTranscript: (format: TranscriptDownloadFormat) => void;
+  onDownloadTranscriptionModel: (modelId: LocalTranscriptionModelId) => void;
   onOpenGeneralInstructions: () => void;
-  onOpenPermissionSettings: () => void;
   onOpenPromptTemplateSettings: () => void;
+  onRequestPermission: (permission: PermissionItem['id']) => void;
+  onSelectAiProvider: (provider: AiProvider) => void;
   onSelectPromptTemplates: (ids: string[]) => void;
+  onSelectTranscriptionModel: (modelId: LocalTranscriptionModelId) => void;
   onSetListenToMicrophone: (listen: boolean) => void;
   onSetListenToSystemAudio: (listen: boolean) => void;
+  onSignInWithChatGpt: () => void;
+  onboardingStatus: OnboardingStatus | null;
   outputRef: RefObject<HTMLDivElement | null>;
   promptTemplates: PromptTemplate[];
+  recommendedLocalAiModelReady: boolean;
   sendToAiWhenListeningStops: boolean;
   selectedAiProvider: AiProvider;
   selectedPromptTemplateIds: string[];
+  selectedTranscriptionModelId: LocalTranscriptionModelId;
   setSendToAiWhenListeningStops: (sendToAi: boolean) => void;
   toggleListening: () => void;
+  transcriptIssue: PanelIssue | null;
   transcription: ReturnType<typeof useLiveTranscription>;
 }) {
   const showScrollFixture = isScrollFixtureEnabled();
@@ -3119,19 +4171,16 @@ function HomePage({
     });
   const isTranscriptPanelPlaceholder = !showScrollFixture && !showStreamFixture && isTranscriptPlaceholder;
   const isAiResponsePanelPlaceholder = !showScrollFixture && !showStreamFixture && isAiResponsePlaceholder;
-  const localAiPlaceholderStatusText = selectedAiProvider === 'local'
+  const localAiPlaceholderStatusText = selectedAiProvider === 'local' && !aiIssue
     ? getLocalAiPlaceholderStatusText(localLlmStatus)
     : null;
-  const isBlockedByPermissions = missingSelectedPermissions.length > 0;
-  const hasTranscript = isTranscriptTextCopyable(transcription.output);
+  const hasTranscript = isTranscriptTextCopyable(transcription.confirmedOutput);
   const hasAiResponse = visibleAiResponses.some((response) => isAiResponseTextCopyable(response.response));
   const startButtonLabel = isListening
     ? 'Stop Listening'
     : isBusy
       ? 'Starting...'
-      : isLlmReady
-        ? 'Start Listening'
-        : 'Preparing...';
+      : 'Start Listening';
   const autoSendLabel = 'Auto Send';
   const autoSendTooltip = 'Sends the transcript to AI when listening stops.';
   const hasTranscriptSessions = visibleTranscriptSessions.length > 0;
@@ -3192,22 +4241,22 @@ function HomePage({
   useLayoutEffect(() => {
     setCollapsedTranscriptIds((current) => reconcileCollapsedSectionIds({
       activeId: activeTranscriptSessionId,
-      autoCollapse,
+      autoCollapse: autoCollapseTranscription,
       current,
       ids: visibleTranscriptSessions.map((session) => session.id),
       overrides: transcriptCollapseOverrides
     }));
-  }, [activeTranscriptSessionId, autoCollapse, transcriptCollapseOverrides, visibleTranscriptSessions]);
+  }, [activeTranscriptSessionId, autoCollapseTranscription, transcriptCollapseOverrides, visibleTranscriptSessions]);
 
   useLayoutEffect(() => {
     setCollapsedAiResponseIds((current) => reconcileCollapsedSectionIds({
       activeId: activeAiResponseId,
-      autoCollapse,
+      autoCollapse: autoCollapseAiResponses,
       current,
       ids: visibleAiResponses.map((response) => response.id),
       overrides: aiResponseCollapseOverrides
     }));
-  }, [activeAiResponseId, aiResponseCollapseOverrides, autoCollapse, visibleAiResponses]);
+  }, [activeAiResponseId, aiResponseCollapseOverrides, autoCollapseAiResponses, visibleAiResponses]);
 
   useLayoutEffect(() => {
     if (activeTranscriptSessionId === lastScrolledTranscriptSessionIdRef.current) {
@@ -3316,14 +4365,13 @@ function HomePage({
           <HomeActionToolbar
             autoSendLabel={autoSendLabel}
             autoSendTooltip={autoSendTooltip}
+            canUseAi={canUseAi}
             canStartListening={canStartListening}
             edge={edge}
-            isBlockedByPermissions={isBlockedByPermissions}
             isBusy={isBusy}
             isListening={isListening}
             listenToMicrophone={listenToMicrophone}
             listenToSystemAudio={listenToSystemAudio}
-            onOpenPermissionSettings={onOpenPermissionSettings}
             onOpenGeneralInstructions={onOpenGeneralInstructions}
             onOpenPromptTemplateSettings={onOpenPromptTemplateSettings}
             onSelectPromptTemplates={onSelectPromptTemplates}
@@ -3359,7 +4407,28 @@ function HomePage({
             }`}
             onScroll={handleTranscriptPanelScroll}
           >
-            {isTranscriptPanelPlaceholder ? (
+            {transcriptIssue ? (
+              <PanelIssueRecovery
+                isChatGptSigningIn={isChatGptSigningIn}
+                isCloudAiReady={isCloudAiReady}
+                issue={transcriptIssue}
+                localAiSetupPhase={localAiSetupPhase}
+                localLlmStatus={localLlmStatus}
+                missingSelectedPermissions={missingSelectedPermissions}
+                onCancelLocalAiDownload={onCancelLocalAiDownload}
+                onCancelTranscriptionModelDownload={onCancelTranscriptionModelDownload}
+                onDownloadLocalAi={onDownloadLocalAi}
+                onDownloadTranscriptionModel={onDownloadTranscriptionModel}
+                onRequestPermission={onRequestPermission}
+                onSelectAiProvider={onSelectAiProvider}
+                onSelectTranscriptionModel={onSelectTranscriptionModel}
+                onSignInWithChatGpt={onSignInWithChatGpt}
+                onboardingStatus={onboardingStatus}
+                recommendedLocalAiModelReady={recommendedLocalAiModelReady}
+                selectedAiProvider={selectedAiProvider}
+                selectedTranscriptionModelId={selectedTranscriptionModelId}
+              />
+            ) : isTranscriptPanelPlaceholder ? (
               <>
                 {transcriptPlaceholder}
                 <StartHereHint
@@ -3372,6 +4441,7 @@ function HomePage({
             ) : (
               <TranscriptSessionList
                 activeSessionId={activeTranscriptSessionId}
+                canUseAi={canUseAi}
                 collapsedIds={collapsedTranscriptIds}
                 isAsking={transcription.isAsking}
                 onAskAi={onAskAiFromSpecificTranscript}
@@ -3383,6 +4453,7 @@ function HomePage({
           {isVerticalToolbar ? (
             <div className={layout.panelBottomActions} data-toolbar-section="transcript-bottom">
               <TranscriptBottomActionControls
+                canUseAi={canUseAi}
                 hasTranscript={hasTranscript}
                 onAskAiFromTranscript={onAskAiFromTranscript}
                 onClearTranscript={onClearTranscript}
@@ -3408,7 +4479,28 @@ function HomePage({
             className={`${layout.panelScroller} ${isAiResponsePanelPlaceholder ? layout.placeholder : layout.transcriptSessionOutput}`}
             onScroll={handleAiResponsePanelScroll}
           >
-            {isAiResponsePanelPlaceholder ? (
+            {aiIssue ? (
+              <PanelIssueRecovery
+                isChatGptSigningIn={isChatGptSigningIn}
+                isCloudAiReady={isCloudAiReady}
+                issue={aiIssue}
+                localAiSetupPhase={localAiSetupPhase}
+                localLlmStatus={localLlmStatus}
+                missingSelectedPermissions={missingSelectedPermissions}
+                onCancelLocalAiDownload={onCancelLocalAiDownload}
+                onCancelTranscriptionModelDownload={onCancelTranscriptionModelDownload}
+                onDownloadLocalAi={onDownloadLocalAi}
+                onDownloadTranscriptionModel={onDownloadTranscriptionModel}
+                onRequestPermission={onRequestPermission}
+                onSelectAiProvider={onSelectAiProvider}
+                onSelectTranscriptionModel={onSelectTranscriptionModel}
+                onSignInWithChatGpt={onSignInWithChatGpt}
+                onboardingStatus={onboardingStatus}
+                recommendedLocalAiModelReady={recommendedLocalAiModelReady}
+                selectedAiProvider={selectedAiProvider}
+                selectedTranscriptionModelId={selectedTranscriptionModelId}
+              />
+            ) : isAiResponsePanelPlaceholder ? (
               <div className="grid justify-items-center gap-2">
                 {localAiPlaceholderStatusText ? (
                   <span aria-live="polite" className="text-xs font-medium text-foreground">
@@ -3432,7 +4524,7 @@ function HomePage({
               ref={manualAiPromptRef}
               aria-label="Ask AI"
               className={layout.aiManualPromptInput}
-              disabled={transcription.isAsking}
+              disabled={!canUseAi || transcription.isAsking}
               onChange={(event) => setManualAiPrompt(event.target.value)}
               onKeyDown={handleManualAiPromptKeyDown}
               placeholder="Ask anything"
@@ -3442,7 +4534,7 @@ function HomePage({
             />
             <TooltipButton
               aria-label="Send manual prompt to AI"
-              disabled={!manualAiPrompt.trim() || transcription.isAsking}
+              disabled={!canUseAi || !manualAiPrompt.trim() || transcription.isAsking}
               onClick={sendManualAiPrompt}
               size="icon-lg"
               tooltip="Send manual prompt to AI"
@@ -3473,6 +4565,7 @@ function HomePage({
             edge={edge}
             hasAiResponse={hasAiResponse}
             hasTranscript={hasTranscript}
+            canUseAi={canUseAi}
             onAskAiFromTranscript={onAskAiFromTranscript}
             onClearAiResponses={onClearAiResponses}
             onClearTranscript={onClearTranscript}
@@ -3488,14 +4581,13 @@ function HomePage({
           <HomeActionToolbar
             autoSendLabel={autoSendLabel}
             autoSendTooltip={autoSendTooltip}
+            canUseAi={canUseAi}
             canStartListening={canStartListening}
             edge={edge}
-            isBlockedByPermissions={isBlockedByPermissions}
             isBusy={isBusy}
             isListening={isListening}
             listenToMicrophone={listenToMicrophone}
             listenToSystemAudio={listenToSystemAudio}
-            onOpenPermissionSettings={onOpenPermissionSettings}
             onOpenGeneralInstructions={onOpenGeneralInstructions}
             onOpenPromptTemplateSettings={onOpenPromptTemplateSettings}
             onSelectPromptTemplates={onSelectPromptTemplates}
@@ -3549,6 +4641,149 @@ function StartHereHint({
       <ArrowUpIcon className={layout.startHereArrow} aria-hidden="true" />
       <div className={layout.startHereDescription}>
         {getStartListeningSourceDescription({ listenToMicrophone, listenToSystemAudio })}
+      </div>
+    </div>
+  );
+}
+
+function PanelIssueRecovery({
+  isChatGptSigningIn,
+  isCloudAiReady,
+  issue,
+  localAiSetupPhase,
+  localLlmStatus,
+  missingSelectedPermissions,
+  onCancelLocalAiDownload,
+  onCancelTranscriptionModelDownload,
+  onDownloadLocalAi,
+  onDownloadTranscriptionModel,
+  onRequestPermission,
+  onSelectAiProvider,
+  onSelectTranscriptionModel,
+  onSignInWithChatGpt,
+  onboardingStatus,
+  recommendedLocalAiModelReady,
+  selectedAiProvider,
+  selectedTranscriptionModelId
+}: {
+  isChatGptSigningIn: boolean;
+  isCloudAiReady: boolean;
+  issue: PanelIssue;
+  localAiSetupPhase: 'requesting' | 'downloading' | 'idle';
+  localLlmStatus: LocalLlmStatus | null;
+  missingSelectedPermissions: PermissionItem[];
+  onCancelLocalAiDownload: () => void;
+  onCancelTranscriptionModelDownload: () => void;
+  onDownloadLocalAi: () => void;
+  onDownloadTranscriptionModel: (modelId: LocalTranscriptionModelId) => void;
+  onRequestPermission: (permission: PermissionItem['id']) => void;
+  onSelectAiProvider: (provider: AiProvider) => void;
+  onSelectTranscriptionModel: (modelId: LocalTranscriptionModelId) => void;
+  onSignInWithChatGpt: () => void;
+  onboardingStatus: OnboardingStatus | null;
+  recommendedLocalAiModelReady: boolean;
+  selectedAiProvider: AiProvider;
+  selectedTranscriptionModelId: LocalTranscriptionModelId;
+}) {
+  let recoveryControl: ReactNode = null;
+  let swapControl: ReactNode = null;
+  const isLocalAiDownloading = localLlmStatus?.status === 'downloading'
+    || localAiSetupPhase === 'requesting'
+    || localAiSetupPhase === 'downloading';
+
+  if (issue.kind === 'permissions') {
+    recoveryControl = (
+      <div className="grid w-full gap-1 text-left">
+        {missingSelectedPermissions.map((permission) => (
+          <PermissionSetupRow
+            issuePanel
+            key={permission.id}
+            onChange={() => onRequestPermission(permission.id)}
+            permission={permission}
+            showDivider={false}
+          />
+        ))}
+      </div>
+    );
+  } else if (issue.kind === 'transcription-model') {
+    recoveryControl = (
+      <TranscriptionModelRow
+        onCancel={onCancelTranscriptionModelDownload}
+        onDownload={onDownloadTranscriptionModel}
+        onSelectModel={onSelectTranscriptionModel}
+        selectedModelId={selectedTranscriptionModelId}
+        status={onboardingStatus}
+      />
+    );
+  } else if (issue.kind === 'local-ai') {
+    if (isCloudAiReady && !isLocalAiDownloading) {
+      swapControl = (
+        <Button aria-label="Swap to Cloud" onClick={() => onSelectAiProvider('cloud')} type="button">
+          <span>Swap to Cloud</span>
+          <IssueActionInfoIcon
+            label="Cloud AI tradeoff details"
+            message="Cloud AI is usually faster and more capable, but prompts and transcript context are sent to the cloud provider."
+          />
+        </Button>
+      );
+    }
+    recoveryControl = (
+      <LocalAiIssueRecovery
+        localAiSetupPhase={localAiSetupPhase}
+        localLlmStatus={localLlmStatus}
+        onCancelLocalDownload={onCancelLocalAiDownload}
+        onDownloadLocalAi={onDownloadLocalAi}
+        status={onboardingStatus}
+      />
+    );
+  } else if (issue.kind === 'cloud-ai') {
+    if (recommendedLocalAiModelReady) {
+      swapControl = (
+        <Button aria-label="Swap to Local" onClick={() => onSelectAiProvider('local')} type="button">
+          <span>Swap to Local</span>
+          <IssueActionInfoIcon
+            label="Local AI tradeoff details"
+            message="Local AI keeps prompts and transcript context on this computer, but it may be slower than Cloud."
+          />
+        </Button>
+      );
+    }
+    recoveryControl = (
+      <AiProviderSetup
+        isChatGptSigningIn={isChatGptSigningIn}
+        isCloudAiReady={isCloudAiReady}
+        localAiSetupPhase={localAiSetupPhase}
+        localLlmStatus={localLlmStatus}
+        onCancelLocalDownload={onCancelLocalAiDownload}
+        onDownloadLocalAi={() => onDownloadLocalAi()}
+        onSelectProvider={onSelectAiProvider}
+        onSignInWithChatGpt={onSignInWithChatGpt}
+        selectedProvider={selectedAiProvider}
+        status={onboardingStatus}
+      />
+    );
+  }
+
+  return (
+    <div className="grid h-full min-h-0 items-start justify-items-center px-4 py-6 text-center text-sm">
+      <div className="grid w-full max-w-xl justify-items-center gap-3 rounded-lg border border-destructive/45 bg-destructive/[0.04] px-5 py-4 shadow-[0_0_28px_rgba(239,68,68,0.12)] dark:border-destructive/40 dark:bg-destructive/[0.08] dark:shadow-[0_0_30px_rgba(248,113,113,0.12)]">
+        <div className="text-sm font-medium text-foreground">
+          <span>{issue.message}</span>
+        </div>
+        {issue.kind === 'local-ai' ? (
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {recoveryControl}
+            {recoveryControl && swapControl ? (
+              <span className="text-sm font-medium text-muted-foreground">or</span>
+            ) : null}
+            {swapControl}
+          </div>
+        ) : (
+          <>
+            {swapControl}
+            {recoveryControl}
+          </>
+        )}
       </div>
     </div>
   );
@@ -3642,14 +4877,13 @@ function HomeActionToolbar({
   autoSendLabel,
   autoSendTooltip,
   canStartListening,
+  canUseAi,
   edge,
-  isBlockedByPermissions,
   isBusy,
   isListening,
   listenToMicrophone,
   listenToSystemAudio,
   onOpenGeneralInstructions,
-  onOpenPermissionSettings,
   onOpenPromptTemplateSettings,
   onSelectPromptTemplates,
   onSetListenToMicrophone,
@@ -3665,14 +4899,13 @@ function HomeActionToolbar({
   autoSendLabel: string;
   autoSendTooltip: string;
   canStartListening: boolean;
+  canUseAi: boolean;
   edge: OverlayEdge;
-  isBlockedByPermissions: boolean;
   isBusy: boolean;
   isListening: boolean;
   listenToMicrophone: boolean;
   listenToSystemAudio: boolean;
   onOpenGeneralInstructions: () => void;
-  onOpenPermissionSettings: () => void;
   onOpenPromptTemplateSettings: () => void;
   onSelectPromptTemplates: (ids: string[]) => void;
   onSetListenToMicrophone: (listen: boolean) => void;
@@ -3688,7 +4921,7 @@ function HomeActionToolbar({
   const isVertical = isVerticalToolbarEdge(edge);
   const tooltipSide = homeTopToolbarTooltipSide;
   const hasAudioSource = listenToMicrophone || listenToSystemAudio;
-  const startButtonDisabled = isBusy || (!canStartListening && hasAudioSource);
+  const startButtonDisabled = isBusy || !canStartListening;
   const startListeningTooltip = isListening
     ? 'Stop listening and finish the transcript'
     : hasAudioSource
@@ -3699,7 +4932,8 @@ function HomeActionToolbar({
       <TooltipButton
         aria-label={autoSendLabel}
         aria-pressed={sendToAiWhenListeningStops}
-        className={`${isVertical ? layout.sideToolbarButton : layout.compactToolbarButton} ${sendToAiWhenListeningStops ? layout.listeningSourceIndicatorActive : 'text-muted-foreground'}`.trim()}
+        className={`${isVertical ? layout.sideToolbarButton : layout.compactToolbarButton} ${sendToAiWhenListeningStops && canUseAi ? layout.listeningSourceIndicatorActive : 'text-muted-foreground'}`.trim()}
+        disabled={!canUseAi}
         flashTooltipOnClick
         onClick={() => setSendToAiWhenListeningStops(!sendToAiWhenListeningStops)}
         size={isVertical ? 'icon-lg' : 'lg'}
@@ -3724,46 +4958,29 @@ function HomeActionToolbar({
   const primaryControls = (
     <div className={isVertical ? layout.transcriptPrimaryActionsVertical : layout.transcriptPrimaryActions}>
       <div className={isVertical ? layout.sideToolbarRow : undefined}>
-        {isBlockedByPermissions ? (
-          <TooltipButton
-            aria-label="Permissions"
-            className={isVertical ? layout.sideToolbarButton : `${layout.grantPermissionsButton} ${layout.compactToolbarButton}`}
-            onClick={onOpenPermissionSettings}
-            size="lg"
-            tooltip="Open settings to grant required permissions"
-            tooltipSide={tooltipSide}
-            type="button"
-            variant="destructive"
-          >
-            <CircleAlertIcon />
-            <span className={isVertical ? layout.sideToolbarButtonLabel : layout.compactToolbarButtonLabel}>Permissions</span>
-          </TooltipButton>
-        ) : (
-          <TooltipButton
-            aria-label={startButtonLabel}
-            aria-disabled={!hasAudioSource || undefined}
-            className={`${isVertical ? layout.sideToolbarButton : `${layout.listeningButton} ${layout.compactToolbarButton}`} ${isListening ? '' : layout.startButton} ${!hasAudioSource ? 'cursor-not-allowed opacity-50' : ''}`.trim()}
-            disabled={startButtonDisabled}
-            onClick={!hasAudioSource ? undefined : toggleListening}
-            size="lg"
-            tooltip={startListeningTooltip}
-            tooltipSide={tooltipSide}
-            type="button"
-            variant={isListening ? 'destructive' : 'default'}
-          >
-            {isListening ? (
-              <>
-                <SquareIcon />
-                <span className={isVertical ? layout.sideToolbarButtonLabel : layout.compactToolbarButtonLabel}>{startButtonLabel}</span>
-              </>
-            ) : (
-              <>
-                <PlayIcon />
-                <span className={isVertical ? layout.sideToolbarButtonLabel : layout.compactToolbarButtonLabel}>{startButtonLabel}</span>
-              </>
-            )}
-          </TooltipButton>
-        )}
+        <TooltipButton
+          aria-label={startButtonLabel}
+          className={`${isVertical ? layout.sideToolbarButton : `${layout.listeningButton} ${layout.compactToolbarButton}`} ${isListening ? '' : layout.startButton} ${!canStartListening && !isListening ? 'cursor-not-allowed opacity-50' : ''}`.trim()}
+          disabled={startButtonDisabled}
+          onClick={toggleListening}
+          size="lg"
+          tooltip={startListeningTooltip}
+          tooltipSide={tooltipSide}
+          type="button"
+          variant={isListening ? 'destructive' : 'default'}
+        >
+          {isListening ? (
+            <>
+              <SquareIcon />
+              <span className={isVertical ? layout.sideToolbarButtonLabel : layout.compactToolbarButtonLabel}>{startButtonLabel}</span>
+            </>
+          ) : (
+            <>
+              <PlayIcon />
+              <span className={isVertical ? layout.sideToolbarButtonLabel : layout.compactToolbarButtonLabel}>{startButtonLabel}</span>
+            </>
+          )}
+        </TooltipButton>
       </div>
       <div className={isVertical ? layout.transcriptPrimaryActionsVertical : layout.transcriptSourceActions}>
         <ListeningSourceIndicators
@@ -3836,6 +5053,7 @@ function HomeActionToolbar({
 }
 
 function HomeBottomActionToolbar({
+  canUseAi,
   edge,
   hasAiResponse,
   hasTranscript,
@@ -3848,6 +5066,7 @@ function HomeBottomActionToolbar({
   onDownloadTranscript,
   transcriptionIsAsking
 }: {
+  canUseAi: boolean;
   edge: OverlayEdge;
   hasAiResponse: boolean;
   hasTranscript: boolean;
@@ -3866,6 +5085,7 @@ function HomeBottomActionToolbar({
     <div className={layout.homeToolbarBottomActions} aria-label="Bottom transcript actions">
       <div className={layout.homeToolbarBottomActionSection} data-toolbar-section="transcript-bottom">
         <TranscriptBottomActionControls
+          canUseAi={canUseAi}
           hasTranscript={hasTranscript}
           onAskAiFromTranscript={onAskAiFromTranscript}
           onClearTranscript={onClearTranscript}
@@ -3891,6 +5111,7 @@ function HomeBottomActionToolbar({
 }
 
 function TranscriptBottomActionControls({
+  canUseAi,
   hasTranscript,
   onAskAiFromTranscript,
   onClearTranscript,
@@ -3900,6 +5121,7 @@ function TranscriptBottomActionControls({
   tooltipSide,
   transcriptionIsAsking
 }: {
+  canUseAi: boolean;
   hasTranscript: boolean;
   onAskAiFromTranscript: () => void;
   onClearTranscript: () => void;
@@ -3953,7 +5175,7 @@ function TranscriptBottomActionControls({
       </div>
       <TooltipButton
         aria-label="Send full transcript to AI"
-        disabled={!hasTranscript || transcriptionIsAsking}
+        disabled={!canUseAi || !hasTranscript || transcriptionIsAsking}
         className={showLabels ? layout.compactToolbarButton : undefined}
         onClick={onAskAiFromTranscript}
         size={showLabels ? 'lg' : 'icon-lg'}
@@ -4637,6 +5859,7 @@ function createScrollFixtureTranscriptSession({
   });
 
   return {
+    confirmedOutput: [title, ...lines].join('\n'),
     id,
     output: [title, ...lines].join('\n'),
     startedAt
@@ -4681,6 +5904,7 @@ function formatCompactUserDateTime(date: Date) {
 
 function TranscriptSessionList({
   activeSessionId = null,
+  canUseAi,
   collapsedIds,
   isAsking,
   onAskAi,
@@ -4688,6 +5912,7 @@ function TranscriptSessionList({
   sessions
 }: {
   activeSessionId?: string | null;
+  canUseAi: boolean;
   collapsedIds: Set<string>;
   isAsking: boolean;
   onAskAi: (transcript: string) => void;
@@ -4703,6 +5928,7 @@ function TranscriptSessionList({
             key={session.id}
             isActive={session.id === activeSessionId}
             isAsking={isAsking}
+            canUseAi={canUseAi}
             isCollapsed={collapsedIds.has(session.id)}
             onAskAi={onAskAi}
             onToggleCollapsed={onToggleCollapsed}
@@ -4715,6 +5941,7 @@ function TranscriptSessionList({
 }
 
 function TranscriptSessionSection({
+  canUseAi,
   isActive = false,
   isAsking,
   isCollapsed,
@@ -4722,6 +5949,7 @@ function TranscriptSessionSection({
   onToggleCollapsed,
   session
 }: {
+  canUseAi: boolean;
   isActive?: boolean;
   isAsking: boolean;
   isCollapsed: boolean;
@@ -4730,7 +5958,12 @@ function TranscriptSessionSection({
   session: TranscriptSession;
 }) {
   const headerClassName = `${layout.transcriptSectionHeader} ${isActive ? layout.transcriptSectionHeaderActive : ''}`.trim();
-  const collapsedPreview = isCollapsed ? getTranscriptSectionBody(session.output) : null;
+  const confirmedTranscript = session.confirmedOutput ?? session.output;
+  const confirmedBody = getTranscriptSectionBody(confirmedTranscript);
+  const draftBody = session.draftOutput ? getTranscriptSectionBody(session.draftOutput) : '';
+  const statusBody = !confirmedBody && !draftBody ? getTranscriptSectionBody(session.output) : '';
+  const collapsedPreview = isCollapsed ? confirmedBody : null;
+  const hasConfirmedTranscript = isTranscriptTextCopyable(confirmedTranscript);
 
   return (
         <article className={`${layout.transcriptSection} ${isActive ? layout.transcriptSectionActive : ''}`.trim()} data-transcript-session-active={isActive ? 'true' : undefined} data-transcript-session-id={session.id}>
@@ -4750,7 +5983,8 @@ function TranscriptSessionSection({
             <div className={layout.transcriptActions}>
               <TooltipButton
                 aria-label="Copy this transcript"
-                onClick={() => void navigator.clipboard?.writeText(session.output)}
+                disabled={!hasConfirmedTranscript}
+                onClick={() => void navigator.clipboard?.writeText(confirmedTranscript)}
                 size="icon"
                 tooltip={getActionTooltipWithPreview('Copy this transcript to clipboard', collapsedPreview)}
                 tooltipClassName={collapsedPreview ? layout.sectionPreviewTooltip : undefined}
@@ -4763,17 +5997,17 @@ function TranscriptSessionSection({
                 <CopyIcon />
               </TooltipButton>
               <DownloadTranscriptPopover
-                disabled={false}
+                disabled={!hasConfirmedTranscript}
                 label="Download this transcript"
-                onDownload={(format) => downloadTranscriptFile(session.output, format)}
+                onDownload={(format) => downloadTranscriptFile(confirmedTranscript, format)}
                 preview={collapsedPreview}
                 tooltipSide="bottom"
                 triggerSize="icon"
               />
               <TooltipButton
                 aria-label="Send this transcript to AI"
-                disabled={isAsking}
-                onClick={() => onAskAi(session.output)}
+                disabled={!canUseAi || isAsking || !hasConfirmedTranscript}
+                onClick={() => onAskAi(confirmedTranscript)}
                 size="icon"
                 tooltip={getActionTooltipWithPreview('Send this transcript to AI now', collapsedPreview)}
                 tooltipClassName={collapsedPreview ? layout.sectionPreviewTooltip : undefined}
@@ -4789,7 +6023,11 @@ function TranscriptSessionSection({
           </div>
           {!isCollapsed ? (
           <div className={layout.transcriptSectionBody}>
-            {getTranscriptSectionBody(session.output)}
+            {statusBody}
+            {confirmedBody}
+            {draftBody ? (
+              <div className="transcript-draft-tail">{draftBody}</div>
+            ) : null}
           </div>
           ) : null}
         </article>
@@ -5111,8 +6349,13 @@ function PromptTemplateDialog({
   useEffect(() => {
     if (open) {
       setVisibleTemplates(templates);
+      setActiveId((current) => (
+        current && templates.some((template) => template.id === current)
+          ? current
+          : templates[0]?.id ?? null
+      ));
     }
-  }, [open]);
+  }, [open, templates]);
 
   useEffect(() => {
     if (!open) {
@@ -5134,7 +6377,6 @@ function PromptTemplateDialog({
     const template = withPromptTemplateTimestamp(createPromptTemplate({ name: '', prompt: '' }));
     setVisibleTemplates((items) => [...items, template]);
     selectTemplate(template);
-    onSave(normalisePromptTemplateDraft(template));
     setDeleteConfirmationId(null);
   }
 
@@ -5156,7 +6398,9 @@ function PromptTemplateDialog({
           ? items.map((item) => (item.id === nextTemplate.id ? nextTemplate : item))
           : [...items, nextTemplate]
       ));
-      onSave(normalisePromptTemplateDraft(nextTemplate));
+      if (nextTemplate.name.trim()) {
+        onSave(normalisePromptTemplateDraft(nextTemplate));
+      }
       return nextTemplate;
     });
   }
@@ -5404,13 +6648,112 @@ function isUpdateInstalling(status: UpdateStatus | null) {
   return status?.lastResult?.status === 'installing';
 }
 
-function getMainNotifications({
-  localLlmStatus,
-  selectedAiProvider,
-  updateStatus
+function getSettingsSectionForTarget(target: SettingsTarget): SettingsSection {
+  if (target === 'models:transcription') {
+    return 'transcription';
+  }
+
+  if (target === 'models:ai') {
+    return 'ai';
+  }
+
+  if (target === 'permissions') {
+    return 'general';
+  }
+
+  return target;
+}
+
+function getTranscriptPanelIssue({
+  missingSelectedPermissions,
+  parakeetStatus
 }: {
+  missingSelectedPermissions: PermissionItem[];
+  parakeetStatus: ParakeetStatus | null;
+}): PanelIssue | null {
+  if (missingSelectedPermissions.length > 0) {
+    return {
+      id: 'missing-permissions',
+      kind: 'permissions',
+      message: 'Permissions are needed before listening.',
+      target: 'permissions'
+    };
+  }
+
+  if (parakeetStatus?.status === 'downloading') {
+    return {
+      id: 'transcription-model-downloading',
+      kind: 'transcription-model',
+      message: 'Finish downloading the transcription model before listening.',
+      target: 'models:transcription'
+    };
+  }
+
+  if (parakeetStatus && !parakeetStatus.installed) {
+    return {
+      id: 'transcription-model-missing',
+      kind: 'transcription-model',
+      message: 'Download a transcription model before listening.',
+      target: 'models:transcription'
+    };
+  }
+
+  return null;
+}
+
+function getAiPanelIssue({
+  isCloudAiReady,
+  isLocalAiReady,
+  localLlmStatus,
+  selectedAiProvider
+}: {
+  isCloudAiReady: boolean;
+  isLocalAiReady: boolean;
   localLlmStatus: LocalLlmStatus | null;
   selectedAiProvider: AiProvider;
+}): PanelIssue | null {
+  if (
+    selectedAiProvider === 'local'
+    && localLlmStatus
+    && !isLocalAiReady
+  ) {
+    const localStatus = localLlmStatus?.status ?? 'missing';
+
+    return {
+      id: 'local-ai-setup',
+      kind: 'local-ai',
+      message: localStatus === 'error'
+        ? 'Local AI needs attention before AI responses can work.'
+        : localStatus === 'downloading'
+          ? 'Local AI is downloading before AI responses can work.'
+          : 'Local AI needs setup before AI responses can work.',
+      target: 'models:ai'
+    };
+  }
+
+  if (selectedAiProvider === 'cloud' && !isCloudAiReady) {
+    return {
+      id: 'cloud-ai-setup',
+      kind: 'cloud-ai',
+      message: 'Cloud AI needs sign-in before AI responses can work.',
+      target: 'models:ai'
+    };
+  }
+
+  return null;
+}
+
+function getMainNotifications({
+  aiIssue,
+  missingSelectedPermissions,
+  parakeetStatus,
+  transcriptIssue,
+  updateStatus
+}: {
+  aiIssue: PanelIssue | null;
+  missingSelectedPermissions: PermissionItem[];
+  parakeetStatus: ParakeetStatus | null;
+  transcriptIssue: PanelIssue | null;
   updateStatus: UpdateStatus | null;
 }): MainNotification[] {
   const notifications: MainNotification[] = [];
@@ -5419,42 +6762,63 @@ function getMainNotifications({
     notifications.push({
       id: 'app-update-error',
       label: 'App update needs attention',
-      section: 'updates',
+      target: 'general',
       tone: 'error'
     });
   } else if (isUpdateInstalling(updateStatus)) {
     notifications.push({
       id: 'app-update-installing',
       label: 'App update installing',
-      section: 'updates',
+      target: 'general',
       tone: 'progress'
     });
   } else if (isUpdateDownloaded(updateStatus)) {
     notifications.push({
       id: 'app-update-ready',
       label: 'App update ready',
-      section: 'updates',
+      target: 'general',
       tone: 'action'
     });
   } else if (updateStatus?.availableUpdate) {
     notifications.push({
       id: 'app-update-available',
       label: 'App update available',
-      section: 'updates',
+      target: 'general',
       tone: updateStatus.downloading ? 'progress' : 'action'
     });
   }
 
-  if (
-    selectedAiProvider === 'local'
-    && localLlmStatus
-    && (localLlmStatus.status === 'missing' || localLlmStatus.status === 'error')
-  ) {
+  if (missingSelectedPermissions.length > 0 && transcriptIssue?.id === 'missing-permissions') {
     notifications.push({
-      id: 'local-ai-setup',
-      label: 'Local AI needs setup',
-      section: 'models',
-      tone: localLlmStatus.status === 'error' ? 'error' : 'action'
+      id: 'permissions-setup',
+      label: 'Permissions need setup',
+      target: 'permissions',
+      tone: 'error'
+    });
+  }
+
+  if (aiIssue) {
+    notifications.push({
+      id: aiIssue.id,
+      label: aiIssue.id === 'cloud-ai-setup' ? 'Cloud AI needs setup' : 'Local AI needs setup',
+      target: aiIssue.target,
+      tone: 'error'
+    });
+  }
+
+  if (parakeetStatus?.status === 'missing') {
+    notifications.push({
+      id: 'transcription-model-setup',
+      label: 'Transcription model needs setup',
+      target: 'models:transcription',
+      tone: 'error'
+    });
+  } else if (parakeetStatus?.status === 'downloading') {
+    notifications.push({
+      id: 'transcription-model-downloading',
+      label: 'Transcription model downloading',
+      target: 'models:transcription',
+      tone: 'error'
     });
   }
 
@@ -5916,10 +7280,10 @@ function mergeStarterPromptTemplates(templates: PromptTemplate[]) {
   const starterTemplatesById = new Map(starterPromptTemplates.map((template) => [template.id, template]));
   const customTemplates = templates.filter((template) => !starterTemplatesById.has(template.id));
 
-  return [
+  return resolvePromptTemplateNameCollisions([
     ...starterPromptTemplates,
     ...customTemplates
-  ];
+  ]);
 }
 
 function getCustomStarterPromptTemplateId(id: string) {
@@ -5956,21 +7320,15 @@ function getAvailablePromptTemplateName(name: string, templates: PromptTemplate[
     return baseName;
   }
 
-  const customName = `${baseName} custom`;
-
-  if (!usedNames.has(customName.toLocaleLowerCase())) {
-    return customName;
-  }
-
   for (let index = 2; index < 1000; index += 1) {
-    const candidate = `${customName} ${index}`;
+    const candidate = `${baseName} ${index}`;
 
     if (!usedNames.has(candidate.toLocaleLowerCase())) {
       return candidate;
     }
   }
 
-  return `${customName} ${Date.now()}`;
+  return `${baseName} ${Date.now()}`;
 }
 
 function resolvePromptTemplateNameCollisions(templates: PromptTemplate[]) {
@@ -6056,15 +7414,17 @@ function parseTranscriptStartedAt(transcript: string) {
 
 function SettingsSectionBlock({
   children,
+  sectionRef,
   title
 }: {
   children: ReactNode;
+  sectionRef?: RefObject<HTMLElement | null>;
   title: string;
 }) {
   const titleId = useId();
 
   return (
-    <section aria-labelledby={titleId} className={layout.settingsSection} role="group">
+    <section ref={sectionRef} aria-labelledby={titleId} className={layout.settingsSection} role="group" tabIndex={-1}>
       <h3 id={titleId} className="text-base font-medium text-foreground">
         {title}
       </h3>
@@ -6074,12 +7434,15 @@ function SettingsSectionBlock({
 }
 
 function SettingsPage({
-  autoCollapse,
+  autoCollapseAiResponses,
+  autoCollapseTranscription,
   initialSection,
+  initialTarget,
   isMac,
   isBusy,
   isListening,
   listenToMicrophone,
+  localLlmReasoning,
   llmModel,
   llmReasoning,
   onClose,
@@ -6090,16 +7453,21 @@ function SettingsPage({
   permissionsStatus,
   privateOverlayStatus,
   resetSettings,
-  setAutoCollapse,
+  setAutoCollapseAiResponses,
+  setAutoCollapseTranscription,
   setLlmModel,
-  setLlmReasoning
+  setLlmReasoning,
+  setLocalLlmReasoning
 }: {
-  autoCollapse: boolean;
+  autoCollapseAiResponses: boolean;
+  autoCollapseTranscription: boolean;
   initialSection: SettingsSection;
+  initialTarget: SettingsTarget;
   isMac: boolean;
   isBusy: boolean;
   isListening: boolean;
   listenToMicrophone: boolean;
+  localLlmReasoning: LlmReasoning;
   llmModel: LlmModel;
   llmReasoning: LlmReasoning;
   onClose: () => void;
@@ -6109,17 +7477,21 @@ function SettingsPage({
   onSetPrivateOverlayHandleSize: (size: PrivateOverlayHandleSize) => void;
   permissionsStatus: PermissionsStatus | null;
   privateOverlayStatus: PrivateOverlayState | null;
-  resetSettings: () => void;
-  setAutoCollapse: (autoCollapse: boolean) => void;
+  resetSettings: () => Promise<void>;
+  setAutoCollapseAiResponses: (autoCollapseAiResponses: boolean) => void;
+  setAutoCollapseTranscription: (autoCollapseTranscription: boolean) => void;
   setLlmModel: (model: LlmModel) => void;
   setLlmReasoning: (reasoning: LlmReasoning) => void;
+  setLocalLlmReasoning: (reasoning: LlmReasoning) => void;
 }) {
   const [isResetDialogOpen, setIsResetDialogOpen] = useState(false);
+  const [isQuitConfirmationOpen, setIsQuitConfirmationOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection);
   const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatus | null>(null);
   const [localLlmStatus, setLocalLlmStatus] = useState<LocalLlmStatus | null>(null);
   const [localAiSetupPhase, setLocalAiSetupPhase] = useState<'requesting' | 'downloading' | 'idle'>('idle');
   const [catalogueRefreshResult, setCatalogueRefreshResult] = useState<ModelCatalogueRefreshResult | null>(null);
+  const [catalogueRefreshStatus, setCatalogueRefreshStatus] = useState<ModelCatalogueRefreshStatus | null>(null);
   const [isRefreshingCatalogue, setIsRefreshingCatalogue] = useState(false);
   const [isChatGptSigningIn, setIsChatGptSigningIn] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
@@ -6127,6 +7499,9 @@ function SettingsPage({
   const [historyStatus, setHistoryStatus] = useState<HistoryStatus | null>(null);
   const [selectedAiProvider, setSelectedAiProviderState] = useState<AiProvider>('local');
   const [selectedTranscriptionModelId, setSelectedTranscriptionModelId] = useState<LocalTranscriptionModelId>('parakeet');
+  const localTranscriptionSettingsRef = useRef<HTMLElement | null>(null);
+  const aiResponseSettingsRef = useRef<HTMLElement | null>(null);
+  const permissionsSettingsRef = useRef<HTMLElement | null>(null);
   const hasInitialisedTranscriptionModelRef = useRef(false);
   const autoSelectingReadyModelRef = useRef<LocalTranscriptionModelId | null>(null);
   const hasDownloadedUpdate = isUpdateDownloaded(updateStatus);
@@ -6140,10 +7515,8 @@ function SettingsPage({
   );
   const settingsSections: Array<{ id: SettingsSection; label: string }> = [
     { id: 'general', label: 'General' },
-    { id: 'models', label: 'Models' },
-    { id: 'updates', label: 'Updates' },
-    { id: 'storage', label: 'Storage' },
-    { id: 'permissions', label: 'Permissions' }
+    { id: 'transcription', label: 'Transcription' },
+    { id: 'ai', label: 'AI responses' }
   ];
   const updateFrequencyOptions: Array<{ value: UpdateFrequency; label: string }> = [
     { value: 'never', label: 'Never' },
@@ -6152,12 +7525,32 @@ function SettingsPage({
     { value: 'sixHours', label: 'Every 6 hours' },
     { value: 'twelveHours', label: 'Every 12 hours' },
     { value: 'daily', label: 'Daily' },
-    { value: 'weekly', label: 'Weekly' }
+    { value: 'weekly', label: 'Weekly' },
+    { value: 'monthly', label: 'Monthly' }
   ];
 
   useEffect(() => {
     setActiveSection(initialSection);
   }, [initialSection]);
+
+  useEffect(() => {
+    const targetRef = initialTarget === 'models:transcription'
+      ? localTranscriptionSettingsRef
+      : initialTarget === 'models:ai'
+        ? aiResponseSettingsRef
+        : initialTarget === 'permissions'
+          ? permissionsSettingsRef
+          : null;
+
+    if (!targetRef?.current) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      targetRef.current?.scrollIntoView({ block: 'start' });
+      targetRef.current?.focus({ preventScroll: true });
+    });
+  }, [activeSection, initialTarget]);
 
   useEffect(() => {
     void refreshOnboardingStatus();
@@ -6197,13 +7590,31 @@ function SettingsPage({
           setUpdateStatus(status);
         }
       })
-      .catch((error) => {
+      .catch((error: unknown) => {
         console.error('Failed to load update status:', error);
       });
 
     return () => {
       isMounted = false;
       unsubscribe?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    getSettingsBridge()?.ai?.refreshCatalogueStatus?.()
+      .then((status) => {
+        if (isMounted) {
+          setCatalogueRefreshStatus(status);
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to load Local AI Catalogue refresh status:', error);
+      });
+
+    return () => {
+      isMounted = false;
     };
   }, []);
 
@@ -6268,6 +7679,7 @@ function SettingsPage({
       const nextStatus = await getSettingsBridge()?.ai?.setProvider?.(provider);
       if (nextStatus) {
         setOnboardingStatus(nextStatus);
+        setLocalLlmStatus(getCaulLocalLlmStatus(nextStatus));
       }
     } catch (error) {
       console.error('Failed to update AI provider:', error);
@@ -6312,6 +7724,7 @@ function SettingsPage({
       }
 
       setCatalogueRefreshResult(nextResult);
+      setCatalogueRefreshStatus(await getSettingsBridge()?.ai?.refreshCatalogueStatus?.() ?? null);
       setOnboardingStatus(nextResult.status);
       setSelectedAiProviderState(nextResult.status.ai?.provider ?? 'local');
       setLocalLlmStatus(getCaulLocalLlmStatus(nextResult.status));
@@ -6320,6 +7733,17 @@ function SettingsPage({
       console.error('Failed to refresh model catalogue:', error);
     } finally {
       setIsRefreshingCatalogue(false);
+    }
+  }
+
+  async function setCatalogueRefreshFrequency(frequency: UpdateFrequency) {
+    try {
+      const nextStatus = await getSettingsBridge()?.ai?.setRefreshCatalogueFrequency?.(frequency);
+      if (nextStatus) {
+        setCatalogueRefreshStatus(nextStatus);
+      }
+    } catch (error) {
+      console.error('Failed to update Local AI Catalogue refresh frequency:', error);
     }
   }
 
@@ -6401,8 +7825,26 @@ function SettingsPage({
   }
 
   function confirmResetSettings() {
-    resetSettings();
-    setIsResetDialogOpen(false);
+    void resetSettings()
+      .then(() => {
+        setIsResetDialogOpen(false);
+      })
+      .catch((error) => {
+        console.error('Failed to reset settings:', error);
+      });
+  }
+
+  function confirmQuit() {
+    setIsQuitConfirmationOpen(false);
+    onQuit();
+  }
+
+  const autoCollapse = autoCollapseAiResponses && autoCollapseTranscription;
+  const promptTemplateBackupFolder = getPromptTemplateBackupFolderLabel(historyStatus?.folder);
+
+  function setAutoCollapse(autoCollapseNext: boolean) {
+    setAutoCollapseAiResponses(autoCollapseNext);
+    setAutoCollapseTranscription(autoCollapseNext);
   }
 
   return (
@@ -6473,36 +7915,235 @@ function SettingsPage({
                   </FieldGroup>
                 </SettingsSectionBlock>
 
-                <SettingsSectionBlock title="Auto-collapse">
+                <SettingsSectionBlock title="History and storage">
                   <FieldGroup className={layout.settingsSectionBody}>
-                    <p className={layout.settingsDescription}>
-                      Collapses older AI replies when a new answer starts, so the latest response stays easy to read during a call.
-                    </p>
                     <Field className="w-auto self-start" orientation="horizontal">
                       <Checkbox
-                        id="auto-collapse"
-                        checked={autoCollapse}
-                        onCheckedChange={(checked) => setAutoCollapse(checked === true)}
+                        id="save-html-history"
+                        checked={historyStatus?.enabled ?? true}
+                        onCheckedChange={(checked) => void setHistoryEnabled(checked === true)}
                       />
-                      <FieldLabel htmlFor="auto-collapse">Auto-collapse</FieldLabel>
+                      <FieldLabel htmlFor="save-html-history">Save HTML history</FieldLabel>
                     </Field>
+                    <div className="flex max-w-2xl flex-col items-start gap-2">
+                      <div className="max-w-full rounded-md border bg-muted/30 px-2 py-1 font-mono text-xs text-muted-foreground">
+                        {historyStatus?.folder ?? 'Loading history folder...'}
+                      </div>
+                      {historyStatus?.message ? (
+                        <p className={layout.settingsDescription}>{historyStatus.message}</p>
+                      ) : null}
+                      <div className="flex flex-wrap gap-2">
+                        <TooltipButton
+                          onClick={() => void getSettingsBridge()?.history?.openFolder()}
+                          size="default"
+                          tooltip="Open Caul folder"
+                          type="button"
+                          variant="outline"
+                        >
+                          <FolderOpenIcon />
+                          Open Caul Folder
+                        </TooltipButton>
+                        <TooltipButton
+                          onClick={() => void chooseHistoryFolder()}
+                          size="default"
+                          tooltip="Choose a different history folder"
+                          type="button"
+                          variant="outline"
+                        >
+                          Change Folder
+                        </TooltipButton>
+                      </div>
+                    </div>
+                  </FieldGroup>
+                </SettingsSectionBlock>
+
+                <SettingsSectionBlock title="Caul updates">
+                  <FieldGroup className={layout.settingsSectionBody}>
+                    <div className="flex max-w-2xl flex-col items-start gap-3">
+                      <div className="grid gap-1 text-sm">
+                        <p>{formatUpdateVersionLine(updateStatus)}</p>
+                        <p className={layout.settingsDescription}>{formatUpdateStatusLine(updateStatus)}</p>
+                      </div>
+                      <div className="flex w-full flex-wrap items-end gap-3">
+                        <Field className="w-auto">
+                          <FieldLabel htmlFor="update-frequency">Automatic checks</FieldLabel>
+                          <Select
+                            disabled={!updateStatus?.enabled || updateStatus.checking || updateStatus.downloading || isRestartingForUpdate}
+                            name="update-frequency"
+                            value={updateStatus?.frequency ?? 'weekly'}
+                            onValueChange={(value) => void getSettingsBridge()?.updates?.setFrequency(value as UpdateFrequency)}
+                          >
+                            <div>
+                              <SelectTrigger id="update-frequency" className="w-[8.5rem]">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </div>
+                            <SelectContent>
+                              <SelectGroup>
+                                {updateFrequencyOptions.map((option) => (
+                                  <SelectItem key={option.value} value={option.value}>
+                                    {option.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectGroup>
+                            </SelectContent>
+                          </Select>
+                        </Field>
+                        {!updateStatus?.availableUpdate ? (
+                          <TooltipButton
+                            disabled={!updateStatus?.enabled || updateStatus?.checking || updateStatus?.downloading || isRestartingForUpdate}
+                            onClick={() => void getSettingsBridge()?.updates?.checkNow()}
+                            size="default"
+                            tooltip="Check for updates"
+                            type="button"
+                            variant="outline"
+                          >
+                            {updateStatus?.checking ? <LoaderCircleIcon className="animate-spin" /> : <DownloadIcon />}
+                            Check now
+                          </TooltipButton>
+                        ) : !hasDownloadedUpdate && !isRestartingForUpdate ? (
+                          <TooltipButton
+                            disabled={updateStatus.checking || updateStatus.downloading || isRestartingForUpdate}
+                            onClick={() => void getSettingsBridge()?.updates?.downloadAndInstall()}
+                            size="default"
+                            tooltip="Download this update"
+                            type="button"
+                          >
+                            {updateStatus.downloading ? <LoaderCircleIcon className="animate-spin" /> : <DownloadIcon />}
+                            Download
+                          </TooltipButton>
+                        ) : (
+                          <TooltipButton
+                            disabled={isRestartingForUpdate}
+                            onClick={() => void restartToInstallUpdate()}
+                            size="default"
+                            tooltip="Restart Caul and install the update"
+                            type="button"
+                          >
+                            {isRestartingForUpdate ? <LoaderCircleIcon className="animate-spin" /> : null}
+                            {isRestartingForUpdate ? 'Restarting...' : 'Restart to update'}
+                          </TooltipButton>
+                        )}
+                        {updateStatus?.availableUpdate ? (
+                          <TooltipButton
+                            disabled={isRestartingForUpdate}
+                            onClick={() => void getSettingsBridge()?.updates?.openDownloadPage()}
+                            size="default"
+                            tooltip="Open release page"
+                            type="button"
+                            variant="outline"
+                          >
+                            Release Page
+                          </TooltipButton>
+                        ) : null}
+                      </div>
+                      {updateStatus?.downloading && updateStatus.lastResult?.message ? (
+                        <p className={layout.settingsDescription} aria-live="polite">
+                          {updateStatus.lastResult.message}
+                        </p>
+                      ) : null}
+                    </div>
+                  </FieldGroup>
+                </SettingsSectionBlock>
+
+                <SettingsSectionBlock title="Local AI Catalogue">
+                  <FieldGroup className={layout.settingsSectionBody}>
+                    <div className="flex max-w-2xl flex-col items-start gap-3">
+                      <p className={layout.settingsDescription} aria-live="polite">
+                        {formatCatalogueRefreshStatus(catalogueRefreshResult)}
+                      </p>
+                      <div className="flex w-full flex-wrap items-end gap-3">
+                        <Field className="w-auto">
+                          <FieldLabel htmlFor="model-catalogue-refresh-frequency">Automatic refresh</FieldLabel>
+                          <Select
+                            disabled={!catalogueRefreshStatus?.enabled || isListening || isBusy || isRefreshingCatalogue}
+                            name="model-catalogue-refresh-frequency"
+                            value={catalogueRefreshStatus?.frequency ?? 'monthly'}
+                            onValueChange={(value) => void setCatalogueRefreshFrequency(value as UpdateFrequency)}
+                          >
+                            <div>
+                              <SelectTrigger id="model-catalogue-refresh-frequency" className="w-[8.5rem]">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </div>
+                            <SelectContent>
+                              <SelectGroup>
+                                {updateFrequencyOptions.map((option) => (
+                                  <SelectItem key={option.value} value={option.value}>
+                                    {option.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectGroup>
+                            </SelectContent>
+                          </Select>
+                        </Field>
+                        <TooltipButton
+                          disabled={isListening || isBusy || isRefreshingCatalogue}
+                          onClick={() => void refreshModelCatalogue()}
+                          size="default"
+                          tooltip="Refresh Local AI Catalogue"
+                          type="button"
+                          variant="outline"
+                        >
+                          {isRefreshingCatalogue ? <LoaderCircleIcon className="animate-spin" /> : <DownloadIcon />}
+                          Refresh catalogue
+                        </TooltipButton>
+                      </div>
+                    </div>
+                  </FieldGroup>
+                </SettingsSectionBlock>
+
+                <SettingsSectionBlock sectionRef={permissionsSettingsRef} title="Permissions">
+                  <FieldGroup className={layout.settingsSectionBody}>
+                    <div className="grid w-full max-w-[30rem]">
+                      {permissionsStatus ? getOnboardingPermissionRows(getVisiblePermissionItems(permissionsStatus)).map((permission) => (
+                        <PermissionSetupRow
+                          key={permission.id}
+                          actionSize="default"
+                          contextLabel={permission.id === 'microphone' && listenToMicrophone ? 'Required now' : undefined}
+                          onChange={() => onRequestPermission(permission.id)}
+                          permission={permission}
+                          showDivider={false}
+                        />
+                      )) : (
+                        <StatusRow
+                          label="Permissions"
+                          ready={false}
+                          value="Checking current permission status"
+                        />
+                      )}
+                    </div>
                   </FieldGroup>
                 </SettingsSectionBlock>
 
                 <SettingsSectionBlock title="Advanced">
-                  <FieldGroup className={layout.settingsSectionBody}>
-                    <div className="flex max-w-2xl flex-wrap items-center gap-2">
+                  <FieldGroup className="gap-4">
+                    <div className="flex w-fit max-w-full flex-col items-start gap-2">
                       <div className="flex">
-                        <TooltipButton
-                          onClick={onQuit}
-                          size="default"
-                          tooltip="Quit Caul"
-                          type="button"
-                          variant="destructive"
-                        >
-                          <LogOutIcon />
-                          Quit Caul
-                        </TooltipButton>
+                        <Popover open={isQuitConfirmationOpen} onOpenChange={setIsQuitConfirmationOpen}>
+                          <PopoverTrigger asChild>
+                            <Button size="default" type="button" variant="destructive">
+                              <LogOutIcon />
+                              Quit Caul
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent align="start" className="w-56 gap-3" side="right" sideOffset={8}>
+                            <div className="space-y-1">
+                              <h2 className="text-sm font-medium text-foreground">Quit Caul?</h2>
+                              <p className="text-xs text-muted-foreground">
+                                This will stop Caul and close the app completely.
+                              </p>
+                            </div>
+                            <div className="flex justify-end gap-2">
+                              <Button onClick={() => setIsQuitConfirmationOpen(false)} size="sm" type="button" variant="outline">
+                                Cancel
+                              </Button>
+                              <Button onClick={confirmQuit} size="sm" type="button" variant="destructive">
+                                Quit Caul
+                              </Button>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
                       </div>
                       <div className="flex">
                         <TooltipButton
@@ -6513,6 +8154,7 @@ function SettingsPage({
                           type="button"
                           variant="outline"
                         >
+                          <RotateCcwIcon />
                           Reset Settings
                         </TooltipButton>
                       </div>
@@ -6522,166 +8164,11 @@ function SettingsPage({
               </FieldGroup>
             ) : null}
 
-            {activeSection === 'storage' ? (
-              <SettingsSectionBlock title="History and storage">
-                <FieldGroup className={layout.settingsSectionBody}>
-                  <Field className="w-auto self-start" orientation="horizontal">
-                    <Checkbox
-                      id="save-html-history"
-                      checked={historyStatus?.enabled ?? true}
-                      onCheckedChange={(checked) => void setHistoryEnabled(checked === true)}
-                    />
-                    <FieldLabel htmlFor="save-html-history">Save HTML history</FieldLabel>
-                  </Field>
-                  <div className="flex max-w-2xl flex-col items-start gap-2">
-                    <div className="max-w-full rounded-md border bg-muted/30 px-2 py-1 font-mono text-xs text-muted-foreground">
-                      {historyStatus?.folder ?? 'Loading history folder...'}
-                    </div>
-                    {historyStatus?.message ? (
-                      <p className={layout.settingsDescription}>{historyStatus.message}</p>
-                    ) : null}
-                    <div className="flex flex-wrap gap-2">
-                      <TooltipButton
-                        onClick={() => void getSettingsBridge()?.history?.openFolder()}
-                        size="default"
-                        tooltip="Open Caul folder"
-                        type="button"
-                        variant="outline"
-                      >
-                        <FolderOpenIcon />
-                        Open Caul Folder
-                      </TooltipButton>
-                      <TooltipButton
-                        onClick={() => void chooseHistoryFolder()}
-                        size="default"
-                        tooltip="Choose a different history folder"
-                        type="button"
-                        variant="outline"
-                      >
-                        Change Folder
-                      </TooltipButton>
-                    </div>
-                  </div>
-                </FieldGroup>
-              </SettingsSectionBlock>
-            ) : null}
-
-            {activeSection === 'updates' ? (
-              <SettingsSectionBlock title="Updates">
-                <FieldGroup className={layout.settingsSectionBody}>
-                  <div className="flex max-w-2xl flex-col items-start gap-3">
-                    <div className="grid gap-1 text-sm">
-                      <p>{formatUpdateVersionLine(updateStatus)}</p>
-                      <p className={layout.settingsDescription}>{formatUpdateStatusLine(updateStatus)}</p>
-                    </div>
-                    <div className="flex w-full flex-wrap items-end gap-3">
-                      <Field className="w-auto">
-                        <FieldLabel htmlFor="update-frequency">Automatic checks</FieldLabel>
-                        <Select
-                          disabled={!updateStatus?.enabled || updateStatus.checking || updateStatus.downloading || isRestartingForUpdate}
-                          name="update-frequency"
-                          value={updateStatus?.frequency ?? 'weekly'}
-                          onValueChange={(value) => void getSettingsBridge()?.updates?.setFrequency(value as UpdateFrequency)}
-                        >
-                          <div>
-                            <SelectTrigger id="update-frequency" className="w-[8.5rem]">
-                              <SelectValue />
-                            </SelectTrigger>
-                          </div>
-                          <SelectContent>
-                            <SelectGroup>
-                              {updateFrequencyOptions.map((option) => (
-                                <SelectItem key={option.value} value={option.value}>
-                                  {option.label}
-                                </SelectItem>
-                              ))}
-                            </SelectGroup>
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                      {!updateStatus?.availableUpdate ? (
-                        <TooltipButton
-                          disabled={!updateStatus?.enabled || updateStatus?.checking || updateStatus?.downloading || isRestartingForUpdate}
-                          onClick={() => void getSettingsBridge()?.updates?.checkNow()}
-                          size="default"
-                          tooltip="Check for updates"
-                          type="button"
-                          variant="outline"
-                        >
-                          {updateStatus?.checking ? <LoaderCircleIcon className="animate-spin" /> : <DownloadIcon />}
-                          Check now
-                        </TooltipButton>
-                      ) : !hasDownloadedUpdate && !isRestartingForUpdate ? (
-                        <TooltipButton
-                          disabled={updateStatus.checking || updateStatus.downloading || isRestartingForUpdate}
-                          onClick={() => void getSettingsBridge()?.updates?.downloadAndInstall()}
-                          size="default"
-                          tooltip="Download this update"
-                          type="button"
-                        >
-                          {updateStatus.downloading ? <LoaderCircleIcon className="animate-spin" /> : <DownloadIcon />}
-                          Download
-                        </TooltipButton>
-                      ) : (
-                        <TooltipButton
-                          disabled={isRestartingForUpdate}
-                          onClick={() => void restartToInstallUpdate()}
-                          size="default"
-                          tooltip="Restart Caul and install the update"
-                          type="button"
-                        >
-                          {isRestartingForUpdate ? <LoaderCircleIcon className="animate-spin" /> : null}
-                          {isRestartingForUpdate ? 'Restarting...' : 'Restart to update'}
-                        </TooltipButton>
-                      )}
-                      {updateStatus?.availableUpdate ? (
-                        <TooltipButton
-                          disabled={isRestartingForUpdate}
-                          onClick={() => void getSettingsBridge()?.updates?.openDownloadPage()}
-                          size="default"
-                          tooltip="Open release page"
-                          type="button"
-                          variant="outline"
-                        >
-                          Release Page
-                        </TooltipButton>
-                      ) : null}
-                    </div>
-                    {updateStatus?.downloading && updateStatus.lastResult?.message ? (
-                      <p className={layout.settingsDescription} aria-live="polite">
-                        {updateStatus.lastResult.message}
-                      </p>
-                    ) : null}
-                  </div>
-                </FieldGroup>
-              </SettingsSectionBlock>
-            ) : null}
-
-            {activeSection === 'models' ? (
+            {activeSection === 'transcription' || activeSection === 'ai' ? (
               <FieldGroup className={layout.settingsPageStack}>
-                <SettingsSectionBlock title="AI recommendations">
-                  <FieldGroup className={layout.settingsSectionBody}>
-                    <div className="flex max-w-2xl flex-col items-start gap-2">
-                      <p className={layout.settingsDescription} aria-live="polite">
-                        {formatCatalogueRefreshStatus(catalogueRefreshResult)}
-                      </p>
-                      <TooltipButton
-                        disabled={isListening || isBusy || isRefreshingCatalogue}
-                        onClick={() => void refreshModelCatalogue()}
-                        size="default"
-                        tooltip="Refresh AI recommendations"
-                        type="button"
-                        variant="outline"
-                      >
-                        {isRefreshingCatalogue ? <LoaderCircleIcon className="animate-spin" /> : <DownloadIcon />}
-                        Refresh AI recommendations
-                      </TooltipButton>
-                    </div>
-                  </FieldGroup>
-                </SettingsSectionBlock>
-
-                <SettingsSectionBlock title="Local transcription">
-                  <FieldGroup className={layout.settingsSectionBody}>
+                {activeSection === 'transcription' ? (
+                  <SettingsSectionBlock sectionRef={localTranscriptionSettingsRef} title="Local transcription">
+                  <FieldGroup>
                     <p className={layout.settingsDescription}>
                       Local and private. Audio is transcribed on this computer. Nothing is sent to the internet.
                     </p>
@@ -6691,160 +8178,210 @@ function SettingsPage({
                       onSelectModel={setSelectedTranscriptionModelId}
                       selectedModelId={selectedTranscriptionModelId}
                       status={onboardingStatus}
+                      variant="settings"
                     />
-                    <ModelAutoUpdateCheckbox
-                      checked={onboardingStatus?.autoUpdate?.transcription ?? true}
-                      description="Caul can suggest better supported models on your update schedule."
-                      id="settings-auto-update-transcription-model"
-                      onCheckedChange={(enabled) => void setAutoUpdateModel('transcription', enabled)}
-                    />
+                    <FieldGroup className={layout.settingsSectionBody}>
+                      <ModelAutoUpdateCheckbox
+                        checked={onboardingStatus?.autoUpdate?.transcription ?? true}
+                        id="settings-auto-update-transcription-model"
+                        info="Caul can suggest and select a better supported local transcription model on your update schedule."
+                        label="Auto update local transcription model"
+                        onCheckedChange={(enabled) => void setAutoUpdateModel('transcription', enabled)}
+                      />
+                      <Field className="w-auto self-start" orientation="horizontal">
+                        <Checkbox
+                          id="auto-collapse-transcription"
+                          checked={autoCollapseTranscription}
+                          onCheckedChange={(checked) => setAutoCollapseTranscription(checked === true)}
+                        />
+                        <FieldContent>
+                          <div className="flex items-center gap-1.5">
+                            <FieldLabel htmlFor="auto-collapse-transcription">Auto-collapse</FieldLabel>
+                            <SettingInfoButton
+                              label="Auto-collapse info"
+                              message="Automatically collapse previous transcriptions when a new transcript starts."
+                            />
+                          </div>
+                        </FieldContent>
+                      </Field>
+                    </FieldGroup>
                   </FieldGroup>
-                </SettingsSectionBlock>
+                  </SettingsSectionBlock>
+                ) : null}
 
-                <SettingsSectionBlock title="AI responses">
-                  <FieldGroup className={layout.settingsSectionBody}>
+                {activeSection === 'ai' ? (
+                  <SettingsSectionBlock sectionRef={aiResponseSettingsRef} title="AI responses">
+                  <FieldGroup>
                     <p className={layout.settingsDescription}>
                       Controls how Caul writes answers after it has a transcript.
                     </p>
-                    <div className="inline-flex w-full max-w-sm rounded-md border border-border bg-muted/30 p-0.5" role="tablist" aria-label="AI provider">
-                      {(['local', 'cloud'] as AiProvider[]).map((provider) => (
-                        <button
-                          key={provider}
-                          aria-label={`${provider === 'local' ? 'Local' : 'Cloud'}${onboardingStatus?.ai?.recommended === provider ? ` ${recommendedPillLabel}` : ''}`}
-                          aria-selected={selectedAiProvider === provider}
-                          className={`inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-[6px] px-3 text-sm font-medium transition-colors ${selectedAiProvider === provider ? '!bg-primary !text-primary-foreground shadow-sm hover:!bg-primary/90 dark:!bg-primary dark:!text-primary-foreground dark:hover:!bg-primary/90' : 'text-muted-foreground hover:text-foreground'}`}
-                          disabled={isListening || isBusy}
-                          onClick={() => void selectAiProvider(provider)}
-                          role="tab"
-                          type="button"
-                        >
-                          <span>{provider === 'local' ? 'Local' : 'Cloud'}</span>
-                          {onboardingStatus?.ai?.recommended === provider ? (
-                            <RecommendedPill
-                              message={getAiProviderRecommendationMessage(provider)}
-                              selected={selectedAiProvider === provider}
-                            />
-                          ) : null}
-                        </button>
-                      ))}
-                    </div>
+                    <FieldGroup>
+                      <div className="inline-flex w-full max-w-sm rounded-md border border-border bg-muted/30 p-0.5" role="tablist" aria-label="AI provider">
+                        {(['local', 'cloud'] as AiProvider[]).map((provider) => (
+                          <button
+                            key={provider}
+                            aria-label={`${provider === 'local' ? 'Local' : 'Cloud'}${onboardingStatus?.ai?.recommended === provider ? ` ${recommendedPillLabel}` : ''}`}
+                            aria-selected={selectedAiProvider === provider}
+                            className={`inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-[6px] px-3 text-sm font-medium transition-colors ${selectedAiProvider === provider ? '!bg-primary !text-primary-foreground shadow-sm hover:!bg-primary/90 dark:!bg-primary dark:!text-primary-foreground dark:hover:!bg-primary/90' : 'text-muted-foreground hover:text-foreground'}`}
+                            disabled={isListening || isBusy}
+                            onClick={() => void selectAiProvider(provider)}
+                            role="tab"
+                            type="button"
+                          >
+                            <span>{provider === 'local' ? 'Local' : 'Cloud'}</span>
+                            {onboardingStatus?.ai?.recommended === provider ? (
+                              <RecommendedMarker
+                                message={getAiProviderRecommendationMessage(provider)}
+                                selected={selectedAiProvider === provider}
+                              />
+                            ) : null}
+                          </button>
+                        ))}
+                      </div>
 
-                    {selectedAiProvider === 'local' ? (
-                      <div className="grid max-w-2xl gap-1.5 text-sm">
-                        <div className="flex items-center gap-1">
+                      {selectedAiProvider === 'local' ? (
+                        <FieldGroup className="max-w-2xl text-sm">
                           <p className={layout.settingsDescription}>Data stays local and private. Slower and less intelligent than Cloud.</p>
-                          {recommendedLocalAiModel ? <LocalAiRecommendationInfoButton recommendation={onboardingStatus?.ai} /> : null}
-                        </div>
-                        <LocalAiDownloadControl
-                          align="start"
-                          isInstalled={recommendedLocalAiModelReady}
-                          localAiSetupPhase={localAiSetupPhase}
-                          onCancel={() => void cancelLocalAiDownload()}
-                          onDownload={() => void downloadLocalAi(recommendedLocalAiModel?.id)}
-                          status={localLlmStatus}
-                        />
+                          <LocalAiDownloadControl
+                            align="start"
+                            info={recommendedLocalAiModel || localLlmStatus?.model ? (
+                              <LocalAiRecommendationInfoButton embedded recommendation={onboardingStatus?.ai} status={localLlmStatus} />
+                            ) : null}
+                            isInstalled={recommendedLocalAiModelReady}
+                            localAiSetupPhase={localAiSetupPhase}
+                            onCancel={() => void cancelLocalAiDownload()}
+                            onDownload={() => void downloadLocalAi(recommendedLocalAiModel?.id)}
+                            statusPlacement="inline"
+                            status={localLlmStatus}
+                          />
+                          <FieldGroup className={layout.settingsInlineGroup}>
+                            <Field className="w-auto">
+                              <FieldLabel htmlFor="local-llm-reasoning">Thinking</FieldLabel>
+                              <Select
+                                disabled={isListening || isBusy}
+                                name="local-llm-reasoning"
+                                value={localLlmReasoning}
+                                onValueChange={(value) => setLocalLlmReasoning(value as LlmReasoning)}
+                              >
+                                <div>
+                                  <SelectTrigger id="local-llm-reasoning">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                </div>
+                                <SelectContent>
+                                  <SelectGroup>
+                                    {llmReasoningLevels.map((reasoning) => (
+                                      <SelectItem key={reasoning.value} value={reasoning.value}>
+                                        {reasoning.label}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectGroup>
+                                </SelectContent>
+                              </Select>
+                            </Field>
+                          </FieldGroup>
+                        </FieldGroup>
+                      ) : (
+                        <FieldGroup className="max-w-2xl text-sm">
+                          <p className={layout.settingsDescription}>Sends to a cloud model like ChatGPT. Faster and smarter than Local.</p>
+                          <CloudSignInControl
+                            align="start"
+                            disabled={isListening || isBusy}
+                            info={<CloudAiInfoButton llmModel={llmModel} llmReasoning={llmReasoning} />}
+                            isReady={isCloudAiReady}
+                            isSigningIn={isChatGptSigningIn}
+                            onSignIn={() => void signInWithChatGptFromSettings()}
+                            statusPlacement="inline"
+                          />
+                          {isCloudAiReady ? (
+                            <>
+                              <FieldGroup className={layout.settingsInlineGroup}>
+                                <Field className="w-auto">
+                                  <FieldLabel htmlFor="llm-model">Model</FieldLabel>
+                                  <Select
+                                    disabled={isListening || isBusy}
+                                    name="llm-model"
+                                    value={llmModel}
+                                    onValueChange={(value) => setLlmModel(value as LlmModel)}
+                                  >
+                                    <div>
+                                      <SelectTrigger id="llm-model" className="w-[9.5rem]">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                    </div>
+                                    <SelectContent>
+                                      <SelectGroup>
+                                        {llmModels.map((model) => (
+                                          <SelectItem key={model.value} value={model.value}>
+                                            {model.label}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectGroup>
+                                    </SelectContent>
+                                  </Select>
+                                </Field>
+
+                                <Field className="w-auto">
+                                  <FieldLabel htmlFor="llm-reasoning">Reasoning</FieldLabel>
+                                  <Select
+                                    disabled={isListening || isBusy}
+                                    name="llm-reasoning"
+                                    value={llmReasoning}
+                                    onValueChange={(value) => setLlmReasoning(value as LlmReasoning)}
+                                  >
+                                    <div>
+                                      <SelectTrigger id="llm-reasoning">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                    </div>
+                                    <SelectContent>
+                                      <SelectGroup>
+                                        {llmReasoningLevels.map((reasoning) => (
+                                          <SelectItem key={reasoning.value} value={reasoning.value}>
+                                            {reasoning.label}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectGroup>
+                                    </SelectContent>
+                                  </Select>
+                                </Field>
+                              </FieldGroup>
+                            </>
+                          ) : null}
+                        </FieldGroup>
+                      )}
+                      <FieldGroup className={layout.settingsSectionBody}>
                         <ModelAutoUpdateCheckbox
                           checked={onboardingStatus?.autoUpdate?.ai ?? true}
-                          description="Caul can suggest better supported models on your update schedule."
                           id="settings-auto-update-ai-model"
+                          info="Caul can suggest and download a better supported local AI model on your update schedule."
+                          label="Auto update local AI model"
                           onCheckedChange={(enabled) => void setAutoUpdateModel('ai', enabled)}
                         />
-                      </div>
-                    ) : (
-                      <div className="grid max-w-2xl gap-1.5 text-sm">
-                        <p className={layout.settingsDescription}>Sends to a cloud model like ChatGPT. Faster and smarter than Local.</p>
-                        <CloudSignInControl
-                          align="start"
-                          disabled={isListening || isBusy}
-                          isReady={isCloudAiReady}
-                          isSigningIn={isChatGptSigningIn}
-                          onSignIn={() => void signInWithChatGptFromSettings()}
-                        />
-                        {isCloudAiReady ? (
-                          <>
-                            <FieldGroup className={layout.settingsInlineGroup}>
-                              <Field className="w-auto">
-                                <FieldLabel htmlFor="llm-model">Model</FieldLabel>
-                                <Select
-                                  disabled={isListening || isBusy}
-                                  name="llm-model"
-                                  value={llmModel}
-                                  onValueChange={(value) => setLlmModel(value as LlmModel)}
-                                >
-                                  <div>
-                                    <SelectTrigger id="llm-model" className="w-[9.5rem]">
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                  </div>
-                                  <SelectContent>
-                                    <SelectGroup>
-                                      {llmModels.map((model) => (
-                                        <SelectItem key={model.value} value={model.value}>
-                                          {model.label}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectGroup>
-                                  </SelectContent>
-                                </Select>
-                              </Field>
-
-                              <Field className="w-auto">
-                                <FieldLabel htmlFor="llm-reasoning">Reasoning</FieldLabel>
-                                <Select
-                                  disabled={isListening || isBusy}
-                                  name="llm-reasoning"
-                                  value={llmReasoning}
-                                  onValueChange={(value) => setLlmReasoning(value as LlmReasoning)}
-                                >
-                                  <div>
-                                    <SelectTrigger id="llm-reasoning">
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                  </div>
-                                  <SelectContent>
-                                    <SelectGroup>
-                                      {llmReasoningLevels.map((reasoning) => (
-                                        <SelectItem key={reasoning.value} value={reasoning.value}>
-                                          {reasoning.label}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectGroup>
-                                  </SelectContent>
-                                </Select>
-                              </Field>
-                            </FieldGroup>
-                          </>
-                        ) : null}
-                      </div>
-                    )}
+                        <Field className="w-auto self-start" orientation="horizontal">
+                          <Checkbox
+                            id="auto-collapse-ai-responses"
+                            checked={autoCollapseAiResponses}
+                            onCheckedChange={(checked) => setAutoCollapseAiResponses(checked === true)}
+                          />
+                          <FieldContent>
+                            <div className="flex items-center gap-1.5">
+                              <FieldLabel htmlFor="auto-collapse-ai-responses">Auto-collapse</FieldLabel>
+                              <SettingInfoButton
+                                label="Auto-collapse info"
+                                message="Automatically collapse previous AI responses when a new response starts."
+                              />
+                            </div>
+                          </FieldContent>
+                        </Field>
+                      </FieldGroup>
+                    </FieldGroup>
                   </FieldGroup>
-                </SettingsSectionBlock>
+                  </SettingsSectionBlock>
+                ) : null}
               </FieldGroup>
             ) : null}
 
-            {activeSection === 'permissions' ? (
-              <SettingsSectionBlock title="Permissions">
-                <FieldGroup className={layout.settingsSectionBody}>
-                  <div className="grid w-full">
-                    {permissionsStatus ? getOnboardingPermissionRows(getVisiblePermissionItems(permissionsStatus)).map((permission) => (
-                      <PermissionSetupRow
-                        key={permission.id}
-                        contextLabel={permission.id === 'microphone' ? (listenToMicrophone ? 'Required now' : 'Required for setup') : undefined}
-                        onChange={() => onRequestPermission(permission.id)}
-                        permission={permission}
-                        showDivider={false}
-                      />
-                    )) : (
-                      <StatusRow
-                        label="Permissions"
-                        ready={false}
-                        value="Checking current permission status"
-                      />
-                    )}
-                  </div>
-                </FieldGroup>
-              </SettingsSectionBlock>
-            ) : null}
           </div>
       </div>
       <Dialog open={isResetDialogOpen} onOpenChange={setIsResetDialogOpen}>
@@ -6859,8 +8396,10 @@ function SettingsPage({
                   <li>Floating button position</li>
                   <li>Model and listening sources</li>
                   <li>Starter prompt templates</li>
-                  <li>Your custom prompts will not be deleted</li>
                 </ul>
+                <p className="mt-3">
+                  Your user prompt templates will be backed up to {promptTemplateBackupFolder}, then removed from active prompts.
+                </p>
               </div>
             </DialogDescription>
           </DialogHeader>
@@ -6879,6 +8418,15 @@ function SettingsPage({
       </section>
     </>
   );
+}
+
+function getPromptTemplateBackupFolderLabel(folder?: string | null) {
+  const profileFolder = typeof folder === 'string' && folder.trim()
+    ? folder.trim()
+    : 'Documents/Caul';
+  const separator = profileFolder.endsWith('/') ? '' : '/';
+
+  return `${profileFolder}${separator}Backups/prompts/`;
 }
 
 function getMissingSelectedAudioPermissionItems(
@@ -6957,7 +8505,10 @@ function getMissingSelectedPermissionItems({
 }
 
 function isTranscriptTextCopyable(output: string) {
+  const body = getTranscriptSectionBody(output).trim();
+
   return output.trim().length > 0
+    && body.length > 0
     && output !== transcriptPlaceholder
     && output !== 'Listening. Waiting for speech...'
     && output !== 'Speech detected...'

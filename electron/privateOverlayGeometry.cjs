@@ -24,7 +24,19 @@ function getPreferredOverlaySizeForEdge(size, edge, { minimumNonCompactWidth = 0
   };
 }
 
+function getBoundsFromDisplayRelativeBounds(relative, displayOrWorkArea) {
+  const workArea = displayOrWorkArea?.workArea ?? displayOrWorkArea;
+
+  return {
+    height: Math.round(Number(relative.height) * Number(workArea.height)),
+    width: Math.round(Number(relative.width) * Number(workArea.width)),
+    x: Math.round(Number(workArea.x)) + Math.round(Number(relative.x) * Number(workArea.width)),
+    y: Math.round(Number(workArea.y)) + Math.round(Number(relative.y) * Number(workArea.height))
+  };
+}
+
 module.exports = {
+  getBoundsFromDisplayRelativeBounds,
   getPreferredOverlaySizeForEdge,
   orientOverlaySizeForEdge
 };

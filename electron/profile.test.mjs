@@ -176,4 +176,49 @@ describe('profile service', () => {
       test.cleanup();
     }
   });
+
+  it('archives prompts under the portable Caul backups folder', () => {
+    const test = createTestService();
+
+    try {
+      const archive = test.service.archivePrompts({
+        selectedTemplateIds: ['custom-template'],
+        templates: [{
+          attachments: [],
+          createdAt: '2026-06-06T00:00:00.000Z',
+          id: 'custom-template',
+          name: 'Custom template',
+          prompt: 'Back me up.',
+          updatedAt: '2026-06-06T00:00:00.000Z'
+        }]
+      }, { now: new Date(2026, 5, 12, 1, 2, 3) });
+
+      expect(archive.folder).toBe(join(test.documents, 'Caul', 'Backups', 'prompts'));
+      expect(archive.path).toBe(join(test.documents, 'Caul', 'Backups', 'prompts', 'prompts-20260612-010203.json'));
+      expect(JSON.parse(readFileSync(archive.path, 'utf8'))).toEqual({
+        version: 1,
+        selectedTemplateIds: ['custom-template'],
+        templates: [
+          expect.objectContaining({ id: 'custom-template', prompt: 'Back me up.' })
+        ]
+      });
+    } finally {
+      test.cleanup();
+    }
+  });
+
+  it('suffixes prompt archive filename collisions', () => {
+    const test = createTestService();
+
+    try {
+      const now = new Date(2026, 5, 12, 1, 2, 3);
+      const first = test.service.archivePrompts({ selectedTemplateIds: [], templates: [] }, { now });
+      const second = test.service.archivePrompts({ selectedTemplateIds: [], templates: [] }, { now });
+
+      expect(first.path).toBe(join(test.documents, 'Caul', 'Backups', 'prompts', 'prompts-20260612-010203.json'));
+      expect(second.path).toBe(join(test.documents, 'Caul', 'Backups', 'prompts', 'prompts-20260612-010203-2.json'));
+    } finally {
+      test.cleanup();
+    }
+  });
 });

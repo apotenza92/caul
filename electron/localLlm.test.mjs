@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -159,6 +159,44 @@ function createDownloadServer() {
   return server;
 }
 
+function createHangingDownloadServer(targetPath, payload = 'partial data') {
+  let resolveRequest;
+  const requestStarted = new Promise((resolve) => {
+    resolveRequest = resolve;
+  });
+  const sockets = new Set();
+  const server = http.createServer((request, response) => {
+    if (request.url !== targetPath) {
+      response.writeHead(404);
+      response.end();
+      return;
+    }
+
+    response.writeHead(200, {
+      'Content-Length': '1024',
+      'Content-Type': 'application/octet-stream'
+    });
+    response.write(payload);
+    resolveRequest();
+  });
+
+  server.on('connection', (socket) => {
+    sockets.add(socket);
+    socket.once('close', () => sockets.delete(socket));
+  });
+
+  return {
+    close: async () => {
+      for (const socket of sockets) {
+        socket.destroy();
+      }
+      await closeServer(server);
+    },
+    requestStarted,
+    server
+  };
+}
+
 function fakeExtractorSpawn(root) {
   return () => {
     const child = new EventEmitter();
@@ -191,8 +229,12 @@ function createFakeLlamaSpawn(options = {}) {
       }
 
       if (request.url === '/v1/chat/completions' && request.method === 'POST') {
-        options.requests?.push({ url: request.url });
-        request.resume();
+        const chunks = [];
+        request.on('data', (chunk) => chunks.push(chunk));
+        request.on('end', () => {
+          const body = Buffer.concat(chunks).toString();
+          options.requests?.push(body ? JSON.parse(body) : { url: request.url });
+        });
         response.writeHead(200, {
           'Content-Type': 'text/event-stream'
         });
@@ -469,6 +511,76 @@ describe('local LLM service', () => {
     }
   });
 
+  it('cancels a first-time local AI download and removes partial runtime files', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'caul-local-llm-test-'));
+    const hangingDownload = createHangingDownloadServer('/runtime.tar.gz');
+
+    try {
+      const port = await listen(hangingDownload.server);
+      const service = createLocalLlmService({
+        app: { getPath: () => root },
+        catalogue: createTestCatalogue({
+          modelUrl: `http://127.0.0.1:${port}/model.gguf`,
+          runtimeUrl: `http://127.0.0.1:${port}/runtime.tar.gz`
+        }),
+        httpsModule: http,
+        spawn: fakeExtractorSpawn(root)
+      });
+
+      const downloadPromise = service.download();
+      await hangingDownload.requestStarted;
+
+      const cancelStatus = service.cancelDownload();
+
+      await expect(downloadPromise).rejects.toThrow('Local AI download cancelled.');
+      expect(cancelStatus.status).toBe('missing');
+      expect(existsSync(join(root, 'local-llm', 'runtimes', 'llama.cpp'))).toBe(false);
+      expect(service.status().runtime.installed).toBe(false);
+      expect(service.status().model.installed).toBe(false);
+    } finally {
+      await hangingDownload.close();
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it('cancels a local AI model download without deleting an existing runtime', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'caul-local-llm-test-'));
+    const hangingDownload = createHangingDownloadServer('/model.gguf');
+
+    try {
+      const port = await listen(hangingDownload.server);
+      const service = createLocalLlmService({
+        app: { getPath: () => root },
+        catalogue: createTestCatalogue({
+          modelUrl: `http://127.0.0.1:${port}/model.gguf`,
+          runtimeUrl: `http://127.0.0.1:${port}/runtime.tar.gz`
+        }),
+        httpsModule: http,
+        spawn: fakeExtractorSpawn(root)
+      });
+      const model = service.getRecommendedModel();
+      const modelPath = service.getModelPath(model);
+      const serverPath = join(root, 'local-llm', 'runtimes', 'llama.cpp', 'bin', process.platform === 'win32' ? 'llama-server.exe' : 'llama-server');
+      mkdirSync(dirname(serverPath), { recursive: true });
+      writeFileSync(serverPath, 'fake server');
+
+      const downloadPromise = service.download();
+      await hangingDownload.requestStarted;
+
+      const cancelStatus = service.cancelDownload();
+
+      await expect(downloadPromise).rejects.toThrow('Local AI download cancelled.');
+      expect(cancelStatus.runtime.installed).toBe(true);
+      expect(cancelStatus.model.installed).toBe(false);
+      expect(readFileSync(serverPath, 'utf8')).toBe('fake server');
+      expect(existsSync(modelPath)).toBe(false);
+      expect(existsSync(`${modelPath}.download`)).toBe(false);
+    } finally {
+      await hangingDownload.close();
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
   it('reports local AI download progress as one forward-moving sequence', async () => {
     const root = mkdtempSync(join(tmpdir(), 'caul-local-llm-test-'));
     const server = createDownloadServer();
@@ -579,7 +691,8 @@ describe('local LLM service', () => {
   it('does not relaunch an already warm llama.cpp model', async () => {
     const root = mkdtempSync(join(tmpdir(), 'caul-local-llm-test-'));
     const launches = [];
-    const spawn = createFakeLlamaSpawn({ launches });
+    const requests = [];
+    const spawn = createFakeLlamaSpawn({ launches, requests });
 
     try {
       const service = createLocalLlmService({
@@ -634,7 +747,8 @@ describe('local LLM service', () => {
   it('starts the loopback llama.cpp server with a targeted local AI model', async () => {
     const root = mkdtempSync(join(tmpdir(), 'caul-local-llm-test-'));
     const launches = [];
-    const spawn = createFakeLlamaSpawn({ launches });
+    const requests = [];
+    const spawn = createFakeLlamaSpawn({ launches, requests });
 
     try {
       const service = createLocalLlmService({
@@ -658,8 +772,48 @@ describe('local LLM service', () => {
       });
 
       expect(response).toBe('Local answer');
+      expect(requests.at(-1)).not.toHaveProperty('max_tokens');
+      expect(requests.at(-1)).not.toHaveProperty('temperature');
+      expect(requests.at(-1).messages).toEqual([
+        { role: 'user', content: 'Summarise the call.' }
+      ]);
       expect(launches.at(-1).args).toContain(selectedModelPath);
       expect(launches.at(-1).args).not.toContain(defaultModelPath);
+      expect(launches.at(-1).args).toEqual(expect.arrayContaining(['--reasoning', 'off']));
+      service.stop();
+    } finally {
+      await spawn.closeAll();
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it('starts llama.cpp with a bounded reasoning budget when local thinking is enabled', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'caul-local-llm-test-'));
+    const launches = [];
+    const spawn = createFakeLlamaSpawn({ launches });
+
+    try {
+      const service = createLocalLlmService({
+        app: { getPath: () => root },
+        catalogue: createTestCatalogue(),
+        spawn
+      });
+      const model = service.getRecommendedModel();
+      const modelPath = service.getModelPath(model);
+      const serverPath = join(root, 'local-llm', 'runtimes', 'llama.cpp', 'bin', process.platform === 'win32' ? 'llama-server.exe' : 'llama-server');
+      mkdirSync(dirname(modelPath), { recursive: true });
+      mkdirSync(dirname(serverPath), { recursive: true });
+      writeFileSync(modelPath, 'fake model');
+      writeFileSync(serverPath, 'fake server');
+
+      const response = await service.request('Think briefly, then answer.', {
+        onDelta: () => undefined,
+        reasoning: 'low'
+      });
+
+      expect(response).toBe('Local answer');
+      expect(launches.at(-1).args).toEqual(expect.arrayContaining(['--reasoning', 'on', '--reasoning-budget', '64']));
+      expect(launches.at(-1).args).not.toEqual(expect.arrayContaining(['--reasoning', 'off']));
       service.stop();
     } finally {
       await spawn.closeAll();
@@ -759,7 +913,7 @@ describe('local LLM service', () => {
     }
   });
 
-  it('disables Qwen3 thinking for MLX local AI requests', async () => {
+  it('uses catalogue metadata to disable Qwen3 thinking for MLX local AI requests', async () => {
     const root = mkdtempSync(join(tmpdir(), 'caul-local-mlx-test-'));
     const requests = [];
 
@@ -780,6 +934,67 @@ describe('local LLM service', () => {
 
       expect(response).toBe('OK');
       expect(requests.at(-1).messages.at(-1).content).toContain('/no_think');
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it('does not disable thinking from a Qwen3 model name without catalogue metadata', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'caul-local-mlx-test-'));
+    const requests = [];
+    const qwenCatalogueWithoutThinkingControl = createMlxOnlyCatalogue();
+    qwenCatalogueWithoutThinkingControl.aiResponse = qwenCatalogueWithoutThinkingControl.aiResponse.map((model) => (
+      model.runtime === 'mlx-lm'
+        ? { ...model, thinkingControl: undefined }
+        : model
+    ));
+
+    try {
+      const service = createLocalLlmService({
+        app: { getPath: () => root },
+        catalogue: qwenCatalogueWithoutThinkingControl,
+        spawn: fakeMlxSpawn(root, { requests }),
+        spawnSync: fakeMlxSpawnSync()
+      });
+      if (process.platform !== 'darwin' || process.arch !== 'arm64') {
+        expect(service.status().runtime.supported).toBe(false);
+        return;
+      }
+
+      await service.download();
+      const response = await service.request('Reply with exactly: OK.', { onDelta: () => undefined });
+
+      expect(response).toBe('OK');
+      expect(requests.at(-1).messages.at(-1).content).not.toContain('/no_think');
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it('keeps Qwen3 thinking enabled for MLX local AI requests when local thinking is enabled', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'caul-local-mlx-test-'));
+    const requests = [];
+
+    try {
+      const service = createLocalLlmService({
+        app: { getPath: () => root },
+        catalogue: createMlxOnlyCatalogue(),
+        spawn: fakeMlxSpawn(root, { requests }),
+        spawnSync: fakeMlxSpawnSync()
+      });
+      if (process.platform !== 'darwin' || process.arch !== 'arm64') {
+        expect(service.status().runtime.supported).toBe(false);
+        return;
+      }
+
+      await service.download();
+      const response = await service.request('Reply with exactly: OK.', {
+        onDelta: () => undefined,
+        reasoning: 'low'
+      });
+
+      expect(response).toBe('OK');
+      expect(requests.at(-1).messages.at(-1).content).not.toContain('/no_think');
     } finally {
       rmSync(root, { force: true, recursive: true });
     }

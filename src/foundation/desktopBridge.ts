@@ -5,26 +5,23 @@ export type TranscriptionBridgeEvent =
   | { type: 'closed' }
   | { type: 'connected' }
   | { type: 'delta'; itemId?: string; text: string }
-  | { type: 'partial'; source?: CaptureSource; utteranceId?: number; startMs?: number; endMs?: number; text: string }
+  | { type: 'partial'; source?: CaptureSource; utteranceId?: number; startMs?: number; endMs?: number; revision?: number; text: string }
   | { type: 'completed'; itemId?: string; source?: CaptureSource; utteranceId?: number; startMs?: number; endMs?: number; text: string }
   | { type: 'error'; message: string }
   | { type: 'llm-query'; requestId?: string; text: string }
   | { type: 'llm-response'; requestId?: string; text: string }
   | { type: 'llm-response-delta'; requestId?: string; text: string }
-  | { type: 'metric'; name: string; utteranceId?: number; atMs: number }
+  | { type: 'metric'; name: string; utteranceId?: number; atMs: number; value?: number }
   | { type: 'stage'; message: string }
   | { type: 'speech-started' }
   | { type: 'speech-stopped' };
 
 export type TranscriptionStartOptions = {
+  hotCapture?: boolean;
   sources: CaptureSource[];
 };
 
-export type LlmModel =
-  | 'openai-codex/gpt-5.2'
-  | 'openai-codex/gpt-5.4'
-  | 'openai-codex/gpt-5.4-mini'
-  | 'openai-codex/gpt-5.5';
+export type LlmModel = string;
 
 export type LlmReasoning = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
@@ -265,7 +262,13 @@ export type ModelCatalogueRefreshResult = {
   status: OnboardingStatus;
 };
 
-export type UpdateFrequency = 'never' | 'startup' | 'hourly' | 'sixHours' | 'twelveHours' | 'daily' | 'weekly';
+export type UpdateFrequency = 'never' | 'startup' | 'hourly' | 'sixHours' | 'twelveHours' | 'daily' | 'weekly' | 'monthly';
+
+export type ModelCatalogueRefreshStatus = {
+  enabled: boolean;
+  frequency: UpdateFrequency;
+  lastCheckedAt: string | null;
+};
 
 export type UpdateStatus = {
   appChannel: 'stable' | 'beta' | 'dev' | string;
@@ -332,10 +335,13 @@ export type PromptTemplateState = {
 
 export type PortablePreferences = {
   autoCollapse?: boolean;
+  autoCollapseAiResponses?: boolean;
+  autoCollapseTranscription?: boolean;
   autoUpdateAiModel?: boolean;
   autoUpdateTranscriptionModel?: boolean;
   generalInstructions?: string;
   historyEnabled?: boolean;
+  localLlmReasoning?: LlmReasoning;
   llmModel?: LlmModel;
   llmReasoning?: LlmReasoning;
   selectedAiProvider?: AiProvider;
@@ -386,7 +392,7 @@ export type CaptureBridge = {
 
 export type TranscriptionBridge = {
   onEvent: (callback: (event: TranscriptionBridgeEvent) => void) => () => void;
-  prepare?: (options: TranscriptionStartOptions) => Promise<{ ok: boolean }>;
+  prepare?: (options: TranscriptionStartOptions) => Promise<{ hotCaptureArmed?: boolean; ok: boolean }>;
   requestLlm: (options: LlmRequestOptions) => Promise<{ ok: boolean; text: string }>;
   start: (options: TranscriptionStartOptions) => Promise<{ ok: boolean }>;
   stop: () => Promise<{ ok: boolean }>;
@@ -431,7 +437,9 @@ export type SettingsBridge = {
     openLogin: () => Promise<{ ok: boolean; message?: string }>;
     openModel: () => Promise<{ ok: boolean; message?: string }>;
     refreshCatalogue: () => Promise<ModelCatalogueRefreshResult>;
+    refreshCatalogueStatus: () => Promise<ModelCatalogueRefreshStatus>;
     saveModel: (model: string) => Promise<PiStatus>;
+    setRefreshCatalogueFrequency: (frequency: UpdateFrequency) => Promise<ModelCatalogueRefreshStatus>;
     setProvider: (provider: AiProvider) => Promise<OnboardingStatus>;
     setLocalModel: (modelId: string) => Promise<LocalLlmStatus>;
     status: () => Promise<PiStatus>;

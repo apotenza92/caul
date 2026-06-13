@@ -79,7 +79,7 @@ try {
     .split('\n')
     .find((line) => line.includes('caul-renderer-transcription-smoke'));
   const summary = smokeLine ? JSON.parse(smokeLine.replace(/^.*caul-renderer-transcription-smoke /, '')) : null;
-  const transcript = summary?.longestOutput || summary?.renderedOutput || '';
+  const transcript = (summary?.completed ?? []).join('\n') || summary?.renderedOutput || '';
   const wordOverlap = scoreTranscript(phrase, transcript);
   const coreAudioStarted = summary?.stages?.includes('Core Audio capture started') ?? false;
   const parakeetStarted = summary?.stages?.some((stage) => (
@@ -89,7 +89,6 @@ try {
   const hasErrors = (summary?.errors?.length ?? 0) > 0;
   const result = {
     firstCompletedAtMs: summary?.firstCompletedAtMs ?? null,
-    firstPartialAtMs: summary?.firstPartialAtMs ?? null,
     phrase,
     transcript,
     wordOverlap,

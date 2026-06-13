@@ -13,9 +13,12 @@ const {
   getSystemAudioPermissionStatusFromState,
   isSystemAudioPermissionProbeGrantedEvent
 } = require('./permissions.cjs');
-const { getPreferredOverlaySizeForEdge } = require('./privateOverlayGeometry.cjs');
+const {
+  getBoundsFromDisplayRelativeBounds,
+  getPreferredOverlaySizeForEdge
+} = require('./privateOverlayGeometry.cjs');
 const { createStopFlushController } = require('./transcriptionStopFlush.cjs');
-const { createUpdaterService } = require('./updater.cjs');
+const { createUpdaterService, normaliseUpdateFrequency, shouldCheckForUpdates } = require('./updater.cjs');
 const { createHistoryService } = require('./history.cjs');
 const { getUsableSelectedLocalAiModelId } = require('./localAiSelection.cjs');
 const { createLocalLlmService } = require('./localLlm.cjs');
@@ -30,6 +33,7 @@ const {
   writeLiveModelCatalogue
 } = require('./modelRecommendation.cjs');
 const { refreshModelCatalogue } = require('./modelCatalogueRefresh.cjs');
+const cloudLlmConfig = require('./llmConfig.json');
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const smokeExitMs = Number(process.env.CAUL_SMOKE_EXIT_MS ?? 0);
@@ -95,9 +99,11 @@ function exitSmokeProcess(code = app.exitCode || process.exitCode || 0) {
 }
 const defaultHandleSizePreset = 'medium';
 const onboardingContentSize = {
-  width: 496,
+  width: 560,
   initialHeight: 560,
-  minHeight: 360
+  minWidth: 520,
+  minHeight: 440,
+  maxWidth: 720
 };
 const minimumWindowSize = {
   width: 600,
@@ -122,20 +128,15 @@ const windowStateFileName = 'window-state.json';
 const privateOverlayStateFileName = 'private-overlay-state.json';
 const promptTemplatesFileName = 'prompt-templates.json';
 const setupStateFileName = 'setup-state.json';
-const portableLlmModels = new Set([
-  'openai-codex/gpt-5.2',
-  'openai-codex/gpt-5.4',
-  'openai-codex/gpt-5.4-mini',
-  'openai-codex/gpt-5.5'
-]);
-const portableLlmReasoningLevels = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh']);
+const portableLlmModels = new Set(cloudLlmConfig.models.map((model) => model.value));
+const portableLlmReasoningLevels = new Set(cloudLlmConfig.reasoningLevels.map((reasoning) => reasoning.value));
 const transcriptionRecommendationTtlMs = 7 * 24 * 60 * 60 * 1000;
 const parakeetArchiveUrl = 'https://blob.handy.computer/parakeet-v3-int8.tar.gz';
 const parakeetModelDirName = 'parakeet-tdt-0.6b-v3-int8';
 const moonshineTinyArchiveUrl = 'https://blob.handy.computer/moonshine-tiny-streaming-en.tar.gz';
 const moonshineTinyModelDirName = 'moonshine-tiny-streaming-en';
-const defaultPiChatGptProvider = 'openai-codex';
-const defaultPiChatGptModel = 'openai-codex/gpt-5.5';
+const defaultPiChatGptProvider = cloudLlmConfig.provider;
+const defaultPiChatGptModel = cloudLlmConfig.defaultModel;
 const defaultAiProvider = 'local';
 const onboardingModelCatalogueRefreshTimeoutMs = Number(process.env.CAUL_ONBOARDING_MODEL_CATALOGUE_REFRESH_TIMEOUT_MS ?? 8000);
 const localAiFirstTokenTargetMs = Number(process.env.CAUL_LOCAL_AI_FIRST_TOKEN_TARGET_MS ?? 2500);
@@ -154,6 +155,7 @@ let privateOverlayHandleDrag = null;
 let privateOverlayHandleSnapAnimation = null;
 let privateOverlayWindowDrag = null;
 let privateOverlayWindowResize = null;
+let privateOverlayDisplayChangeTimer = null;
 let onboardingWindow = null;
 let updaterService = null;
 let parakeetDownload = null;
@@ -190,6 +192,22 @@ const starterPromptTemplates = [
   }
 ];
 const defaultSelectedPromptTemplateIds = [];
+
+function isCloudLlmModel(value) {
+  return typeof value === 'string' && portableLlmModels.has(value.trim());
+}
+
+function normaliseCloudLlmModel(value, fallback = defaultPiChatGptModel) {
+  const model = typeof value === 'string' ? value.trim() : '';
+
+  return isCloudLlmModel(model) ? model : fallback;
+}
+
+function normaliseCloudLlmReasoning(value, fallback = cloudLlmConfig.defaultReasoning) {
+  const reasoning = typeof value === 'string' ? value.trim() : '';
+
+  return portableLlmReasoningLevels.has(reasoning) ? reasoning : fallback;
+}
 
 if (packagedPrivacySmoke) {
   installPackagedPrivacyMainNetworkHooks();
@@ -713,7 +731,6 @@ function getUpdaterService() {
       appName: getAppDisplayName(),
       forceEnabled: process.env.CAUL_FORCE_UPDATE_CHECKS === '1',
       isDev,
-      onAfterSuccessfulCheck: refreshLiveModelCatalogueAfterUpdateCheck,
       onBeforeInstallDownloadedUpdate: prepareForDownloadedUpdateInstall
     });
   }
@@ -848,21 +865,15 @@ function getAvailablePromptTemplateName(name, templates) {
     return baseName;
   }
 
-  const customName = `${baseName} custom`;
-
-  if (!usedNames.has(customName.toLocaleLowerCase())) {
-    return customName;
-  }
-
   for (let index = 2; index < 1000; index += 1) {
-    const candidate = `${customName} ${index}`;
+    const candidate = `${baseName} ${index}`;
 
     if (!usedNames.has(candidate.toLocaleLowerCase())) {
       return candidate;
     }
   }
 
-  return `${customName} ${Date.now()}`;
+  return `${baseName} ${Date.now()}`;
 }
 
 function resolvePromptTemplateNameCollisions(templates) {
@@ -1043,7 +1054,7 @@ function normalisePromptTemplateState(value) {
   const templates = Array.isArray(value?.templates)
     ? value.templates.map(normalisePromptTemplate).filter(Boolean)
     : [];
-  const promptTemplates = mergeStarterPromptTemplates(templates);
+  const promptTemplates = resolvePromptTemplateNameCollisions(mergeStarterPromptTemplates(templates));
   const requestedSelectedIds = Array.isArray(value?.selectedTemplateIds)
     ? value.selectedTemplateIds
     : defaultSelectedPromptTemplateIds;
@@ -1096,14 +1107,21 @@ function savePromptTemplate(template) {
   const templateToSave = starterTemplate && isStarterPromptTemplateCustomised(normalised, starterTemplate)
     ? asCustomStarterPromptTemplate(normalised, existing.templates)
     : normalised;
-  const previousTemplate = existing.templates.find((item) => item.id === templateToSave.id);
+  const uniqueTemplateToSave = {
+    ...templateToSave,
+    name: getAvailablePromptTemplateName(
+      templateToSave.name,
+      existing.templates.filter((item) => item.id !== templateToSave.id)
+    )
+  };
+  const previousTemplate = existing.templates.find((item) => item.id === uniqueTemplateToSave.id);
   forgetLocalLlmAttachments(getRemovedPromptTemplateAttachments(
     previousTemplate?.attachments ?? [],
-    templateToSave.attachments ?? []
+    uniqueTemplateToSave.attachments ?? []
   ));
-  const templates = existing.templates.some((item) => item.id === templateToSave.id)
-    ? existing.templates.map((item) => (item.id === templateToSave.id ? templateToSave : item))
-    : [...existing.templates, templateToSave];
+  const templates = existing.templates.some((item) => item.id === uniqueTemplateToSave.id)
+    ? existing.templates.map((item) => (item.id === uniqueTemplateToSave.id ? uniqueTemplateToSave : item))
+    : [...existing.templates, uniqueTemplateToSave];
 
   return writePromptTemplateState({
     selectedTemplateIds: existing.selectedTemplateIds,
@@ -1123,18 +1141,21 @@ function deletePromptTemplate(id) {
   });
 }
 
-function resetPromptTemplates() {
+function resetPromptTemplates({ archive = true } = {}) {
   const existing = readPromptTemplateState();
-  const nextTemplates = preserveCustomisedStarterPromptTemplates(existing.templates);
+  const archiveResult = archive ? getProfileService().archivePrompts(existing) : null;
+  const nextTemplates = createStarterPromptTemplates();
   forgetLocalLlmAttachments(getRemovedPromptTemplateAttachments(
     existing.templates.flatMap((template) => template.attachments ?? []),
     nextTemplates.flatMap((template) => template.attachments ?? [])
   ));
 
-  return writePromptTemplateState({
-    selectedTemplateIds: defaultSelectedPromptTemplateIds,
+  const nextState = writePromptTemplateState({
+    selectedTemplateIds: [],
     templates: nextTemplates
   });
+
+  return archiveResult ? { ...nextState, archivePath: archiveResult.path, archiveFolder: archiveResult.folder } : nextState;
 }
 
 function getRemovedPromptTemplateAttachments(previousAttachments, nextAttachments) {
@@ -1249,12 +1270,24 @@ function normalisePortableSettings(value) {
     settings.llmReasoning = value.llmReasoning;
   }
 
+  if (portableLlmReasoningLevels.has(value.localLlmReasoning)) {
+    settings.localLlmReasoning = value.localLlmReasoning;
+  }
+
   if (typeof value.generalInstructions === 'string') {
     settings.generalInstructions = value.generalInstructions;
   }
 
   if (typeof value.autoCollapse === 'boolean') {
     settings.autoCollapse = value.autoCollapse;
+  }
+
+  if (typeof value.autoCollapseAiResponses === 'boolean') {
+    settings.autoCollapseAiResponses = value.autoCollapseAiResponses;
+  }
+
+  if (typeof value.autoCollapseTranscription === 'boolean') {
+    settings.autoCollapseTranscription = value.autoCollapseTranscription;
   }
 
   if (typeof value.autoUpdateTranscriptionModel === 'boolean') {
@@ -1423,6 +1456,18 @@ async function completeOnboarding() {
   return getOnboardingStatus();
 }
 
+function markOnboardingShown() {
+  const state = readSetupState();
+
+  if (typeof state.onboardingFirstShownAt === 'string') {
+    return;
+  }
+
+  writeSetupState({
+    onboardingFirstShownAt: new Date().toISOString()
+  });
+}
+
 async function reopenOnboarding() {
   createOnboardingWindow().show();
   return getOnboardingStatus();
@@ -1562,7 +1607,7 @@ function persistWindowState(mainWindow) {
   });
 }
 
-function normalisePrivateOverlayState(state) {
+function normalisePrivateOverlayState(state, options = {}) {
   const primaryDisplay = screen.getPrimaryDisplay();
   const workArea = primaryDisplay.workArea;
   const rawHandle = state && typeof state === 'object' && state.handle && typeof state.handle === 'object'
@@ -1585,14 +1630,14 @@ function normalisePrivateOverlayState(state) {
     width: handleWindowSize.width,
     x: normaliseCoordinate(handle.x, defaultHandleX),
     y: normaliseCoordinate(handle.y, defaultHandleY)
-  });
+  }, options);
   const overlayBounds = normaliseStoredOverlayBounds({
     height: clampNumber(Number(overlay.height), minimumOverlayWindowSize.height, maximumOverlayWindowSize.height, defaultAppWindowSize.height),
     rawBounds: overlay,
     width: clampNumber(Number(overlay.width), minimumOverlayWindowSize.width, maximumOverlayWindowSize.width, defaultAppWindowSize.width),
     x: normaliseCoordinate(overlay.x, defaultOverlayX),
     y: normaliseCoordinate(overlay.y, defaultOverlayY)
-  });
+  }, options);
   const handleDisplay = screen.getDisplayMatching(handleBounds);
   const overlayDisplay = screen.getDisplayMatching(overlayBounds);
 
@@ -1618,8 +1663,8 @@ function normalisePrivateOverlayState(state) {
   };
 }
 
-function normaliseStoredHandleBounds(bounds) {
-  const restoredBounds = getRestoredBoundsForStoredDisplay(bounds.rawBounds, bounds);
+function normaliseStoredHandleBounds(bounds, options = {}) {
+  const restoredBounds = getRestoredBoundsForStoredDisplay(bounds.rawBounds, bounds, options);
 
   return normaliseHandleBounds({
     ...restoredBounds,
@@ -1628,13 +1673,13 @@ function normaliseStoredHandleBounds(bounds) {
   });
 }
 
-function normaliseStoredOverlayBounds(bounds) {
-  const restoredBounds = getRestoredBoundsForStoredDisplay(bounds.rawBounds, bounds);
+function normaliseStoredOverlayBounds(bounds, options = {}) {
+  const restoredBounds = getRestoredBoundsForStoredDisplay(bounds.rawBounds, bounds, options);
 
   return clampOverlayBoundsToDisplay(restoredBounds);
 }
 
-function getRestoredBoundsForStoredDisplay(rawBounds, fallbackBounds) {
+function getRestoredBoundsForStoredDisplay(rawBounds, fallbackBounds, options = {}) {
   const fallback = {
     height: Math.round(Number(fallbackBounds.height)),
     width: Math.round(Number(fallbackBounds.width)),
@@ -1643,6 +1688,11 @@ function getRestoredBoundsForStoredDisplay(rawBounds, fallbackBounds) {
   };
   const storedDisplay = getDisplayById(rawBounds?.displayId);
   const relative = normaliseRelativeBounds(rawBounds?.relative);
+  const preferRelative = Boolean(options.preferRelative);
+
+  if (preferRelative && relative) {
+    return getBoundsFromDisplayRelativeBounds(relative, storedDisplay ?? screen.getPrimaryDisplay());
+  }
 
   if (
     storedDisplay
@@ -1702,17 +1752,6 @@ function isStoredWorkAreaCurrent(storedWorkArea, currentWorkArea) {
   return ['x', 'y', 'width', 'height'].every((key) => (
     Math.round(Number(storedWorkArea[key])) === Math.round(Number(currentWorkArea[key]))
   ));
-}
-
-function getBoundsFromDisplayRelativeBounds(relative, display) {
-  const workArea = display.workArea;
-
-  return {
-    height: Math.round(relative.height * workArea.height),
-    width: Math.round(relative.width * workArea.width),
-    x: workArea.x + Math.round(relative.x * workArea.width),
-    y: workArea.y + Math.round(relative.y * workArea.height)
-  };
 }
 
 function isBoundsVisibleOnAnyDisplay(bounds) {
@@ -2330,9 +2369,9 @@ function positionVisibleOverlayFromHandle(size = {}, { persist = true } = {}) {
   return bounds;
 }
 
-function readPrivateOverlayState() {
+function readPrivateOverlayState(options = {}) {
   try {
-    return normalisePrivateOverlayState(JSON.parse(fsSync.readFileSync(getPrivateOverlayStatePath(), 'utf8')));
+    return normalisePrivateOverlayState(JSON.parse(fsSync.readFileSync(getPrivateOverlayStatePath(), 'utf8')), options);
   } catch {
     return normalisePrivateOverlayState(null);
   }
@@ -3182,6 +3221,95 @@ async function benchmarkLocalAiModel(modelId = getPreferredLocalAiModelId(), { t
 
 let liveModelCatalogueRefreshPromise = null;
 let onboardingLiveModelCatalogueRefreshAttempted = false;
+let liveModelCatalogueRefreshTimer = null;
+
+function getModelCatalogueRefreshFrequencyPath() {
+  return path.join(app.getPath('userData'), 'model-catalogue', 'refresh-frequency.json');
+}
+
+function getLastModelCatalogueRefreshPath() {
+  return path.join(app.getPath('userData'), 'model-catalogue', 'last-refresh-check.json');
+}
+
+function readModelCatalogueRefreshFrequency() {
+  try {
+    const parsed = JSON.parse(fsSync.readFileSync(getModelCatalogueRefreshFrequencyPath(), 'utf8'));
+    return normaliseUpdateFrequency(parsed?.frequency);
+  } catch {
+    return 'monthly';
+  }
+}
+
+function writeModelCatalogueRefreshFrequency(frequency) {
+  const nextFrequency = normaliseUpdateFrequency(frequency);
+  fsSync.mkdirSync(path.dirname(getModelCatalogueRefreshFrequencyPath()), { recursive: true });
+  fsSync.writeFileSync(getModelCatalogueRefreshFrequencyPath(), `${JSON.stringify({ frequency: nextFrequency }, null, 2)}\n`);
+  return nextFrequency;
+}
+
+function readLastModelCatalogueRefreshTime() {
+  try {
+    const parsed = JSON.parse(fsSync.readFileSync(getLastModelCatalogueRefreshPath(), 'utf8'));
+    return typeof parsed?.checkedAt === 'string' ? parsed.checkedAt : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeLastModelCatalogueRefreshTime(date = new Date()) {
+  const checkedAt = date.toISOString();
+  fsSync.mkdirSync(path.dirname(getLastModelCatalogueRefreshPath()), { recursive: true });
+  fsSync.writeFileSync(getLastModelCatalogueRefreshPath(), `${JSON.stringify({ checkedAt }, null, 2)}\n`);
+  return checkedAt;
+}
+
+function getModelCatalogueRefreshStatus() {
+  return {
+    enabled: process.env.CAUL_DISABLE_MODEL_CATALOGUE_REFRESH !== '1',
+    frequency: readModelCatalogueRefreshFrequency(),
+    lastCheckedAt: readLastModelCatalogueRefreshTime()
+  };
+}
+
+function setModelCatalogueRefreshFrequency(frequency) {
+  writeModelCatalogueRefreshFrequency(frequency);
+  startModelCatalogueRefreshSchedule();
+  return getModelCatalogueRefreshStatus();
+}
+
+function startModelCatalogueRefreshSchedule() {
+  stopModelCatalogueRefreshSchedule();
+
+  const status = getModelCatalogueRefreshStatus();
+
+  if (!status.enabled || status.frequency === 'never') {
+    return;
+  }
+
+  if (shouldCheckForUpdates(status.frequency, status.lastCheckedAt, Date.now())) {
+    void refreshLiveModelCatalogueFromSchedule();
+  }
+
+  if (status.frequency === 'startup') {
+    return;
+  }
+
+  liveModelCatalogueRefreshTimer = setInterval(() => {
+    const nextStatus = getModelCatalogueRefreshStatus();
+
+    if (nextStatus.enabled && shouldCheckForUpdates(nextStatus.frequency, nextStatus.lastCheckedAt, Date.now())) {
+      void refreshLiveModelCatalogueFromSchedule();
+    }
+  }, 60 * 60 * 1000);
+  liveModelCatalogueRefreshTimer.unref?.();
+}
+
+function stopModelCatalogueRefreshSchedule() {
+  if (liveModelCatalogueRefreshTimer) {
+    clearInterval(liveModelCatalogueRefreshTimer);
+    liveModelCatalogueRefreshTimer = null;
+  }
+}
 
 async function refreshLiveModelCatalogue({ includeStatus = true, resetRuntime = true, timeoutMs = 0 } = {}) {
   const baseCatalogue = loadBestModelCatalogue({
@@ -3198,6 +3326,7 @@ async function refreshLiveModelCatalogue({ includeStatus = true, resetRuntime = 
     : await refreshTask;
 
   writeSetupState({ transcriptionRecommendation: null });
+  writeLastModelCatalogueRefreshTime();
 
   if (resetRuntime) {
     localLlmService?.stop?.();
@@ -3248,14 +3377,8 @@ async function ensureLiveModelCatalogueForOnboarding() {
   }
 }
 
-async function refreshLiveModelCatalogueAfterUpdateCheck() {
-  const settings = readProfileSettings();
-
+async function refreshLiveModelCatalogueFromSchedule() {
   if (!readSetupState().onboardingCompletedAt) {
-    return;
-  }
-
-  if (settings.autoUpdateAiModel === false && settings.autoUpdateTranscriptionModel === false) {
     return;
   }
 
@@ -3954,7 +4077,7 @@ function getPiStatus() {
   const state = readSetupState();
   const cliPath = getPiCliPath();
   warmPiAuthStorage(cliPath);
-  const selectedModel = typeof state.selectedPiModel === 'string' ? state.selectedPiModel : '';
+  const selectedModel = normaliseCloudLlmModel(state.selectedPiModel, '');
   const inferredModel = selectedModel || getInferredPiModelFromAuth();
   const connected = Boolean(inferredModel);
 
@@ -4195,7 +4318,7 @@ function wait(ms) {
 }
 
 function savePiModel(model) {
-  const selectedPiModel = typeof model === 'string' ? model.trim() : '';
+  const selectedPiModel = normaliseCloudLlmModel(model, '');
 
   if (!selectedPiModel) {
     return getPiStatus();
@@ -4269,6 +4392,12 @@ async function shouldShowOnboarding() {
 
   if (packagedOnboardingCompletionSmoke) {
     return !readSetupState().onboardingCompletedAt;
+  }
+
+  const setupState = readSetupState();
+
+  if (setupState.onboardingCompletedAt || setupState.onboardingFirstShownAt) {
+    return false;
   }
 
   return (await getOnboardingStatus()).required;
@@ -4600,10 +4729,15 @@ function prepareLocalTranscriptionCapture(options) {
 
   writeChildStdin(localTranscriptionProcess, {
     type: 'prepare',
+    hotCapture: options?.hotCapture === true,
     sources: selectedSources
   }, 'local-transcription-prepare');
 
-  return { ok: true, provider: getPreferredLocalModelId() };
+  return {
+    ok: true,
+    hotCaptureArmed: options?.hotCapture === true,
+    provider: getPreferredLocalModelId()
+  };
 }
 
 function shouldWarmLocalTranscriptionOnStartup() {
@@ -4697,7 +4831,13 @@ function stopLocalTranscriptionCapture() {
     const waitForFlush = localTranscriptionStopFlush.wait();
     writeChildStdin(localTranscriptionProcess, { type: 'stop' }, 'local-transcription-stop');
 
-    return waitForFlush.then(() => ({ ok: true }));
+    return waitForFlush.then((result) => {
+      writeTranscriptDebugLog('backend.stop_flush_resolved', {
+        reason: result?.reason ?? 'unknown'
+      });
+
+      return { ok: true, flushReason: result?.reason ?? 'unknown' };
+    });
   }
 
   return Promise.resolve({ ok: true });
@@ -4746,6 +4886,7 @@ function handleLocalTranscriptionEvent(event) {
       utteranceId: event.utterance_id,
       startMs: event.start_ms,
       endMs: event.end_ms,
+      revision: event.revision,
       text: event.text
     });
     return;
@@ -4758,6 +4899,7 @@ function handleLocalTranscriptionEvent(event) {
       utteranceId: event.utterance_id,
       startMs: event.start_ms,
       endMs: event.end_ms,
+      revision: event.revision,
       text: event.text
     });
     return;
@@ -4778,7 +4920,8 @@ function handleLocalTranscriptionEvent(event) {
       type: 'metric',
       name: event.name,
       utteranceId: event.utterance_id,
-      atMs: event.at_ms
+      atMs: event.at_ms,
+      value: event.value
     });
     return;
   }
@@ -4820,13 +4963,7 @@ function handleLocalTranscriptionEvent(event) {
   }
 }
 
-const allowedLlmModels = new Set([
-  'openai-codex/gpt-5.2',
-  'openai-codex/gpt-5.4',
-  'openai-codex/gpt-5.4-mini',
-  'openai-codex/gpt-5.5'
-]);
-const allowedLlmThinking = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh']);
+const allowedLlmThinking = portableLlmReasoningLevels;
 
 class PersistentPiRpcBridge {
   constructor({ model, thinking }) {
@@ -5091,7 +5228,7 @@ async function requestLlmResponse(transcript, options = {}) {
   const text = selectedAiProvider === 'local'
     ? await getLocalLlmService().request(
       await buildLocalLlmPromptWithAttachments(trimmedTranscript, attachments),
-      { modelId: getSelectedLocalAiModelId(), onDelta }
+      { modelId: getSelectedLocalAiModelId(), onDelta, reasoning: options.reasoning }
     )
     : await requestCloudLlmResponse(trimmedTranscript, { ...options, attachments }, onDelta);
   emitTranscriptionEvent({ type: 'llm-response', requestId, text });
@@ -5135,21 +5272,18 @@ function formatLlmTranscript(transcript) {
 
 function runPiTextRequest(transcript, options = {}, onDelta = () => {}) {
   const runStartedAt = Date.now();
-  const requestedModel = typeof options.model === 'string' ? options.model : '';
-  const requestedThinking = typeof options.reasoning === 'string' ? options.reasoning : '';
-  const configuredModel = typeof readSetupState().selectedPiModel === 'string'
-    ? readSetupState().selectedPiModel
-    : getInferredPiModelFromAuth();
-  const model = requestedModel
-    || configuredModel
-    || process.env.CAUL_LLM_MODEL
-    || process.env.CAUL_BENCH_LLM_MODEL
-    || 'openai-codex/gpt-5.4-mini';
-  const thinking = allowedLlmThinking.has(requestedThinking)
-    ? requestedThinking
-    : process.env.CAUL_LLM_THINKING
-    ?? process.env.CAUL_BENCH_LLM_THINKING
-    ?? 'off';
+  const configuredModel = normaliseCloudLlmModel(readSetupState().selectedPiModel, '') || getInferredPiModelFromAuth();
+  const model = [
+    options.model,
+    configuredModel,
+    process.env.CAUL_LLM_MODEL,
+    process.env.CAUL_BENCH_LLM_MODEL
+  ].map((value) => normaliseCloudLlmModel(value, '')).find(Boolean) || defaultPiChatGptModel;
+  const thinking = [
+    options.reasoning,
+    process.env.CAUL_LLM_THINKING,
+    process.env.CAUL_BENCH_LLM_THINKING
+  ].map((value) => normaliseCloudLlmReasoning(value, '')).find(Boolean) || cloudLlmConfig.defaultReasoning;
 
   const requestStrategy = process.env.CAUL_LLM_REQUEST_STRATEGY ?? 'persistent';
   const attachments = Array.isArray(options.attachments) ? options.attachments : [];
@@ -5316,14 +5450,16 @@ function warmPersistentPiRpcBridge() {
     return;
   }
 
-  const model = readSetupState().selectedPiModel
-    || getInferredPiModelFromAuth()
-    || process.env.CAUL_LLM_MODEL
-    || process.env.CAUL_BENCH_LLM_MODEL
-    || 'openai-codex/gpt-5.4-mini';
-  const thinking = process.env.CAUL_LLM_THINKING
-    ?? process.env.CAUL_BENCH_LLM_THINKING
-    ?? 'off';
+  const model = [
+    readSetupState().selectedPiModel,
+    getInferredPiModelFromAuth(),
+    process.env.CAUL_LLM_MODEL,
+    process.env.CAUL_BENCH_LLM_MODEL
+  ].map((value) => normaliseCloudLlmModel(value, '')).find(Boolean) || defaultPiChatGptModel;
+  const thinking = normaliseCloudLlmReasoning(
+    process.env.CAUL_LLM_THINKING ?? process.env.CAUL_BENCH_LLM_THINKING,
+    cloudLlmConfig.defaultReasoning
+  );
 
   if (!allowedLlmThinking.has(thinking)) {
     llmWarmStatus = 'ready';
@@ -6100,7 +6236,7 @@ function createOnboardingWindow() {
     y: workArea.y + Math.round((workArea.height - height) / 2),
     width,
     height,
-    minWidth: width,
+    minWidth: onboardingContentSize.minWidth,
     minHeight: onboardingContentSize.minHeight,
     useContentSize: true,
     show: false,
@@ -6141,6 +6277,7 @@ function createOnboardingWindow() {
   });
 
   onboardingWindow.once('ready-to-show', () => {
+    markOnboardingShown();
     onboardingWindow.show();
     onboardingWindow.focus();
     runPackagedLaunchSmokeIfRequested(onboardingWindow, 'onboarding');
@@ -6623,9 +6760,11 @@ function fitOnboardingWindowToContent(sender, size = {}) {
 
   const display = screen.getDisplayMatching(window.getBounds());
   const workArea = display.workArea;
-  const width = onboardingContentSize.width;
+  const minWidth = onboardingContentSize.minWidth;
   const minHeight = onboardingContentSize.minHeight;
+  const maxWidth = Math.max(minWidth, Math.min(onboardingContentSize.maxWidth, workArea.width - 80));
   const maxHeight = Math.max(minHeight, workArea.height - 80);
+  const width = Math.min(maxWidth, Math.max(minWidth, Math.ceil(size.width ?? onboardingContentSize.width)));
   const height = Math.min(maxHeight, Math.max(minHeight, Math.ceil(size.height)));
   const previousBounds = window.getBounds();
 
@@ -6931,7 +7070,7 @@ function createPrivateOverlayHandleWindow() {
   });
 
   if (!shouldUseOpaquePrivateWindowsForProtection()) {
-    privateOverlayHandleWindow.setOpacity(state.handle.opacity);
+    privateOverlayHandleWindow.setOpacity(1);
   }
   persistPrivateOverlayHandleState(privateOverlayHandleWindow);
   loadRendererSurface(privateOverlayHandleWindow, 'handle');
@@ -7093,6 +7232,102 @@ function broadcastPrivateOverlayState() {
   });
 }
 
+function schedulePrivateOverlayDisplayChangeReconcile() {
+  clearTimeout(privateOverlayDisplayChangeTimer);
+  privateOverlayDisplayChangeTimer = setTimeout(() => {
+    privateOverlayDisplayChangeTimer = null;
+    reconcilePrivateOverlayForDisplayChange();
+  }, 150);
+}
+
+function reconcilePrivateOverlayForDisplayChange() {
+  cancelPrivateOverlayHandleSnapAnimation();
+
+  const state = readPrivateOverlayState({ preferRelative: true });
+  const handleWindowSize = getHandleWindowSize(state.handle.size);
+  const handleBounds = magnetiseHandleBoundsToNearestEdge({
+    height: handleWindowSize.height,
+    width: handleWindowSize.width,
+    x: state.handle.x,
+    y: state.handle.y
+  });
+  const handleWindowVisible = Boolean(
+    privateOverlayHandleWindow
+    && !privateOverlayHandleWindow.isDestroyed()
+    && privateOverlayHandleWindow.isVisible()
+  );
+  const overlayWindowVisible = Boolean(
+    privateOverlayWindow
+    && !privateOverlayWindow.isDestroyed()
+    && privateOverlayWindow.isVisible()
+  );
+  let overlayBounds = clampOverlayBoundsToDisplay(state.overlay);
+
+  writePrivateOverlayState({
+    ...state,
+    handle: {
+      ...state.handle,
+      visible: handleWindowVisible || state.handle.visible,
+      x: handleBounds.x,
+      y: handleBounds.y
+    },
+    overlay: {
+      ...state.overlay,
+      height: overlayBounds.height,
+      visible: overlayWindowVisible || state.overlay.visible,
+      width: overlayBounds.width,
+      x: overlayBounds.x,
+      y: overlayBounds.y
+    }
+  });
+
+  if (privateOverlayHandleWindow && !privateOverlayHandleWindow.isDestroyed()) {
+    privateOverlayHandleWindow.setBounds(handleBounds);
+    if (!shouldUseOpaquePrivateWindowsForProtection()) {
+      privateOverlayHandleWindow.setOpacity(1);
+    }
+  }
+
+  if (privateOverlayWindow && !privateOverlayWindow.isDestroyed()) {
+    if (overlayWindowVisible) {
+      overlayBounds = getAnchoredOverlayBounds({
+        height: state.overlay.height,
+        width: state.overlay.width
+      }, {
+        orientForEdge: false,
+        restoreNonCompactWidth: false
+      });
+    }
+
+    setPrivateOverlayWindowVisualBounds(overlayBounds);
+  }
+
+  updatePrivateOverlayState((current) => ({
+    ...current,
+    handle: {
+      ...current.handle,
+      visible: handleWindowVisible || current.handle.visible,
+      x: handleBounds.x,
+      y: handleBounds.y
+    },
+    overlay: {
+      ...current.overlay,
+      height: overlayBounds.height,
+      visible: overlayWindowVisible || current.overlay.visible,
+      width: overlayBounds.width,
+      x: overlayBounds.x,
+      y: overlayBounds.y
+    }
+  }));
+  broadcastPrivateOverlayState();
+}
+
+function registerPrivateOverlayDisplayChangeHandlers() {
+  screen.on('display-added', schedulePrivateOverlayDisplayChangeReconcile);
+  screen.on('display-removed', schedulePrivateOverlayDisplayChangeReconcile);
+  screen.on('display-metrics-changed', schedulePrivateOverlayDisplayChangeReconcile);
+}
+
 function showPrivateOverlayWindow() {
   const window = createPrivateOverlayWindow();
   const bounds = getAnchoredOverlayBounds({}, {
@@ -7194,7 +7429,7 @@ function showPrivateOverlayHandleWindow() {
 
   window.setBounds(bounds);
   if (!shouldUseOpaquePrivateWindowsForProtection()) {
-    window.setOpacity(state.handle.opacity);
+    window.setOpacity(1);
   }
   window.setIgnoreMouseEvents(false);
   applyPrivateWindowWorkspaceBehaviour(window);
@@ -7295,7 +7530,7 @@ function resetPrivateOverlayHandlePosition() {
 
   if (privateOverlayHandleWindow && !privateOverlayHandleWindow.isDestroyed()) {
     privateOverlayHandleWindow.setPosition(state.handle.x, state.handle.y);
-    privateOverlayHandleWindow.setOpacity(state.handle.opacity);
+    privateOverlayHandleWindow.setOpacity(1);
   }
 
   showPrivateOverlayHandleWindow();
@@ -7900,14 +8135,19 @@ function registerPrivateOverlayShortcuts() {
   }
 }
 
-function shouldOpenFullAppOverlayOnLaunch() {
-  return isDev
-    || smokeExitMs > 0
+function shouldOpenFullAppOverlayOnLaunch({ onboardingRequired = false } = {}) {
+  const smokeRequiresFullAppOverlay = smokeExitMs > 0
     || systemAudioSmokeMs > 0
     || localParakeetSmokeMs > 0
     || rendererTranscriptionSmokeMs > 0
     || rendererLlmSmoke
     || rendererRealLlmSmoke;
+
+  if (smokeRequiresFullAppOverlay) {
+    return true;
+  }
+
+  return isDev && !onboardingRequired;
 }
 
 function createWindow() {
@@ -8156,7 +8396,7 @@ function createWindow() {
             const events = [];
             const snapshots = [];
             const eventStartedAt = Date.now();
-            const statusPattern = /^(Not listening\\.|Requesting audio access\\.\\.\\.|Starting local Parakeet\\.\\.\\.|Loading local Parakeet\\.\\.\\.|Listening with local Parakeet\\.\\.\\.|Listening\\. Waiting for speech\\.\\.\\.|Speech detected\\.\\.\\.|Transcribing local audio\\.\\.\\.|local Parakeet capture started|local Parakeet loaded|checking ScreenCaptureKit permission|reading ScreenCaptureKit shareable content|starting ScreenCaptureKit audio stream|ScreenCaptureKit format .*|ScreenCaptureKit audio capture started|reading default output device|creating Core Audio process tap|creating private aggregate device|reading Core Audio tap format|Core Audio tap format .*|creating aggregate device IO callback|starting aggregate device|Core Audio capture started|starting system audio capture|starting microphone capture|microphone capture started)$/;
+            const statusPattern = /^(Not listening\\.|Requesting audio access\\.\\.\\.|Starting local Parakeet\\.\\.\\.|Loading local Parakeet\\.\\.\\.|Listening with local Parakeet\\.\\.\\.|Listening\\. Waiting for speech\\.\\.\\.|Speech detected\\.\\.\\.|Transcribing local audio\\.\\.\\.|local Parakeet capture started|local Parakeet loaded|local Parakeet model prepared|checking ScreenCaptureKit permission|reading ScreenCaptureKit shareable content|starting ScreenCaptureKit audio stream|ScreenCaptureKit format .*|ScreenCaptureKit audio capture started|reading default output device|creating Core Audio process tap|creating private aggregate device|reading Core Audio tap format|Core Audio tap format .*|creating aggregate device IO callback|starting aggregate device|Core Audio capture started|starting system audio capture|starting microphone capture|microphone capture started)$/;
             const transcriptPlaceholder = 'Your live transcript will appear here once you start listening.';
             let previousLongest = '';
             let clearCount = 0;
@@ -8340,10 +8580,6 @@ function createWindow() {
             const partial = events
               .filter((event) => event.type === 'partial' && event.text)
               .map((event) => event.text);
-            const firstPartialAtMs = events
-              .filter((event) => event.type === 'partial' && event.text)
-              .map((event) => event.smokeAtMs)
-              .find((atMs) => typeof atMs === 'number') ?? null;
             const firstCompletedAtMs = events
               .filter((event) => event.type === 'completed' && event.text)
               .map((event) => event.smokeAtMs)
@@ -8383,9 +8619,8 @@ function createWindow() {
               completedEvents,
               completedCount: completed.length,
               partialCount: partial.length,
-              firstPartialAtMs,
               firstCompletedAtMs,
-              detected: completed.length > 0 || partial.length > 0 || previousLongest.length > 0,
+              detected: completed.length > 0,
               errors,
               stages,
               metrics
@@ -8491,8 +8726,8 @@ function createWindow() {
 
             if (llmSmokeMode === 'speculative') {
               speculativePromise = window.caul.transcription.requestLlm({
-                model: ${JSON.stringify(process.env.CAUL_LLM_MODEL ?? 'openai-codex/gpt-5.4-mini')},
-                reasoning: ${JSON.stringify(process.env.CAUL_LLM_THINKING ?? 'off')},
+                model: ${JSON.stringify(normaliseCloudLlmModel(process.env.CAUL_LLM_MODEL, defaultPiChatGptModel))},
+                reasoning: ${JSON.stringify(normaliseCloudLlmReasoning(process.env.CAUL_LLM_THINKING, cloudLlmConfig.defaultReasoning))},
                 trace: {
                   requestedAt: Date.now(),
                   speculative: true
@@ -8682,21 +8917,26 @@ app.whenReady().then(async () => {
     }));
   }
 
-  if (await shouldShowOnboarding()) {
+  const onboardingRequired = await shouldShowOnboarding();
+  const openFullAppOverlay = shouldOpenFullAppOverlayOnLaunch({ onboardingRequired });
+
+  if (onboardingRequired && !openFullAppOverlay) {
     createOnboardingWindow();
   } else {
     createPrivateOverlayHandleWindow();
   }
 
-  if (shouldOpenFullAppOverlayOnLaunch()) {
+  if (openFullAppOverlay) {
     createWindow();
     showPrivateOverlayWindow();
   }
 
   startResourceSmokeTimer();
   registerPrivateOverlayShortcuts();
+  registerPrivateOverlayDisplayChangeHandlers();
   startPackagedLaunchSmokeFallback();
   getUpdaterService().startSchedule();
+  startModelCatalogueRefreshSchedule();
 
   app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -8729,8 +8969,10 @@ function performAppShutdownCleanup() {
 
 app.on('before-quit', () => {
   isQuitting = true;
+  clearTimeout(privateOverlayDisplayChangeTimer);
   globalShortcut.unregisterAll();
   updaterService?.stopSchedule();
+  stopModelCatalogueRefreshSchedule();
   performAppShutdownCleanup();
 });
 
@@ -8850,6 +9092,12 @@ ipcMain.handle('caul:preferences-load', (_event, request) => loadPortablePrefere
 ipcMain.handle('caul:preferences-save', (_event, request) => savePortablePreferences(request));
 
 ipcMain.handle('caul:model-catalogue-refresh', () => refreshLiveModelCatalogue());
+
+ipcMain.handle('caul:model-catalogue-refresh-status', () => getModelCatalogueRefreshStatus());
+
+ipcMain.handle('caul:model-catalogue-refresh-set-frequency', (_event, request) => (
+  setModelCatalogueRefreshFrequency(request?.frequency)
+));
 
 ipcMain.handle('caul:updates-status', () => getUpdaterService().status());
 
@@ -8995,11 +9243,12 @@ ipcMain.handle('caul:transcription-start', (_event, request) => new Promise((res
     ? request
     : { sources: ['system'] };
 
-  localTranscriptionActive = true;
-
   try {
-    resolve(startLocalTranscriptionCapture(normalisedRequest));
+    const result = startLocalTranscriptionCapture(normalisedRequest);
+    localTranscriptionActive = true;
+    resolve(result);
   } catch (error) {
+    localTranscriptionActive = false;
     reject(error);
   }
 }));

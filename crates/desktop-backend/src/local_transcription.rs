@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -22,13 +22,21 @@ const OUTPUT_SAMPLE_RATE_HZ: u32 = 16_000;
 const VAD_FRAME_MS: u64 = 30;
 const VAD_FRAME_SAMPLES: usize = (OUTPUT_SAMPLE_RATE_HZ as usize * VAD_FRAME_MS as usize) / 1000;
 const RESAMPLER_CHUNK_SIZE: usize = 1024;
-const PRE_ROLL_MS: u64 = 200;
-const MIN_SPEECH_MS: u64 = 250;
-const END_SILENCE_MS: u64 = 450;
-const MAX_UTTERANCE_MS: u64 = 8_000;
-const ENERGY_SPEECH_THRESHOLD: f32 = 0.004;
-const LIVE_PARTIAL_MIN_MS: u64 = 200;
-const LIVE_PARTIAL_INTERVAL_MS: u64 = 250;
+const DEFAULT_PRE_ROLL_MS: u64 = 200;
+const DEFAULT_MIN_SPEECH_MS: u64 = 250;
+const DEFAULT_END_SILENCE_MS: u64 = 450;
+const DEFAULT_MAX_UTTERANCE_MS: u64 = 8_000;
+const DEFAULT_ENERGY_SPEECH_THRESHOLD: f32 = 0.004;
+const DEFAULT_HOT_CAPTURE_PRE_ROLL_MS: u64 = 500;
+const DIRECT_WAV_SINGLE_MAX_MS: u64 = 30_000;
+const DIRECT_WAV_CHUNK_MS: u64 = 30_000;
+const DIRECT_WAV_CHUNK_OVERLAP_MS: u64 = 2_000;
+const STITCH_BOUNDARY_WORDS: usize = 80;
+const STITCH_LCS_EDGE_WORDS: usize = 5;
+const STITCH_MIN_OVERLAP_WORDS: usize = 4;
+const STITCH_MIN_OVERLAP_CHARS: usize = 18;
+const DEFAULT_LIVE_PARTIAL_FIRST_MS: u64 = 1_500;
+const DEFAULT_LIVE_PARTIAL_INTERVAL_MS: u64 = 1_500;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum TranscriptSource {
@@ -100,7 +108,7 @@ pub fn run_microphone_smoke(
     Ok(summary)
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct AudioFrame {
     source: TranscriptSource,
     sample_rate_hz: u32,
@@ -120,20 +128,14 @@ struct SpeechSegment {
 }
 
 #[derive(Clone, Debug)]
-struct SpeechPreview {
+struct SpeechPartialSnapshot {
     source: TranscriptSource,
-    id: u64,
+    utterance_id: u64,
     start_ms: u64,
     end_ms: u64,
+    revision: u64,
     queued_at_ms: u64,
-    partial_gate: Arc<AtomicBool>,
     samples: Vec<f32>,
-}
-
-#[derive(Clone, Debug, Default)]
-struct PartialStability {
-    emitted_text: String,
-    previous_raw_text: String,
 }
 
 #[derive(Debug)]
@@ -143,13 +145,6 @@ enum BackendEvent {
         utterance_id: u64,
         start_ms: u64,
     },
-    Partial {
-        source: TranscriptSource,
-        utterance_id: u64,
-        start_ms: u64,
-        end_ms: u64,
-        text: String,
-    },
     Completed {
         source: TranscriptSource,
         utterance_id: u64,
@@ -157,11 +152,20 @@ enum BackendEvent {
         end_ms: u64,
         text: String,
     },
+    Partial {
+        source: TranscriptSource,
+        utterance_id: u64,
+        start_ms: u64,
+        end_ms: u64,
+        revision: u64,
+        text: String,
+    },
     Error(String),
     Metric {
         name: &'static str,
         utterance_id: Option<u64>,
         at_ms: u64,
+        value: Option<u64>,
     },
     Stage(String),
 }
@@ -173,14 +177,124 @@ enum TranscriptionJob {
         utterance_id: u64,
         start_ms: u64,
     },
-    Partial(SpeechPreview),
     Segment(SpeechSegment),
+    PartialSnapshot(SpeechPartialSnapshot),
     Barrier(Sender<()>),
     Stop,
 }
 
+#[derive(Clone, Default)]
+struct AsrQueueMetrics {
+    active_jobs: Arc<Mutex<u64>>,
+    queued_at_ms: Arc<Mutex<VecDeque<u64>>>,
+}
+
+impl AsrQueueMetrics {
+    fn record_queued(
+        &self,
+        queued_at_ms: u64,
+        event_tx: &Sender<BackendEvent>,
+        clock: &PipelineClock,
+    ) {
+        if let Ok(mut queue) = self.queued_at_ms.lock() {
+            queue.push_back(queued_at_ms);
+        }
+        self.emit(event_tx, clock);
+    }
+
+    fn record_started(&self, event_tx: &Sender<BackendEvent>, clock: &PipelineClock) {
+        if let Ok(mut queue) = self.queued_at_ms.lock() {
+            let _ = queue.pop_front();
+        }
+        if let Ok(mut active_jobs) = self.active_jobs.lock() {
+            *active_jobs = active_jobs.saturating_add(1);
+        }
+        self.emit(event_tx, clock);
+    }
+
+    fn record_completed(&self, event_tx: &Sender<BackendEvent>, clock: &PipelineClock) {
+        if let Ok(mut active_jobs) = self.active_jobs.lock() {
+            *active_jobs = active_jobs.saturating_sub(1);
+        }
+        self.emit(event_tx, clock);
+    }
+
+    fn snapshot(&self, clock: &PipelineClock) -> AsrQueueSnapshot {
+        let Ok(queue) = self.queued_at_ms.lock() else {
+            return AsrQueueSnapshot {
+                active_jobs: 0,
+                depth: 0,
+                oldest_age_ms: 0,
+            };
+        };
+        let now = clock.elapsed_ms();
+        let oldest_age_ms = queue
+            .front()
+            .map(|queued_at_ms| now.saturating_sub(*queued_at_ms))
+            .unwrap_or(0);
+
+        AsrQueueSnapshot {
+            active_jobs: self.active_jobs.lock().map(|value| *value).unwrap_or(0),
+            depth: queue.len() as u64,
+            oldest_age_ms,
+        }
+    }
+
+    fn emit(&self, event_tx: &Sender<BackendEvent>, clock: &PipelineClock) {
+        if !pipeline_metrics_enabled() {
+            return;
+        }
+
+        let snapshot = self.snapshot(clock);
+        let at_ms = clock.elapsed_ms();
+        let _ = event_tx.send(BackendEvent::Metric {
+            name: "asr_queue_depth",
+            utterance_id: None,
+            at_ms,
+            value: Some(snapshot.depth),
+        });
+        let _ = event_tx.send(BackendEvent::Metric {
+            name: "asr_queue_oldest_age_ms",
+            utterance_id: None,
+            at_ms,
+            value: Some(snapshot.oldest_age_ms),
+        });
+    }
+
+    fn can_enqueue_partial(&self) -> bool {
+        let snapshot = self.snapshot_without_clock();
+        snapshot.depth == 0 && snapshot.active_jobs == 0
+    }
+
+    fn snapshot_without_clock(&self) -> AsrQueueSnapshot {
+        let Ok(queue) = self.queued_at_ms.lock() else {
+            return AsrQueueSnapshot {
+                active_jobs: 0,
+                depth: 0,
+                oldest_age_ms: 0,
+            };
+        };
+
+        AsrQueueSnapshot {
+            depth: queue.len() as u64,
+            oldest_age_ms: 0,
+            active_jobs: self.active_jobs.lock().map(|value| *value).unwrap_or(0),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct AsrQueueSnapshot {
+    active_jobs: u64,
+    depth: u64,
+    oldest_age_ms: u64,
+}
+
 enum DaemonCommand {
-    Prepare { sources: Vec<TranscriptSource> },
+    Prepare {
+        sources: Vec<TranscriptSource>,
+        hot_capture: bool,
+    },
     Start { sources: Vec<TranscriptSource> },
     Stop,
     Quit,
@@ -203,10 +317,17 @@ pub fn run(sources: Vec<TranscriptSource>) -> Result<(), Box<dyn std::error::Err
     let (audio_tx, audio_rx) = mpsc::channel::<AudioFrame>();
     let (event_tx, event_rx) = mpsc::channel::<BackendEvent>();
     let (job_tx, job_rx) = mpsc::channel::<TranscriptionJob>();
+    let queue_metrics = AsrQueueMetrics::default();
     let transcription_events = event_tx.clone();
     let transcription_clock = clock.clone();
+    let transcription_queue_metrics = queue_metrics.clone();
     let transcription_thread = thread::spawn(move || {
-        run_transcription_worker(job_rx, transcription_events, transcription_clock);
+        run_transcription_worker(
+            job_rx,
+            transcription_events,
+            transcription_clock,
+            transcription_queue_metrics,
+        );
     });
 
     let mut microphone_capture = None;
@@ -236,19 +357,13 @@ pub fn run(sources: Vec<TranscriptSource>) -> Result<(), Box<dyn std::error::Err
     }
 
     let endpoint_config = EndpointConfig::from_environment();
-    let partial_gate = Arc::new(AtomicBool::new(false));
     let mut batchers = sources
         .iter()
         .copied()
         .map(|source| {
             (
                 source,
-                SourcePipeline::with_partial_gate(
-                    source,
-                    clock.clone(),
-                    endpoint_config,
-                    partial_gate.clone(),
-                ),
+                SourcePipeline::new(source, clock.clone(), endpoint_config),
             )
         })
         .collect::<HashMap<_, _>>();
@@ -265,6 +380,7 @@ pub fn run(sources: Vec<TranscriptSource>) -> Result<(), Box<dyn std::error::Err
                 name: "expected_speech_end_at",
                 utterance_id: None,
                 at_ms: expected_speech_end_at,
+                value: None,
             });
         }
     }
@@ -278,12 +394,13 @@ pub fn run(sources: Vec<TranscriptSource>) -> Result<(), Box<dyn std::error::Err
                         name: "audio_started_at",
                         utterance_id: None,
                         at_ms: clock.elapsed_ms(),
+                        value: None,
                     });
                 }
 
                 if let Some(batcher) = batchers.get_mut(&frame.source) {
                     for output in batcher.push_frame(frame) {
-                        send_pipeline_output(&job_tx, output);
+                        send_pipeline_output(&job_tx, output, &queue_metrics, &event_tx, &clock);
                     }
                 }
             }
@@ -298,7 +415,7 @@ pub fn run(sources: Vec<TranscriptSource>) -> Result<(), Box<dyn std::error::Err
 
     for batcher in batchers.values_mut() {
         if let Some(segment) = batcher.flush() {
-            let _ = job_tx.send(TranscriptionJob::Segment(segment));
+            enqueue_segment_job(&job_tx, segment, &queue_metrics, &event_tx, &clock);
         }
     }
 
@@ -329,10 +446,17 @@ pub fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
     let (event_tx, event_rx) = mpsc::channel::<BackendEvent>();
     let (job_tx, job_rx) = mpsc::channel::<TranscriptionJob>();
     let (command_tx, command_rx) = mpsc::channel::<DaemonCommand>();
+    let queue_metrics = AsrQueueMetrics::default();
     let transcription_events = event_tx.clone();
     let transcription_clock = clock.clone();
+    let transcription_queue_metrics = queue_metrics.clone();
     let transcription_thread = thread::spawn(move || {
-        run_transcription_worker(job_rx, transcription_events, transcription_clock);
+        run_transcription_worker(
+            job_rx,
+            transcription_events,
+            transcription_clock,
+            transcription_queue_metrics,
+        );
     });
 
     start_daemon_stdin_thread(command_tx, running.clone());
@@ -346,15 +470,25 @@ pub fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
     while running.load(Ordering::SeqCst) {
         while let Ok(command) = command_rx.try_recv() {
             match command {
-                DaemonCommand::Prepare { sources } => {
+                DaemonCommand::Prepare {
+                    sources,
+                    hot_capture,
+                } => {
                     if !sources.is_empty() {
                         let _ = job_tx.send(TranscriptionJob::Warmup);
-                        prepare_active_session(
-                            &mut session,
-                            sources,
-                            &event_tx,
-                            &job_tx,
-                        )?;
+                        prepare_local_transcription_model(&event_tx)?;
+
+                        if hot_capture {
+                            start_or_prepare_session(
+                                &mut session,
+                                sources,
+                                &clock,
+                                &audio_tx,
+                                &event_tx,
+                                &job_tx,
+                                &queue_metrics,
+                            )?;
+                        }
                     }
                 }
                 DaemonCommand::Start { sources } => {
@@ -363,7 +497,7 @@ pub fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
                             "Select at least one audio source.".to_string(),
                         ))?;
                     } else {
-                        drain_audio_frames(&audio_rx);
+                        drain_or_buffer_audio_frames(&audio_rx, session.as_mut());
                         start_or_activate_session(
                             &mut session,
                             sources,
@@ -371,11 +505,12 @@ pub fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
                             &audio_tx,
                             &event_tx,
                             &job_tx,
+                            &queue_metrics,
                         )?;
                     }
                 }
                 DaemonCommand::Stop => {
-                    stop_active_session(&mut session, &job_tx, &event_tx);
+                    stop_active_session(&mut session, &job_tx, &event_tx, &queue_metrics, &clock);
                 }
                 DaemonCommand::Quit => {
                     running.store(false, Ordering::SeqCst);
@@ -389,6 +524,7 @@ pub fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
             Ok(frame) => {
                 if let Some(active_session) = session.as_mut() {
                     if !active_session.accepting_audio {
+                        active_session.buffer_preroll_frame(frame);
                         continue;
                     }
 
@@ -398,12 +534,13 @@ pub fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
                             name: "audio_started_at",
                             utterance_id: None,
                             at_ms: clock.elapsed_ms(),
+                            value: None,
                         });
                     }
 
                     if let Some(batcher) = active_session.batchers.get_mut(&frame.source) {
                         for output in batcher.push_frame(frame) {
-                            send_pipeline_output(&job_tx, output);
+                            send_pipeline_output(&job_tx, output, &queue_metrics, &event_tx, &clock);
                         }
                     }
                 }
@@ -415,7 +552,7 @@ pub fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
         drain_events(&event_rx);
     }
 
-    stop_active_session(&mut session, &job_tx, &event_tx);
+    stop_active_session(&mut session, &job_tx, &event_tx, &queue_metrics, &clock);
     let _ = job_tx.send(TranscriptionJob::Stop);
     let _ = transcription_thread.join();
     drain_events(&event_rx);
@@ -434,6 +571,9 @@ struct ActiveSession {
     sources: Vec<TranscriptSource>,
     accepting_audio: bool,
     saw_audio: bool,
+    preroll_frames: VecDeque<AudioFrame>,
+    preroll_ms: u64,
+    max_preroll_ms: u64,
 }
 
 fn start_active_session(
@@ -471,19 +611,13 @@ fn start_active_session(
     }
 
     let endpoint_config = EndpointConfig::from_environment();
-    let partial_gate = Arc::new(AtomicBool::new(false));
     let batchers = sources
         .iter()
         .copied()
         .map(|source| {
             (
                 source,
-                SourcePipeline::with_partial_gate(
-                    source,
-                    clock.clone(),
-                    endpoint_config,
-                    partial_gate.clone(),
-                ),
+                SourcePipeline::new(source, clock.clone(), endpoint_config),
             )
         })
         .collect::<HashMap<_, _>>();
@@ -500,7 +634,43 @@ fn start_active_session(
         sources,
         accepting_audio,
         saw_audio: false,
+        preroll_frames: VecDeque::new(),
+        preroll_ms: 0,
+        max_preroll_ms: hot_capture_preroll_ms(),
     })
+}
+
+fn start_or_prepare_session(
+    session: &mut Option<ActiveSession>,
+    sources: Vec<TranscriptSource>,
+    clock: &PipelineClock,
+    audio_tx: &Sender<AudioFrame>,
+    event_tx: &Sender<BackendEvent>,
+    job_tx: &Sender<TranscriptionJob>,
+    queue_metrics: &AsrQueueMetrics,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let can_reuse = session
+        .as_ref()
+        .is_some_and(|active_session| active_session.sources == sources);
+
+    if !can_reuse {
+        stop_active_session(session, job_tx, event_tx, queue_metrics, clock);
+        *session = Some(start_active_session(
+            sources, clock, audio_tx, event_tx, false,
+        )?);
+    }
+
+    if let Some(active_session) = session.as_mut() {
+        active_session.accepting_audio = false;
+        active_session.saw_audio = false;
+        active_session.reset_batchers(clock);
+        active_session.clear_preroll();
+        event_tx.send(BackendEvent::Stage(
+            "local Parakeet hot capture armed".to_string(),
+        ))?;
+    }
+
+    Ok(())
 }
 
 fn start_or_activate_session(
@@ -510,15 +680,14 @@ fn start_or_activate_session(
     audio_tx: &Sender<AudioFrame>,
     event_tx: &Sender<BackendEvent>,
     job_tx: &Sender<TranscriptionJob>,
+    queue_metrics: &AsrQueueMetrics,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let can_reuse = session
         .as_ref()
-        .is_some_and(|active_session| {
-            active_session.sources == sources && active_session.accepting_audio
-        });
+        .is_some_and(|active_session| active_session.sources == sources);
 
     if !can_reuse {
-        stop_active_session(session, job_tx, event_tx);
+        stop_active_session(session, job_tx, event_tx, queue_metrics, clock);
         *session = Some(start_active_session(
             sources, clock, audio_tx, event_tx, true,
         )?);
@@ -529,6 +698,7 @@ fn start_or_activate_session(
         active_session.accepting_audio = true;
         active_session.saw_audio = false;
         active_session.reset_batchers(clock);
+        active_session.drain_preroll(job_tx, queue_metrics, event_tx, clock);
         event_tx.send(BackendEvent::Stage(
             "local Parakeet capture started".to_string(),
         ))?;
@@ -537,28 +707,75 @@ fn start_or_activate_session(
     Ok(())
 }
 
-fn drain_audio_frames(receiver: &mpsc::Receiver<AudioFrame>) {
-    while receiver.try_recv().is_ok() {}
+fn drain_or_buffer_audio_frames(
+    receiver: &mpsc::Receiver<AudioFrame>,
+    session: Option<&mut ActiveSession>,
+) {
+    let mut session = session;
+
+    while let Ok(frame) = receiver.try_recv() {
+        if let Some(active_session) = session.as_deref_mut() {
+            if !active_session.accepting_audio {
+                active_session.buffer_preroll_frame(frame);
+            }
+        }
+    }
 }
 
-fn prepare_active_session(
-    session: &mut Option<ActiveSession>,
-    _sources: Vec<TranscriptSource>,
+fn prepare_local_transcription_model(
     event_tx: &Sender<BackendEvent>,
-    job_tx: &Sender<TranscriptionJob>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    stop_active_session(session, job_tx, event_tx);
     event_tx.send(BackendEvent::Stage(
-        "local Parakeet hot capture prepared".to_string(),
+        "local Parakeet model prepared".to_string(),
     ))?;
 
     Ok(())
 }
 
 impl ActiveSession {
+    fn buffer_preroll_frame(&mut self, frame: AudioFrame) {
+        if self.max_preroll_ms == 0 || !self.sources.contains(&frame.source) {
+            return;
+        }
+
+        self.preroll_ms = self.preroll_ms.saturating_add(frame_duration_ms(&frame));
+        self.preroll_frames.push_back(frame);
+
+        while self.preroll_ms > self.max_preroll_ms {
+            let Some(removed) = self.preroll_frames.pop_front() else {
+                self.preroll_ms = 0;
+                break;
+            };
+
+            self.preroll_ms = self.preroll_ms.saturating_sub(frame_duration_ms(&removed));
+        }
+    }
+
+    fn drain_preroll(
+        &mut self,
+        job_tx: &Sender<TranscriptionJob>,
+        queue_metrics: &AsrQueueMetrics,
+        event_tx: &Sender<BackendEvent>,
+        clock: &PipelineClock,
+    ) {
+        while let Some(frame) = self.preroll_frames.pop_front() {
+            if let Some(batcher) = self.batchers.get_mut(&frame.source) {
+                for output in batcher.push_frame(frame) {
+                    send_pipeline_output(job_tx, output, queue_metrics, event_tx, clock);
+                }
+            }
+        }
+
+        self.preroll_ms = 0;
+    }
+
+    fn clear_preroll(&mut self) {
+        self.preroll_frames.clear();
+        self.preroll_ms = 0;
+    }
+
     fn reset_batchers(&mut self, clock: &PipelineClock) {
         let endpoint_config = EndpointConfig::from_environment();
-        let partial_gate = Arc::new(AtomicBool::new(false));
         self.batchers = self
             .sources
             .iter()
@@ -566,22 +783,47 @@ impl ActiveSession {
             .map(|source| {
                 (
                     source,
-                    SourcePipeline::with_partial_gate(
-                        source,
-                        clock.clone(),
-                        endpoint_config,
-                        partial_gate.clone(),
-                    ),
+                    SourcePipeline::new(source, clock.clone(), endpoint_config),
                 )
             })
             .collect::<HashMap<_, _>>();
     }
 }
 
+fn frame_duration_ms(frame: &AudioFrame) -> u64 {
+    if frame.sample_rate_hz == 0 || frame.channels == 0 {
+        return 0;
+    }
+
+    let frames = frame.samples.len() as u64 / frame.channels as u64;
+
+    frames * 1000 / frame.sample_rate_hz as u64
+}
+
+fn hot_capture_preroll_ms() -> u64 {
+    env_u64("CAUL_HOT_CAPTURE_PRE_ROLL_MS").unwrap_or(DEFAULT_HOT_CAPTURE_PRE_ROLL_MS)
+}
+
+fn live_partials_enabled() -> bool {
+    std::env::var("CAUL_LIVE_PARTIALS")
+        .map(|value| value != "0")
+        .unwrap_or(true)
+}
+
+fn live_partial_first_ms() -> u64 {
+    env_u64("CAUL_LIVE_PARTIAL_FIRST_MS").unwrap_or(DEFAULT_LIVE_PARTIAL_FIRST_MS)
+}
+
+fn live_partial_interval_ms() -> u64 {
+    env_u64("CAUL_LIVE_PARTIAL_INTERVAL_MS").unwrap_or(DEFAULT_LIVE_PARTIAL_INTERVAL_MS)
+}
+
 fn stop_active_session(
     session: &mut Option<ActiveSession>,
     job_tx: &Sender<TranscriptionJob>,
     event_tx: &Sender<BackendEvent>,
+    queue_metrics: &AsrQueueMetrics,
+    clock: &PipelineClock,
 ) {
     let Some(mut active_session) = session.take() else {
         return;
@@ -592,7 +834,7 @@ fn stop_active_session(
 
     for batcher in active_session.batchers.values_mut() {
         if let Some(segment) = batcher.flush() {
-            let _ = job_tx.send(TranscriptionJob::Segment(segment));
+            enqueue_segment_job(job_tx, segment, queue_metrics, event_tx, clock);
         }
     }
 
@@ -609,22 +851,65 @@ fn stop_active_session(
     ));
 }
 
-fn send_pipeline_output(job_tx: &Sender<TranscriptionJob>, output: PipelineOutput) {
-    let job = match output {
+fn send_pipeline_output(
+    job_tx: &Sender<TranscriptionJob>,
+    output: PipelineOutput,
+    queue_metrics: &AsrQueueMetrics,
+    event_tx: &Sender<BackendEvent>,
+    clock: &PipelineClock,
+) {
+    match output {
         PipelineOutput::SpeechStarted {
             source,
             utterance_id,
             start_ms,
-        } => TranscriptionJob::SpeechStarted {
-            source,
-            utterance_id,
-            start_ms,
-        },
-        PipelineOutput::Preview(preview) => TranscriptionJob::Partial(preview),
-        PipelineOutput::Segment(segment) => TranscriptionJob::Segment(segment),
-    };
+        } => {
+            let _ = job_tx.send(TranscriptionJob::SpeechStarted {
+                source,
+                utterance_id,
+                start_ms,
+            });
+        }
+        PipelineOutput::Segment(segment) => {
+            enqueue_segment_job(job_tx, segment, queue_metrics, event_tx, clock);
+        }
+        PipelineOutput::PartialSnapshot(snapshot) => {
+            enqueue_partial_snapshot_job(job_tx, snapshot, queue_metrics, event_tx, clock);
+        }
+    }
+}
 
-    let _ = job_tx.send(job);
+fn enqueue_segment_job(
+    job_tx: &Sender<TranscriptionJob>,
+    segment: SpeechSegment,
+    queue_metrics: &AsrQueueMetrics,
+    event_tx: &Sender<BackendEvent>,
+    clock: &PipelineClock,
+) {
+    queue_metrics.record_queued(
+        segment
+            .metrics
+            .asr_queued_at_ms
+            .unwrap_or_else(|| clock.elapsed_ms()),
+        event_tx,
+        clock,
+    );
+    let _ = job_tx.send(TranscriptionJob::Segment(segment));
+}
+
+fn enqueue_partial_snapshot_job(
+    job_tx: &Sender<TranscriptionJob>,
+    snapshot: SpeechPartialSnapshot,
+    queue_metrics: &AsrQueueMetrics,
+    event_tx: &Sender<BackendEvent>,
+    clock: &PipelineClock,
+) {
+    if !queue_metrics.can_enqueue_partial() {
+        return;
+    }
+
+    queue_metrics.record_queued(snapshot.queued_at_ms, event_tx, clock);
+    let _ = job_tx.send(TranscriptionJob::PartialSnapshot(snapshot));
 }
 
 fn start_daemon_stdin_thread(sender: Sender<DaemonCommand>, running: Arc<AtomicBool>) {
@@ -651,8 +936,16 @@ fn parse_daemon_command(line: &str) -> Option<DaemonCommand> {
     match command_type {
         "prepare" => {
             let sources = parse_command_sources(&value);
+            let hot_capture = value
+                .get("hotCapture")
+                .or_else(|| value.get("hot_capture"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
 
-            Some(DaemonCommand::Prepare { sources })
+            Some(DaemonCommand::Prepare {
+                sources,
+                hot_capture,
+            })
         }
         "start" => {
             let sources = parse_command_sources(&value);
@@ -692,7 +985,11 @@ pub fn run_fixture_pipeline_smoke() {
 
     for (name, speech_ms, silence_ms) in cases {
         let clock = PipelineClock::new();
-        let mut pipeline = SourcePipeline::new(clock, EndpointConfig::from_environment());
+        let mut pipeline = SourcePipeline::new(
+            TranscriptSource::System,
+            clock,
+            EndpointConfig::from_environment(),
+        );
         let mut segments = Vec::new();
 
         if speech_ms > 0 {
@@ -751,10 +1048,76 @@ pub fn run_fixture_pipeline_smoke() {
     }
 }
 
+pub fn run_long_transcription_soak_fixture() -> Result<(), Box<dyn std::error::Error>> {
+    let clock = PipelineClock::new();
+    let mut pipeline = SourcePipeline::new(
+        TranscriptSource::System,
+        clock,
+        EndpointConfig::default(),
+    );
+    let target_ms = 60 * 60 * 1000;
+    let frames = target_ms / VAD_FRAME_MS;
+    let mut segment_count = 0_u64;
+    let mut max_segment_ms = 0_u64;
+    let mut previous_end_ms = 0_u64;
+    let mut ordered = true;
+    let mut bounded = true;
+    let max_allowed_ms = DEFAULT_MAX_UTTERANCE_MS + VAD_FRAME_MS;
+
+    for _ in 0..frames {
+        for output in pipeline.push_frame(AudioFrame {
+            source: TranscriptSource::System,
+            sample_rate_hz: OUTPUT_SAMPLE_RATE_HZ,
+            channels: 1,
+            samples: speech_frame_samples(),
+        }) {
+            if let PipelineOutput::Segment(segment) = output {
+                let segment_ms = segment.end_ms.saturating_sub(segment.start_ms);
+                segment_count += 1;
+                max_segment_ms = max_segment_ms.max(segment_ms);
+                ordered = ordered && segment.start_ms >= previous_end_ms;
+                previous_end_ms = segment.end_ms;
+                bounded = bounded && segment_ms <= max_allowed_ms;
+            }
+        }
+    }
+
+    if let Some(segment) = pipeline.flush() {
+        let segment_ms = segment.end_ms.saturating_sub(segment.start_ms);
+        segment_count += 1;
+        max_segment_ms = max_segment_ms.max(segment_ms);
+        ordered = ordered && segment.start_ms >= previous_end_ms;
+        previous_end_ms = segment.end_ms;
+        bounded = bounded && segment_ms <= max_allowed_ms;
+    }
+
+    let ok = segment_count > 0 && bounded && ordered;
+    println!(
+        "{}",
+        json!({
+            "type": "long_transcription_soak_summary",
+            "ok": ok,
+            "duration_ms": target_ms,
+            "segment_count": segment_count,
+            "max_segment_ms": max_segment_ms,
+            "max_allowed_segment_ms": max_allowed_ms,
+            "ordered": ordered,
+            "bounded": bounded,
+            "final_end_ms": previous_end_ms
+        })
+    );
+
+    if ok {
+        Ok(())
+    } else {
+        Err("long transcription soak fixture failed".into())
+    }
+}
+
 fn collect_segments_into(segments: &mut Vec<SpeechSegment>, outputs: Vec<PipelineOutput>) {
     segments.extend(outputs.into_iter().filter_map(|output| match output {
         PipelineOutput::Segment(segment) => Some(segment),
-        PipelineOutput::SpeechStarted { .. } | PipelineOutput::Preview(_) => None,
+        PipelineOutput::PartialSnapshot(_) | PipelineOutput::SpeechStarted { .. } => None,
     }));
 }
 
@@ -764,6 +1127,7 @@ pub fn run_parakeet_wav_benchmark(path: &Path) -> Result<(), Box<dyn std::error:
     let samples = read_mono_16khz_wav(path)?;
     let audio_read_completed_at_ms = clock.elapsed_ms();
     let audio_duration_ms = samples_to_ms(samples.len() as u64);
+    let sample_windows = direct_wav_sample_windows(samples.len());
 
     let model_load_started_at_ms = clock.elapsed_ms();
     let model_dir = ensure_parakeet_model()?;
@@ -771,23 +1135,79 @@ pub fn run_parakeet_wav_benchmark(path: &Path) -> Result<(), Box<dyn std::error:
     let model_load_completed_at_ms = clock.elapsed_ms();
 
     let asr_started_at_ms = clock.elapsed_ms();
-    let params = ParakeetParams {
-        timestamp_granularity: Some(TimestampGranularity::Segment),
-        ..Default::default()
-    };
-    let result = model.transcribe_with(&samples, &params)?;
+    let mut chunk_summaries = Vec::new();
+    let mut asr_ms_total = 0;
+
+    for window in &sample_windows {
+        let chunk_started_at_ms = clock.elapsed_ms();
+        let result = transcribe_parakeet_sample_window(&mut model, &samples[window.range()])?;
+        let chunk_completed_at_ms = clock.elapsed_ms();
+        let chunk_asr_ms = chunk_completed_at_ms.saturating_sub(chunk_started_at_ms);
+        let text = result.text.trim().to_string();
+        asr_ms_total += chunk_asr_ms;
+
+        chunk_summaries.push(DirectWavChunkSummary {
+            index: window.index,
+            start_ms: samples_to_ms(window.start_sample as u64),
+            end_ms: samples_to_ms(window.end_sample as u64),
+            audio_duration_ms: samples_to_ms(window.len() as u64),
+            samples: window.len(),
+            asr_ms: chunk_asr_ms,
+            transcript: text,
+        });
+    }
+
     let asr_completed_at_ms = clock.elapsed_ms();
-    let text = result.text.trim().to_string();
+    let stitched_transcript = stitch_direct_wav_chunks(&chunk_summaries);
     let stats = audio_stats(&samples);
+    let mode = if sample_windows.len() == 1 {
+        "single"
+    } else {
+        "chunked"
+    };
+    let max_chunk_duration_ms = sample_windows
+        .iter()
+        .map(|window| samples_to_ms(window.len() as u64))
+        .max()
+        .unwrap_or(0);
+    let chunk_json: Vec<Value> = chunk_summaries
+        .iter()
+        .zip(stitched_transcript.chunks.iter())
+        .map(|(chunk, stitched)| {
+            json!({
+                "index": chunk.index,
+                "start_ms": chunk.start_ms,
+                "end_ms": chunk.end_ms,
+                "audio_duration_ms": chunk.audio_duration_ms,
+                "samples": chunk.samples,
+                "asr_ms": chunk.asr_ms,
+                "transcript_chars": chunk.transcript.len(),
+                "transcript": chunk.transcript,
+                "stitched_transcript_chars": stitched.transcript.len(),
+                "stitched_transcript": stitched.transcript,
+                "merge_strategy": stitched.strategy.as_str(),
+                "overlap_words": stitched.overlap_words,
+                "dropped_prefix_words": stitched.dropped_prefix_words,
+                "dropped_previous_suffix_words": stitched.dropped_previous_suffix_words
+            })
+        })
+        .collect();
 
     println!(
         "{}",
         json!({
             "type": "parakeet_direct_bench",
+            "mode": mode,
             "path": path.display().to_string(),
             "sample_rate_hz": OUTPUT_SAMPLE_RATE_HZ,
             "samples": samples.len(),
             "audio_duration_ms": audio_duration_ms,
+            "chunk_count": sample_windows.len(),
+            "chunk_ms": DIRECT_WAV_CHUNK_MS,
+            "chunk_overlap_ms": DIRECT_WAV_CHUNK_OVERLAP_MS,
+            "max_chunk_duration_ms": max_chunk_duration_ms,
+            "chunks": chunk_json,
+            "stitched": sample_windows.len() > 1,
             "audio_read_started_at_ms": audio_read_started_at_ms,
             "audio_read_completed_at_ms": audio_read_completed_at_ms,
             "model_load_started_at_ms": model_load_started_at_ms,
@@ -797,13 +1217,491 @@ pub fn run_parakeet_wav_benchmark(path: &Path) -> Result<(), Box<dyn std::error:
             "audio_read_ms": audio_read_completed_at_ms.saturating_sub(audio_read_started_at_ms),
             "model_load_ms": model_load_completed_at_ms.saturating_sub(model_load_started_at_ms),
             "asr_ms": asr_completed_at_ms.saturating_sub(asr_started_at_ms),
+            "asr_chunk_ms_total": asr_ms_total,
             "rms": stats.rms,
             "peak": stats.peak,
-            "transcript": text
+            "raw_transcript": stitched_transcript.raw_transcript,
+            "transcript": stitched_transcript.transcript
         })
     );
 
     Ok(())
+}
+
+fn transcribe_parakeet_sample_window(
+    model: &mut ParakeetModel,
+    samples: &[f32],
+) -> Result<transcribe_rs::TranscriptionResult, transcribe_rs::TranscribeError> {
+    let params = ParakeetParams {
+        timestamp_granularity: Some(TimestampGranularity::Segment),
+        ..Default::default()
+    };
+    model.transcribe_with(samples, &params)
+}
+
+fn direct_wav_sample_windows(total_samples: usize) -> Vec<SampleWindow> {
+    let chunk_samples = ms_to_samples(DIRECT_WAV_CHUNK_MS) as usize;
+    let overlap_samples = ms_to_samples(DIRECT_WAV_CHUNK_OVERLAP_MS) as usize;
+    let single_max_samples = ms_to_samples(DIRECT_WAV_SINGLE_MAX_MS) as usize;
+
+    if total_samples <= single_max_samples {
+        segment_sample_windows(total_samples, total_samples.max(1), 0)
+    } else {
+        segment_sample_windows(total_samples, chunk_samples, overlap_samples)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SampleWindow {
+    index: usize,
+    start_sample: usize,
+    end_sample: usize,
+}
+
+impl SampleWindow {
+    fn len(&self) -> usize {
+        self.end_sample.saturating_sub(self.start_sample)
+    }
+
+    fn range(&self) -> std::ops::Range<usize> {
+        self.start_sample..self.end_sample
+    }
+}
+
+fn segment_sample_windows(
+    total_samples: usize,
+    chunk_samples: usize,
+    overlap_samples: usize,
+) -> Vec<SampleWindow> {
+    if total_samples == 0 || chunk_samples == 0 {
+        return Vec::new();
+    }
+
+    if total_samples <= chunk_samples {
+        return vec![SampleWindow {
+            index: 0,
+            start_sample: 0,
+            end_sample: total_samples,
+        }];
+    }
+
+    let step_samples = chunk_samples.saturating_sub(overlap_samples).max(1);
+    let mut windows = Vec::new();
+    let mut start_sample = 0;
+
+    loop {
+        let end_sample = (start_sample + chunk_samples).min(total_samples);
+        windows.push(SampleWindow {
+            index: windows.len(),
+            start_sample,
+            end_sample,
+        });
+
+        if end_sample >= total_samples {
+            break;
+        }
+
+        start_sample += step_samples;
+    }
+
+    windows
+}
+
+#[derive(Clone, Debug)]
+struct DirectWavChunkSummary {
+    index: usize,
+    start_ms: u64,
+    end_ms: u64,
+    audio_duration_ms: u64,
+    samples: usize,
+    asr_ms: u64,
+    transcript: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct StitchedTranscript {
+    transcript: String,
+    raw_transcript: String,
+    chunks: Vec<StitchedChunk>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct StitchedChunk {
+    transcript: String,
+    strategy: StitchStrategy,
+    overlap_words: usize,
+    dropped_prefix_words: usize,
+    dropped_previous_suffix_words: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StitchStrategy {
+    Exact,
+    Lcs,
+    Append,
+}
+
+impl StitchStrategy {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Exact => "exact",
+            Self::Lcs => "lcs",
+            Self::Append => "append",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct WordToken {
+    original: String,
+    normalised: String,
+}
+
+fn stitch_direct_wav_chunks(chunks: &[DirectWavChunkSummary]) -> StitchedTranscript {
+    let raw_transcript = chunks
+        .iter()
+        .map(|chunk| chunk.transcript.trim())
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string();
+    let mut stitched_lines = Vec::new();
+    let mut stitched_tokens = Vec::new();
+    let mut stitched_chunks = Vec::new();
+
+    for chunk in chunks {
+        let text = chunk.transcript.trim();
+        let tokens = word_tokens(text);
+
+        if text.is_empty() || tokens.is_empty() {
+            stitched_chunks.push(StitchedChunk {
+                transcript: String::new(),
+                strategy: StitchStrategy::Append,
+                overlap_words: 0,
+                dropped_prefix_words: 0,
+                dropped_previous_suffix_words: 0,
+            });
+            continue;
+        }
+
+        let decision = if stitched_tokens.is_empty() {
+            StitchDecision {
+                strategy: StitchStrategy::Append,
+                overlap_words: 0,
+                dropped_prefix_words: 0,
+                dropped_previous_suffix_words: 0,
+            }
+        } else {
+            detect_chunk_overlap(&stitched_tokens, &tokens)
+        };
+
+        if decision.dropped_previous_suffix_words > 0 {
+            drop_stitched_suffix(
+                &mut stitched_lines,
+                &mut stitched_tokens,
+                decision.dropped_previous_suffix_words,
+            );
+        }
+
+        let emitted = tokens
+            .iter()
+            .skip(decision.dropped_prefix_words)
+            .map(|token| token.original.as_str())
+            .collect::<Vec<_>>()
+            .join(" ")
+            .trim()
+            .to_string();
+
+        if !emitted.is_empty() {
+            stitched_tokens.extend(word_tokens(&emitted));
+            stitched_lines.push(emitted.clone());
+        }
+
+        stitched_chunks.push(StitchedChunk {
+            transcript: emitted,
+            strategy: decision.strategy,
+            overlap_words: decision.overlap_words,
+            dropped_prefix_words: decision.dropped_prefix_words,
+            dropped_previous_suffix_words: decision.dropped_previous_suffix_words,
+        });
+    }
+
+    StitchedTranscript {
+        transcript: stitched_lines.join("\n").trim().to_string(),
+        raw_transcript,
+        chunks: stitched_chunks,
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct StitchDecision {
+    strategy: StitchStrategy,
+    overlap_words: usize,
+    dropped_prefix_words: usize,
+    dropped_previous_suffix_words: usize,
+}
+
+fn detect_chunk_overlap(previous: &[WordToken], next: &[WordToken]) -> StitchDecision {
+    if previous.is_empty() || next.is_empty() {
+        return append_stitch_decision();
+    }
+
+    if let Some(words) = detect_exact_suffix_prefix_overlap(previous, next) {
+        return StitchDecision {
+            strategy: StitchStrategy::Exact,
+            overlap_words: words,
+            dropped_prefix_words: words,
+            dropped_previous_suffix_words: 0,
+        };
+    }
+
+    if let Some((overlap_words, dropped_previous_suffix_words)) =
+        detect_prefix_inside_previous_tail_overlap(previous, next)
+    {
+        return StitchDecision {
+            strategy: StitchStrategy::Lcs,
+            overlap_words,
+            dropped_prefix_words: 0,
+            dropped_previous_suffix_words,
+        };
+    }
+
+    if let Some((overlap_words, dropped_prefix_words)) = detect_lcs_boundary_overlap(previous, next)
+    {
+        return StitchDecision {
+            strategy: StitchStrategy::Lcs,
+            overlap_words,
+            dropped_prefix_words,
+            dropped_previous_suffix_words: 0,
+        };
+    }
+
+    append_stitch_decision()
+}
+
+fn append_stitch_decision() -> StitchDecision {
+    StitchDecision {
+        strategy: StitchStrategy::Append,
+        overlap_words: 0,
+        dropped_prefix_words: 0,
+        dropped_previous_suffix_words: 0,
+    }
+}
+
+fn detect_exact_suffix_prefix_overlap(previous: &[WordToken], next: &[WordToken]) -> Option<usize> {
+    let max_words = previous
+        .len()
+        .min(next.len())
+        .min(STITCH_BOUNDARY_WORDS);
+
+    for words in (1..=max_words).rev() {
+        let previous_start = previous.len() - words;
+        let previous_suffix = &previous[previous_start..];
+        let next_prefix = &next[..words];
+
+        if token_slices_match(previous_suffix, next_prefix) && overlap_is_confident(next_prefix) {
+            return Some(words);
+        }
+    }
+
+    None
+}
+
+fn detect_prefix_inside_previous_tail_overlap(
+    previous: &[WordToken],
+    next: &[WordToken],
+) -> Option<(usize, usize)> {
+    let previous_tail_start = previous.len().saturating_sub(STITCH_BOUNDARY_WORDS);
+    let max_words = next.len().min(STITCH_BOUNDARY_WORDS);
+
+    for words in (1..=max_words).rev() {
+        let next_prefix = &next[..words];
+
+        if !overlap_is_confident(next_prefix) {
+            continue;
+        }
+
+        for previous_start in previous_tail_start..previous.len() {
+            let previous_end = previous_start + words;
+
+            if previous_end > previous.len() {
+                break;
+            }
+
+            if previous_start < STITCH_LCS_EDGE_WORDS {
+                continue;
+            }
+
+            let previous_suffix_after_match = previous.len().saturating_sub(previous_end);
+
+            if previous_suffix_after_match > STITCH_LCS_EDGE_WORDS * 2 {
+                continue;
+            }
+
+            if token_slices_match(&previous[previous_start..previous_end], next_prefix) {
+                return Some((words, previous.len().saturating_sub(previous_start)));
+            }
+        }
+    }
+
+    None
+}
+
+fn detect_lcs_boundary_overlap(
+    previous: &[WordToken],
+    next: &[WordToken],
+) -> Option<(usize, usize)> {
+    let previous_start = previous.len().saturating_sub(STITCH_BOUNDARY_WORDS);
+    let previous_band = &previous[previous_start..];
+    let next_band_len = next.len().min(STITCH_BOUNDARY_WORDS);
+    let next_band = &next[..next_band_len];
+    let pairs = lcs_token_pairs(previous_band, next_band);
+
+    if pairs.is_empty() {
+        return None;
+    }
+
+    let first_next = pairs.first().map(|(_, next_index)| *next_index)?;
+    let last_next = pairs.last().map(|(_, next_index)| *next_index)?;
+    let last_previous = pairs.last().map(|(previous_index, _)| *previous_index)?;
+    let matched_next_tokens = pairs
+        .iter()
+        .map(|(_, next_index)| next_band[*next_index].clone())
+        .collect::<Vec<_>>();
+    let dropped_prefix_words = last_next + 1;
+
+    if first_next >= STITCH_LCS_EDGE_WORDS
+        || last_previous + STITCH_LCS_EDGE_WORDS < previous_band.len()
+        || dropped_prefix_words > pairs.len() + STITCH_LCS_EDGE_WORDS
+        || !overlap_is_confident(&matched_next_tokens)
+    {
+        return None;
+    }
+
+    Some((pairs.len(), dropped_prefix_words))
+}
+
+fn lcs_token_pairs(left: &[WordToken], right: &[WordToken]) -> Vec<(usize, usize)> {
+    if left.is_empty() || right.is_empty() {
+        return Vec::new();
+    }
+
+    let mut lengths = vec![vec![0usize; right.len() + 1]; left.len() + 1];
+
+    for left_index in 0..left.len() {
+        for right_index in 0..right.len() {
+            lengths[left_index + 1][right_index + 1] =
+                if left[left_index].normalised == right[right_index].normalised {
+                    lengths[left_index][right_index] + 1
+                } else {
+                    lengths[left_index + 1][right_index].max(lengths[left_index][right_index + 1])
+                };
+        }
+    }
+
+    let mut left_index = left.len();
+    let mut right_index = right.len();
+    let mut pairs = Vec::new();
+
+    while left_index > 0 && right_index > 0 {
+        if left[left_index - 1].normalised == right[right_index - 1].normalised {
+            pairs.push((left_index - 1, right_index - 1));
+            left_index -= 1;
+            right_index -= 1;
+        } else if lengths[left_index][right_index - 1] >= lengths[left_index - 1][right_index] {
+            right_index -= 1;
+        } else {
+            left_index -= 1;
+        }
+    }
+
+    pairs.reverse();
+    pairs
+}
+
+fn drop_stitched_suffix(
+    stitched_lines: &mut Vec<String>,
+    stitched_tokens: &mut Vec<WordToken>,
+    words_to_drop: usize,
+) {
+    if words_to_drop == 0 {
+        return;
+    }
+
+    let keep_tokens = stitched_tokens.len().saturating_sub(words_to_drop);
+    stitched_tokens.truncate(keep_tokens);
+
+    let mut remaining_words = words_to_drop;
+
+    while remaining_words > 0 {
+        let Some(last_line) = stitched_lines.last_mut() else {
+            break;
+        };
+        let line_tokens = word_tokens(last_line);
+
+        if line_tokens.len() <= remaining_words {
+            remaining_words -= line_tokens.len();
+            stitched_lines.pop();
+            continue;
+        }
+
+        let keep_words = line_tokens.len() - remaining_words;
+        *last_line = line_tokens[..keep_words]
+            .iter()
+            .map(|token| token.original.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        remaining_words = 0;
+    }
+}
+
+fn token_slices_match(left: &[WordToken], right: &[WordToken]) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right.iter())
+            .all(|(left, right)| left.normalised == right.normalised)
+}
+
+fn overlap_is_confident(tokens: &[WordToken]) -> bool {
+    tokens.len() >= STITCH_MIN_OVERLAP_WORDS
+        || tokens
+            .iter()
+            .map(|token| token.normalised.chars().count())
+            .sum::<usize>()
+            >= STITCH_MIN_OVERLAP_CHARS
+}
+
+fn word_tokens(text: &str) -> Vec<WordToken> {
+    text.split_whitespace()
+        .filter_map(|word| {
+            let normalised = normalise_word(word);
+
+            if normalised.is_empty() {
+                None
+            } else {
+                Some(WordToken {
+                    original: word.to_string(),
+                    normalised,
+                })
+            }
+        })
+        .collect()
+}
+
+fn normalise_word(word: &str) -> String {
+    let mut normalised = String::new();
+
+    for character in word.chars() {
+        for lower in character.to_lowercase() {
+            if lower.is_alphanumeric() {
+                normalised.push(lower);
+            }
+        }
+    }
+
+    normalised
 }
 
 fn read_mono_16khz_wav(path: &Path) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
@@ -1167,8 +2065,11 @@ struct SourcePipeline {
     endpoint: EndpointDetector,
     next_utterance_id: u64,
     active_utterance_id: Option<u64>,
-    last_partial_end_sample: u64,
-    partial_gate: Arc<AtomicBool>,
+    last_partial_end_sample: Option<u64>,
+    live_partial_first_samples: u64,
+    live_partial_interval_samples: u64,
+    live_partials_enabled: bool,
+    partial_revision: u64,
     speech_started_emitted_for: Option<u64>,
 }
 
@@ -1179,26 +2080,12 @@ enum PipelineOutput {
         utterance_id: u64,
         start_ms: u64,
     },
-    Preview(SpeechPreview),
     Segment(SpeechSegment),
+    PartialSnapshot(SpeechPartialSnapshot),
 }
 
 impl SourcePipeline {
-    fn new(clock: PipelineClock, endpoint_config: EndpointConfig) -> Self {
-        Self::with_partial_gate(
-            TranscriptSource::System,
-            clock,
-            endpoint_config,
-            Arc::new(AtomicBool::new(false)),
-        )
-    }
-
-    fn with_partial_gate(
-        source: TranscriptSource,
-        clock: PipelineClock,
-        endpoint_config: EndpointConfig,
-        partial_gate: Arc<AtomicBool>,
-    ) -> Self {
+    fn new(source: TranscriptSource, clock: PipelineClock, endpoint_config: EndpointConfig) -> Self {
         Self {
             source,
             clock,
@@ -1206,8 +2093,11 @@ impl SourcePipeline {
             endpoint: EndpointDetector::new(endpoint_config),
             next_utterance_id: 1,
             active_utterance_id: None,
-            last_partial_end_sample: 0,
-            partial_gate,
+            last_partial_end_sample: None,
+            live_partial_first_samples: ms_to_samples(live_partial_first_ms()),
+            live_partial_interval_samples: ms_to_samples(live_partial_interval_ms()),
+            live_partials_enabled: live_partials_enabled(),
+            partial_revision: 0,
             speech_started_emitted_for: None,
         }
     }
@@ -1226,8 +2116,9 @@ impl SourcePipeline {
             if let Some(output) = self.maybe_speech_started() {
                 outputs.push(output);
             }
-            if let Some(preview) = self.maybe_preview() {
-                outputs.push(PipelineOutput::Preview(preview));
+
+            if let Some(output) = self.maybe_partial_snapshot() {
+                outputs.push(output);
             }
         }
 
@@ -1256,9 +2147,9 @@ impl SourcePipeline {
             .take()
             .unwrap_or(self.next_utterance_id);
         self.next_utterance_id = self.next_utterance_id.max(id + 1);
-        self.last_partial_end_sample = 0;
+        self.last_partial_end_sample = None;
+        self.partial_revision = 0;
         self.speech_started_emitted_for = None;
-        self.partial_gate.store(false, Ordering::SeqCst);
 
         let mut metrics = utterance.metrics;
         metrics.asr_queued_at_ms = Some(self.clock.elapsed_ms());
@@ -1278,7 +2169,7 @@ impl SourcePipeline {
         let snapshot = self.endpoint.active_snapshot()?;
         let active_duration = snapshot.end_sample.saturating_sub(snapshot.start_sample);
 
-        if active_duration < ms_to_samples(LIVE_PARTIAL_MIN_MS) {
+        if active_duration < ms_to_samples(DEFAULT_MIN_SPEECH_MS) {
             return None;
         }
 
@@ -1300,45 +2191,42 @@ impl SourcePipeline {
         })
     }
 
-    fn maybe_preview(&mut self) -> Option<SpeechPreview> {
+    fn maybe_partial_snapshot(&mut self) -> Option<PipelineOutput> {
+        if !self.live_partials_enabled {
+            return None;
+        }
+
         let snapshot = self.endpoint.active_snapshot()?;
         let active_duration = snapshot.end_sample.saturating_sub(snapshot.start_sample);
 
-        if active_duration < ms_to_samples(LIVE_PARTIAL_MIN_MS) {
+        if active_duration < self.live_partial_first_samples {
             return None;
         }
 
-        if snapshot
-            .end_sample
-            .saturating_sub(self.last_partial_end_sample)
-            < ms_to_samples(LIVE_PARTIAL_INTERVAL_MS)
-        {
-            return None;
+        if let Some(last_partial_end_sample) = self.last_partial_end_sample {
+            if snapshot.end_sample.saturating_sub(last_partial_end_sample)
+                < self.live_partial_interval_samples
+            {
+                return None;
+            }
         }
 
-        if self.active_utterance_id.is_none() {
+        let id = self.active_utterance_id.unwrap_or_else(|| {
             self.active_utterance_id = Some(self.next_utterance_id);
-        }
+            self.next_utterance_id
+        });
+        self.partial_revision = self.partial_revision.saturating_add(1);
+        self.last_partial_end_sample = Some(snapshot.end_sample);
 
-        if self
-            .partial_gate
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_err()
-        {
-            return None;
-        }
-
-        self.last_partial_end_sample = snapshot.end_sample;
-
-        Some(SpeechPreview {
+        Some(PipelineOutput::PartialSnapshot(SpeechPartialSnapshot {
             source: self.source,
-            id: self.active_utterance_id.expect("active preview id exists"),
+            utterance_id: id,
             start_ms: samples_to_ms(snapshot.start_sample),
             end_ms: samples_to_ms(snapshot.end_sample),
+            revision: self.partial_revision,
             queued_at_ms: self.clock.elapsed_ms(),
-            partial_gate: self.partial_gate.clone(),
             samples: snapshot.samples,
-        })
+        }))
     }
 }
 
@@ -1354,13 +2242,15 @@ struct EndpointConfig {
 
 impl Default for EndpointConfig {
     fn default() -> Self {
+        // Live-call endpointing keeps enough context to avoid clipped first words, ignores
+        // tiny clicks, closes on short pauses and caps long monologues into bounded ASR jobs.
         Self {
             frame_samples: VAD_FRAME_SAMPLES,
-            pre_roll_samples: ms_to_samples(PRE_ROLL_MS) as usize,
-            min_speech_samples: ms_to_samples(MIN_SPEECH_MS) as usize,
-            end_silence_samples: ms_to_samples(END_SILENCE_MS) as usize,
-            max_utterance_samples: ms_to_samples(MAX_UTTERANCE_MS) as usize,
-            energy_threshold: ENERGY_SPEECH_THRESHOLD,
+            pre_roll_samples: ms_to_samples(DEFAULT_PRE_ROLL_MS) as usize,
+            min_speech_samples: ms_to_samples(DEFAULT_MIN_SPEECH_MS) as usize,
+            end_silence_samples: ms_to_samples(DEFAULT_END_SILENCE_MS) as usize,
+            max_utterance_samples: ms_to_samples(DEFAULT_MAX_UTTERANCE_MS) as usize,
+            energy_threshold: DEFAULT_ENERGY_SPEECH_THRESHOLD,
         }
     }
 }
@@ -1568,6 +2458,10 @@ fn frame_rms(frame: &[f32]) -> f32 {
     (frame.iter().map(|sample| sample * sample).sum::<f32>() / frame.len().max(1) as f32).sqrt()
 }
 
+fn speech_frame_samples() -> Vec<f32> {
+    vec![0.05; VAD_FRAME_SAMPLES]
+}
+
 struct StreamResampler {
     sample_rate_hz: u32,
     channels: u16,
@@ -1677,10 +2571,10 @@ fn run_transcription_worker(
     receiver: mpsc::Receiver<TranscriptionJob>,
     event_tx: Sender<BackendEvent>,
     clock: PipelineClock,
+    queue_metrics: AsrQueueMetrics,
 ) {
     let selected_model = LocalTranscriptionModel::from_environment();
     let mut model: Option<LocalTranscriber> = None;
-    let mut partial_stability = HashMap::<(TranscriptSource, u64), PartialStability>::new();
     if preload_local_transcription_enabled() {
         let _ = get_or_load_local_model(&mut model, selected_model, &event_tx);
     }
@@ -1700,60 +2594,6 @@ fn run_transcription_worker(
                     utterance_id,
                     start_ms,
                 });
-            }
-            TranscriptionJob::Partial(preview) => {
-                emit_metric(
-                    &event_tx,
-                    "partial_asr_queued_at",
-                    preview.id,
-                    Some(preview.queued_at_ms),
-                );
-
-                let Some(model) = get_or_load_local_model(&mut model, selected_model, &event_tx)
-                else {
-                    preview.partial_gate.store(false, Ordering::SeqCst);
-                    continue;
-                };
-
-                emit_metric(
-                    &event_tx,
-                    "partial_asr_started_at",
-                    preview.id,
-                    Some(clock.elapsed_ms()),
-                );
-
-                if let Some(text) = transcribe_samples(model, &preview.samples, &event_tx) {
-                    emit_metric(
-                        &event_tx,
-                        "partial_asr_completed_at",
-                        preview.id,
-                        Some(clock.elapsed_ms()),
-                    );
-                    if let Some(stable_text) = stable_partial_text(
-                        &mut partial_stability,
-                        preview.source,
-                        preview.id,
-                        &text,
-                    ) {
-                        let stable_text = suppress_pathological_repetitions(&stable_text);
-                        let _ = event_tx.send(BackendEvent::Partial {
-                            source: preview.source,
-                            utterance_id: preview.id,
-                            start_ms: preview.start_ms,
-                            end_ms: preview.end_ms,
-                            text: stable_text,
-                        });
-                    }
-                } else {
-                    emit_metric(
-                        &event_tx,
-                        "partial_asr_empty_at",
-                        preview.id,
-                        Some(clock.elapsed_ms()),
-                    );
-                }
-
-                preview.partial_gate.store(false, Ordering::SeqCst);
             }
             TranscriptionJob::Segment(mut segment) => {
                 emit_metric(
@@ -1777,11 +2617,14 @@ fn run_transcription_worker(
 
                 let Some(model) = get_or_load_local_model(&mut model, selected_model, &event_tx)
                 else {
+                    queue_metrics.record_started(&event_tx, &clock);
+                    queue_metrics.record_completed(&event_tx, &clock);
                     continue;
                 };
 
                 dump_segment_audio_if_requested(&segment, &event_tx);
 
+                queue_metrics.record_started(&event_tx, &clock);
                 segment.metrics.asr_started_at_ms = Some(clock.elapsed_ms());
                 emit_metric(
                     &event_tx,
@@ -1790,20 +2633,18 @@ fn run_transcription_worker(
                     segment.metrics.asr_started_at_ms,
                 );
 
-                if let Some(text) = transcribe_samples(model, &segment.samples, &event_tx) {
-                    segment.metrics.asr_completed_at_ms = Some(clock.elapsed_ms());
-                    emit_metric(
-                        &event_tx,
-                        "asr_completed_at",
-                        segment.id,
-                        segment.metrics.asr_completed_at_ms,
-                    );
+                let text = transcribe_samples(model, &segment.samples, &event_tx)
+                    .map(|text| suppress_pathological_repetitions(&text));
+                segment.metrics.asr_completed_at_ms = Some(clock.elapsed_ms());
+                queue_metrics.record_completed(&event_tx, &clock);
+                emit_metric(
+                    &event_tx,
+                    "asr_completed_at",
+                    segment.id,
+                    segment.metrics.asr_completed_at_ms,
+                );
 
-                    let text = suppress_pathological_repetitions(&final_text_with_stable_partial(
-                        partial_stability.remove(&(segment.source, segment.id)),
-                        text,
-                    ));
-
+                if let Some(text) = text {
                     let _ = event_tx.send(BackendEvent::Completed {
                         source: segment.source,
                         utterance_id: segment.id,
@@ -1811,6 +2652,34 @@ fn run_transcription_worker(
                         end_ms: segment.end_ms,
                         text: text.clone(),
                     });
+                }
+            }
+            TranscriptionJob::PartialSnapshot(snapshot) => {
+                let Some(model) = get_or_load_local_model(&mut model, selected_model, &event_tx)
+                else {
+                    queue_metrics.record_started(&event_tx, &clock);
+                    queue_metrics.record_completed(&event_tx, &clock);
+                    continue;
+                };
+
+                queue_metrics.record_started(&event_tx, &clock);
+                let text = transcribe_samples(model, &snapshot.samples, &event_tx)
+                    .map(|text| suppress_pathological_repetitions(&text));
+                queue_metrics.record_completed(&event_tx, &clock);
+
+                if let Some(text) = text {
+                    let text = text.trim().to_string();
+
+                    if !text.is_empty() {
+                        let _ = event_tx.send(BackendEvent::Partial {
+                            source: snapshot.source,
+                            utterance_id: snapshot.utterance_id,
+                            start_ms: snapshot.start_ms,
+                            end_ms: snapshot.end_ms,
+                            revision: snapshot.revision,
+                            text,
+                        });
+                    }
                 }
             }
             TranscriptionJob::Barrier(sender) => {
@@ -1860,6 +2729,7 @@ fn emit_metric(
             name,
             utterance_id: Some(utterance_id),
             at_ms,
+            value: None,
         });
     }
 }
@@ -2008,56 +2878,6 @@ fn transcribe_samples(
     }
 }
 
-fn stable_partial_text(
-    partial_stability: &mut HashMap<(TranscriptSource, u64), PartialStability>,
-    source: TranscriptSource,
-    utterance_id: u64,
-    raw_text: &str,
-) -> Option<String> {
-    let raw_text = raw_text.trim();
-    let state = partial_stability.entry((source, utterance_id)).or_default();
-
-    if state.previous_raw_text.is_empty() {
-        state.previous_raw_text = raw_text.to_string();
-        state.emitted_text = raw_text.to_string();
-        return Some(raw_text.to_string());
-    }
-
-    let stable_text = common_word_prefix(&state.previous_raw_text, raw_text);
-    state.previous_raw_text = raw_text.to_string();
-
-    if stable_text.len() > state.emitted_text.len() {
-        state.emitted_text = stable_text.clone();
-        Some(stable_text)
-    } else {
-        None
-    }
-}
-
-fn final_text_with_stable_partial(
-    stability: Option<PartialStability>,
-    final_text: String,
-) -> String {
-    let Some(stability) = stability else {
-        return final_text;
-    };
-
-    let emitted_words = words(&stability.emitted_text);
-    let final_words = words(&final_text);
-
-    if emitted_words.is_empty() || final_words.len() != emitted_words.len() + 1 {
-        return final_text;
-    }
-
-    if final_words[..emitted_words.len()] == emitted_words
-        && final_words.last() == emitted_words.last()
-    {
-        stability.emitted_text
-    } else {
-        final_text
-    }
-}
-
 fn suppress_pathological_repetitions(text: &str) -> String {
     let tokens = text.split_whitespace().collect::<Vec<_>>();
 
@@ -2098,20 +2918,6 @@ fn repetition_key(token: &str) -> String {
 
 fn is_pathological_repetition_key(key: &str) -> bool {
     !key.is_empty() && key.len() <= 3
-}
-
-fn common_word_prefix(left: &str, right: &str) -> String {
-    words(left)
-        .into_iter()
-        .zip(words(right))
-        .take_while(|(left_word, right_word)| left_word == right_word)
-        .map(|(word, _)| word)
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-fn words(text: &str) -> Vec<String> {
-    text.split_whitespace().map(ToString::to_string).collect()
 }
 
 fn ensure_parakeet_model() -> Result<PathBuf, Box<dyn std::error::Error>> {
@@ -2211,20 +3017,6 @@ fn emit_event(event: BackendEvent) {
             "utterance_id": utterance_id,
             "start_ms": start_ms
         }),
-        BackendEvent::Partial {
-            source,
-            utterance_id,
-            start_ms,
-            end_ms,
-            text,
-        } => json!({
-            "type": "transcription_partial",
-            "source": source.as_str(),
-            "utterance_id": utterance_id,
-            "start_ms": start_ms,
-            "end_ms": end_ms,
-            "text": text
-        }),
         BackendEvent::Completed {
             source,
             utterance_id,
@@ -2239,6 +3031,22 @@ fn emit_event(event: BackendEvent) {
             "end_ms": end_ms,
             "text": text
         }),
+        BackendEvent::Partial {
+            source,
+            utterance_id,
+            start_ms,
+            end_ms,
+            revision,
+            text,
+        } => json!({
+            "type": "transcription_partial",
+            "source": source.as_str(),
+            "utterance_id": utterance_id,
+            "start_ms": start_ms,
+            "end_ms": end_ms,
+            "revision": revision,
+            "text": text
+        }),
         BackendEvent::Error(message) => json!({
             "type": "capture_error",
             "message": message
@@ -2247,11 +3055,13 @@ fn emit_event(event: BackendEvent) {
             name,
             utterance_id,
             at_ms,
+            value,
         } => json!({
             "type": "pipeline_metric",
             "name": name,
             "utterance_id": utterance_id,
-            "at_ms": at_ms
+            "at_ms": at_ms,
+            "value": value
         }),
         BackendEvent::Stage(message) => json!({
             "type": "capture_stage",
@@ -2298,6 +3108,440 @@ mod tests {
     }
 
     #[test]
+    fn sample_window_segmentation_ignores_empty_audio() {
+        assert!(segment_sample_windows(0, ms_to_samples(30_000) as usize, 0).is_empty());
+    }
+
+    #[test]
+    fn sample_window_segmentation_applies_overlap_and_bounds_chunks() {
+        let chunk_samples = ms_to_samples(30_000) as usize;
+        let overlap_samples = ms_to_samples(2_000) as usize;
+        let total_samples = ms_to_samples(75_000) as usize;
+        let windows = segment_sample_windows(total_samples, chunk_samples, overlap_samples);
+
+        assert!(windows.len() > 1);
+        assert!(windows.iter().all(|window| window.len() <= chunk_samples));
+        assert_eq!(windows[0].start_sample, 0);
+        assert_eq!(windows[0].end_sample, chunk_samples);
+        assert_eq!(
+            windows[1].start_sample,
+            chunk_samples.saturating_sub(overlap_samples)
+        );
+        assert_eq!(windows.last().map(|window| window.end_sample), Some(total_samples));
+    }
+
+    #[test]
+    fn sample_window_segmentation_is_monotonic() {
+        let windows = segment_sample_windows(
+            ms_to_samples(120_000) as usize,
+            ms_to_samples(30_000) as usize,
+            ms_to_samples(2_000) as usize,
+        );
+
+        for pair in windows.windows(2) {
+            assert!(pair[0].index < pair[1].index);
+            assert!(pair[0].start_sample < pair[1].start_sample);
+            assert!(pair[0].end_sample < pair[1].end_sample);
+            assert!(pair[0].start_sample < pair[0].end_sample);
+        }
+    }
+
+    #[test]
+    fn direct_wav_uses_single_window_for_short_audio() {
+        let windows = direct_wav_sample_windows(ms_to_samples(29_000) as usize);
+
+        assert_eq!(windows.len(), 1);
+        assert_eq!(samples_to_ms(windows[0].len() as u64), 29_000);
+    }
+
+    #[test]
+    fn direct_wav_chunks_long_audio_before_parakeet() {
+        let windows = direct_wav_sample_windows(ms_to_samples(75_000) as usize);
+
+        assert!(windows.len() > 1);
+        assert!(windows
+            .iter()
+            .all(|window| samples_to_ms(window.len() as u64) <= DIRECT_WAV_CHUNK_MS));
+    }
+
+    #[test]
+    fn live_partial_snapshot_waits_for_first_threshold() {
+        let clock = PipelineClock::new();
+        let mut pipeline = SourcePipeline::new(
+            TranscriptSource::System,
+            clock,
+            EndpointConfig::default(),
+        );
+        let outputs = pipeline.push_frame(test_frame(
+            TranscriptSource::System,
+            samples_for_ms(1_470, 0.05),
+        ));
+
+        assert!(!outputs
+            .iter()
+            .any(|output| matches!(output, PipelineOutput::PartialSnapshot(_))));
+    }
+
+    #[test]
+    fn live_partial_snapshot_emits_after_first_threshold_and_interval() {
+        let clock = PipelineClock::new();
+        let mut pipeline = SourcePipeline::new(
+            TranscriptSource::System,
+            clock,
+            EndpointConfig::default(),
+        );
+        let first_outputs = pipeline.push_frame(test_frame(
+            TranscriptSource::System,
+            samples_for_ms(1_500, 0.05),
+        ));
+        let second_outputs = pipeline.push_frame(test_frame(
+            TranscriptSource::System,
+            samples_for_ms(1_470, 0.05),
+        ));
+        let third_outputs = pipeline.push_frame(test_frame(
+            TranscriptSource::System,
+            samples_for_ms(30, 0.05),
+        ));
+
+        let first_partial = first_outputs.iter().find_map(|output| match output {
+            PipelineOutput::PartialSnapshot(snapshot) => Some(snapshot),
+            _ => None,
+        });
+        let early_second_partial = second_outputs
+            .iter()
+            .any(|output| matches!(output, PipelineOutput::PartialSnapshot(_)));
+        let second_partial = third_outputs.iter().find_map(|output| match output {
+            PipelineOutput::PartialSnapshot(snapshot) => Some(snapshot),
+            _ => None,
+        });
+
+        assert_eq!(first_partial.map(|snapshot| snapshot.revision), Some(1));
+        assert!(!early_second_partial);
+        assert_eq!(second_partial.map(|snapshot| snapshot.revision), Some(2));
+    }
+
+    #[test]
+    fn live_partial_snapshot_and_final_segment_share_utterance_id() {
+        let clock = PipelineClock::new();
+        let mut pipeline = SourcePipeline::new(
+            TranscriptSource::System,
+            clock,
+            EndpointConfig::default(),
+        );
+        let partial_id = pipeline
+            .push_frame(test_frame(
+                TranscriptSource::System,
+                samples_for_ms(1_500, 0.05),
+            ))
+            .into_iter()
+            .find_map(|output| match output {
+                PipelineOutput::PartialSnapshot(snapshot) => Some(snapshot.utterance_id),
+                _ => None,
+            })
+            .expect("partial should emit");
+        let segment_id = pipeline
+            .push_frame(test_frame(
+                TranscriptSource::System,
+                samples_for_ms(DEFAULT_END_SILENCE_MS, 0.0),
+            ))
+            .into_iter()
+            .find_map(|output| match output {
+                PipelineOutput::Segment(segment) => Some(segment.id),
+                _ => None,
+            })
+            .expect("final segment should emit");
+
+        assert_eq!(partial_id, segment_id);
+    }
+
+    #[test]
+    fn queue_guard_skips_partial_snapshot_when_asr_is_busy() {
+        let clock = PipelineClock::new();
+        let (job_tx, job_rx) = mpsc::channel();
+        let (event_tx, _event_rx) = mpsc::channel();
+        let queue_metrics = AsrQueueMetrics::default();
+        let snapshot = SpeechPartialSnapshot {
+            source: TranscriptSource::System,
+            utterance_id: 1,
+            start_ms: 0,
+            end_ms: 1_500,
+            revision: 1,
+            queued_at_ms: clock.elapsed_ms(),
+            samples: samples_for_ms(1_500, 0.05),
+        };
+
+        queue_metrics.record_queued(clock.elapsed_ms(), &event_tx, &clock);
+        enqueue_partial_snapshot_job(&job_tx, snapshot, &queue_metrics, &event_tx, &clock);
+
+        assert!(job_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn stop_flush_does_not_create_partial_snapshot() {
+        let clock = PipelineClock::new();
+        let mut pipeline = SourcePipeline::new(
+            TranscriptSource::System,
+            clock,
+            EndpointConfig::default(),
+        );
+        let _ = pipeline.push_frame(test_frame(
+            TranscriptSource::System,
+            samples_for_ms(1_500, 0.05),
+        ));
+
+        let segment = pipeline.flush().expect("stop flush should produce final segment");
+
+        assert_eq!(segment.id, 1);
+    }
+
+    fn test_direct_chunk(index: usize, transcript: &str) -> DirectWavChunkSummary {
+        DirectWavChunkSummary {
+            index,
+            start_ms: index as u64 * 28_000,
+            end_ms: index as u64 * 28_000 + 30_000,
+            audio_duration_ms: 30_000,
+            samples: ms_to_samples(30_000) as usize,
+            asr_ms: 1,
+            transcript: transcript.to_string(),
+        }
+    }
+
+    #[test]
+    fn chunk_stitching_removes_exact_suffix_prefix_overlap() {
+        let stitched = stitch_direct_wav_chunks(&[
+            test_direct_chunk(
+                0,
+                "Alice looked at the White Rabbit and hurried down the hall",
+            ),
+            test_direct_chunk(
+                1,
+                "White Rabbit and hurried down the hall after the sound",
+            ),
+        ]);
+
+        assert_eq!(
+            stitched.transcript,
+            "Alice looked at the White Rabbit and hurried down the hall\nafter the sound"
+        );
+        assert_eq!(stitched.chunks[1].strategy, StitchStrategy::Exact);
+        assert_eq!(stitched.chunks[1].dropped_prefix_words, 7);
+        assert_eq!(stitched.chunks[1].overlap_words, 7);
+    }
+
+    #[test]
+    fn chunk_stitching_matches_case_and_punctuation_but_preserves_next_text() {
+        let stitched = stitch_direct_wav_chunks(&[
+            test_direct_chunk(0, "She said, Rabbit with pink eyes came close."),
+            test_direct_chunk(1, "rabbit with pink eyes came close and hurried away."),
+        ]);
+
+        assert_eq!(
+            stitched.transcript,
+            "She said, Rabbit with pink eyes came close.\nand hurried away."
+        );
+        assert_eq!(stitched.chunks[1].strategy, StitchStrategy::Exact);
+        assert_eq!(stitched.chunks[1].dropped_prefix_words, 6);
+    }
+
+    #[test]
+    fn chunk_stitching_does_not_merge_short_common_phrases() {
+        let stitched = stitch_direct_wav_chunks(&[
+            test_direct_chunk(0, "We are nearly at the end"),
+            test_direct_chunk(1, "the end begins again"),
+        ]);
+
+        assert_eq!(
+            stitched.transcript,
+            "We are nearly at the end\nthe end begins again"
+        );
+        assert_eq!(stitched.chunks[1].strategy, StitchStrategy::Append);
+        assert_eq!(stitched.chunks[1].dropped_prefix_words, 0);
+    }
+
+    #[test]
+    fn chunk_stitching_lcs_fallback_handles_inserted_boundary_word() {
+        let stitched = stitch_direct_wav_chunks(&[
+            test_direct_chunk(0, "Alice saw the white rabbit run under the hedge"),
+            test_direct_chunk(1, "white rabbit quickly run under the hedge and vanished"),
+        ]);
+
+        assert_eq!(
+            stitched.transcript,
+            "Alice saw the white rabbit run under the hedge\nand vanished"
+        );
+        assert_eq!(stitched.chunks[1].strategy, StitchStrategy::Lcs);
+        assert_eq!(stitched.chunks[1].overlap_words, 6);
+        assert_eq!(stitched.chunks[1].dropped_prefix_words, 7);
+    }
+
+    #[test]
+    fn chunk_stitching_replaces_short_flawed_previous_boundary_tail() {
+        let stitched = stitch_direct_wav_chunks(&[
+            test_direct_chunk(
+                0,
+                "It did not sound at all the right word. But I shall have to ask them what if the name of the",
+            ),
+            test_direct_chunk(
+                1,
+                "But I shall have to ask them what the name of the country is, you know.",
+            ),
+        ]);
+
+        assert_eq!(
+            stitched.transcript,
+            "It did not sound at all the right word.\nBut I shall have to ask them what the name of the country is, you know."
+        );
+        assert_eq!(stitched.chunks[1].strategy, StitchStrategy::Lcs);
+        assert_eq!(stitched.chunks[1].dropped_prefix_words, 0);
+        assert!(stitched.chunks[1].dropped_previous_suffix_words > 0);
+    }
+
+    #[test]
+    fn chunk_stitching_avoids_repeated_phrase_far_from_boundary() {
+        let stitched = stitch_direct_wav_chunks(&[
+            test_direct_chunk(
+                0,
+                "north south east west begins the scene before a small quiet tail",
+            ),
+            test_direct_chunk(1, "north south east west then the story continues"),
+        ]);
+
+        assert_eq!(
+            stitched.transcript,
+            "north south east west begins the scene before a small quiet tail\nnorth south east west then the story continues"
+        );
+        assert_eq!(stitched.chunks[1].strategy, StitchStrategy::Append);
+    }
+
+    #[test]
+    fn chunk_stitching_does_not_follow_sparse_lcs_deep_into_next_chunk() {
+        let stitched = stitch_direct_wav_chunks(&[
+            test_direct_chunk(
+                0,
+                "She was walking with Dinah before another long passage and the white rabbit was still in sight hurrying down it.",
+            ),
+            test_direct_chunk(
+                1,
+                "Alice opened the door and found it led into a small passage, not much larger than a rat hole. And even if my head would go through.",
+            ),
+        ]);
+
+        assert!(stitched
+            .transcript
+            .contains("Alice opened the door and found it led into a small passage"));
+        assert_eq!(stitched.chunks[1].strategy, StitchStrategy::Append);
+        assert_eq!(stitched.chunks[1].dropped_prefix_words, 0);
+    }
+
+    #[test]
+    fn chunk_stitching_ignores_empty_chunks_safely() {
+        let stitched = stitch_direct_wav_chunks(&[
+            test_direct_chunk(0, ""),
+            test_direct_chunk(1, "Only the useful chunk remains."),
+            test_direct_chunk(2, ""),
+        ]);
+
+        assert_eq!(stitched.transcript, "Only the useful chunk remains.");
+        assert_eq!(stitched.raw_transcript, "Only the useful chunk remains.");
+        assert_eq!(stitched.chunks.len(), 3);
+        assert!(stitched.chunks[0].transcript.is_empty());
+        assert_eq!(stitched.chunks[1].strategy, StitchStrategy::Append);
+    }
+
+    fn test_session(source: TranscriptSource, max_preroll_ms: u64) -> ActiveSession {
+        let clock = PipelineClock::new();
+        let endpoint_config = EndpointConfig::default();
+        let mut batchers = HashMap::new();
+        batchers.insert(source, SourcePipeline::new(source, clock, endpoint_config));
+
+        ActiveSession {
+            _microphone_capture: None,
+            system_thread: None,
+            running: Arc::new(AtomicBool::new(true)),
+            batchers,
+            sources: vec![source],
+            accepting_audio: false,
+            saw_audio: false,
+            preroll_frames: VecDeque::new(),
+            preroll_ms: 0,
+            max_preroll_ms,
+        }
+    }
+
+    #[test]
+    fn parse_prepare_defaults_to_model_only() {
+        let command = parse_daemon_command(r#"{"type":"prepare","sources":["system"]}"#)
+            .expect("prepare command parses");
+
+        match command {
+            DaemonCommand::Prepare {
+                sources,
+                hot_capture,
+            } => {
+                assert_eq!(sources, vec![TranscriptSource::System]);
+                assert!(!hot_capture);
+            }
+            _ => panic!("expected prepare command"),
+        }
+    }
+
+    #[test]
+    fn parse_prepare_can_explicitly_arm_hot_capture() {
+        let command =
+            parse_daemon_command(r#"{"type":"prepare","sources":["system"],"hotCapture":true}"#)
+                .expect("prepare command parses");
+
+        match command {
+            DaemonCommand::Prepare {
+                sources,
+                hot_capture,
+            } => {
+                assert_eq!(sources, vec![TranscriptSource::System]);
+                assert!(hot_capture);
+            }
+            _ => panic!("expected prepare command"),
+        }
+    }
+
+    #[test]
+    fn hot_capture_preroll_keeps_only_recent_frames() {
+        let mut session = test_session(TranscriptSource::System, 500);
+
+        session.buffer_preroll_frame(test_frame(
+            TranscriptSource::System,
+            samples_for_ms(300, 0.01),
+        ));
+        session.buffer_preroll_frame(test_frame(
+            TranscriptSource::System,
+            samples_for_ms(300, 0.02),
+        ));
+
+        assert_eq!(session.preroll_frames.len(), 1);
+        assert_eq!(session.preroll_ms, 300);
+        assert_eq!(
+            session
+                .preroll_frames
+                .front()
+                .and_then(|frame| frame.samples.first())
+                .copied(),
+            Some(0.02)
+        );
+    }
+
+    #[test]
+    fn hot_capture_preroll_ignores_unselected_sources() {
+        let mut session = test_session(TranscriptSource::System, 500);
+
+        session.buffer_preroll_frame(test_frame(
+            TranscriptSource::Microphone,
+            samples_for_ms(300, 0.01),
+        ));
+
+        assert!(session.preroll_frames.is_empty());
+        assert_eq!(session.preroll_ms, 0);
+    }
+
+    #[test]
     fn vad_closes_after_configured_silence() {
         let clock = PipelineClock::new();
         let mut detector = EndpointDetector::new(EndpointConfig::default());
@@ -2309,13 +3553,13 @@ mod tests {
 
         assert!(utterances.is_empty());
 
-        for _ in 0..(END_SILENCE_MS / TEST_FRAME_MS + 1) {
+        for _ in 0..(DEFAULT_END_SILENCE_MS / TEST_FRAME_MS + 1) {
             utterances.extend(detector.push_samples(&silence_frame(), &clock));
         }
 
         assert_eq!(utterances.len(), 1);
         assert_eq!(utterances[0].endpoint_reason, EndpointReason::Silence);
-        assert!(utterances[0].samples.len() >= ms_to_samples(MIN_SPEECH_MS) as usize);
+        assert!(utterances[0].samples.len() >= ms_to_samples(DEFAULT_MIN_SPEECH_MS) as usize);
     }
 
     #[test]
@@ -2328,7 +3572,7 @@ mod tests {
             utterances.extend(detector.push_samples(&speech_frame(), &clock));
         }
 
-        for _ in 0..((END_SILENCE_MS / TEST_FRAME_MS) - 2) {
+        for _ in 0..((DEFAULT_END_SILENCE_MS / TEST_FRAME_MS) - 2) {
             utterances.extend(detector.push_samples(&silence_frame(), &clock));
         }
 
@@ -2349,7 +3593,7 @@ mod tests {
         let mut detector = EndpointDetector::new(EndpointConfig::default());
         let mut utterances = Vec::new();
 
-        for _ in 0..(MAX_UTTERANCE_MS / TEST_FRAME_MS + 1) {
+        for _ in 0..(DEFAULT_MAX_UTTERANCE_MS / TEST_FRAME_MS + 1) {
             utterances.extend(detector.push_samples(&speech_frame(), &clock));
             if !utterances.is_empty() {
                 break;
@@ -2358,6 +3602,44 @@ mod tests {
 
         assert_eq!(utterances.len(), 1);
         assert_eq!(utterances[0].endpoint_reason, EndpointReason::MaxDuration);
+    }
+
+    #[test]
+    fn continuous_one_hour_speech_stays_bounded() {
+        let clock = PipelineClock::new();
+        let mut pipeline = SourcePipeline::new(
+            TranscriptSource::System,
+            clock,
+            EndpointConfig::default(),
+        );
+        let frames = (60 * 60 * 1000) / VAD_FRAME_MS;
+        let max_allowed_ms = DEFAULT_MAX_UTTERANCE_MS + VAD_FRAME_MS;
+        let mut segment_count = 0;
+        let mut previous_end_ms = 0;
+
+        for _ in 0..frames {
+            for output in pipeline.push_frame(test_frame(
+                TranscriptSource::System,
+                speech_frame_samples(),
+            )) {
+                if let PipelineOutput::Segment(segment) = output {
+                    let segment_ms = segment.end_ms.saturating_sub(segment.start_ms);
+                    assert!(segment_ms <= max_allowed_ms);
+                    assert!(segment.start_ms >= previous_end_ms);
+                    previous_end_ms = segment.end_ms;
+                    segment_count += 1;
+                }
+            }
+        }
+
+        if let Some(segment) = pipeline.flush() {
+            let segment_ms = segment.end_ms.saturating_sub(segment.start_ms);
+            assert!(segment_ms <= max_allowed_ms);
+            assert!(segment.start_ms >= previous_end_ms);
+            segment_count += 1;
+        }
+
+        assert!(segment_count > 400);
     }
 
     #[test]
@@ -2377,7 +3659,11 @@ mod tests {
     #[test]
     fn source_pipeline_uses_same_endpoint_detector() {
         let clock = PipelineClock::new();
-        let mut pipeline = SourcePipeline::new(clock, EndpointConfig::default());
+        let mut pipeline = SourcePipeline::new(
+            TranscriptSource::System,
+            clock,
+            EndpointConfig::default(),
+        );
         let mut segments = Vec::new();
 
         collect_segments_into(
@@ -2405,42 +3691,51 @@ mod tests {
     }
 
     #[test]
-    fn source_pipeline_emits_live_preview_before_endpoint() {
+    fn source_pipeline_does_not_emit_preview_before_endpoint() {
         let clock = PipelineClock::new();
-        let mut pipeline = SourcePipeline::new(clock, EndpointConfig::default());
+        let mut pipeline = SourcePipeline::new(
+            TranscriptSource::System,
+            clock,
+            EndpointConfig::default(),
+        );
         let outputs = pipeline.push_frame(test_frame(
             TranscriptSource::System,
             samples_for_ms(900, 0.05),
         ));
 
-        let previews = outputs
-            .into_iter()
-            .filter_map(|output| match output {
-                PipelineOutput::Preview(preview) => Some(preview),
-                PipelineOutput::SpeechStarted { .. } | PipelineOutput::Segment(_) => None,
-            })
-            .collect::<Vec<_>>();
-
-        assert_eq!(previews.len(), 1);
-        assert_eq!(previews[0].id, 1);
-        assert!(previews[0].end_ms >= LIVE_PARTIAL_MIN_MS);
+        assert!(outputs.iter().any(|output| matches!(
+            output,
+            PipelineOutput::SpeechStarted {
+                source: TranscriptSource::System,
+                utterance_id: 1,
+                start_ms: 0,
+            }
+        )));
+        assert!(!outputs.iter().any(|output| matches!(
+            output,
+            PipelineOutput::Segment(_)
+        )));
     }
 
     #[test]
-    fn source_pipeline_final_segment_reuses_preview_id() {
+    fn source_pipeline_final_segment_reuses_speech_started_id() {
         let clock = PipelineClock::new();
-        let mut pipeline = SourcePipeline::new(clock, EndpointConfig::default());
-        let preview_id = pipeline
+        let mut pipeline = SourcePipeline::new(
+            TranscriptSource::System,
+            clock,
+            EndpointConfig::default(),
+        );
+        let utterance_id = pipeline
             .push_frame(test_frame(
                 TranscriptSource::System,
                 samples_for_ms(900, 0.05),
             ))
             .into_iter()
             .find_map(|output| match output {
-                PipelineOutput::Preview(preview) => Some(preview.id),
-                PipelineOutput::SpeechStarted { .. } | PipelineOutput::Segment(_) => None,
+                PipelineOutput::SpeechStarted { utterance_id, .. } => Some(utterance_id),
+                PipelineOutput::PartialSnapshot(_) | PipelineOutput::Segment(_) => None,
             })
-            .expect("preview should emit");
+            .expect("speech-started should emit");
         let mut segments = Vec::new();
 
         collect_segments_into(
@@ -2452,13 +3747,17 @@ mod tests {
         );
 
         assert_eq!(segments.len(), 1);
-        assert_eq!(segments[0].id, preview_id);
+        assert_eq!(segments[0].id, utterance_id);
     }
 
     #[test]
-    fn source_pipeline_emits_speech_started_before_live_preview() {
+    fn source_pipeline_emits_speech_started_once_before_segment() {
         let clock = PipelineClock::new();
-        let mut pipeline = SourcePipeline::new(clock, EndpointConfig::default());
+        let mut pipeline = SourcePipeline::new(
+            TranscriptSource::System,
+            clock,
+            EndpointConfig::default(),
+        );
         let outputs = pipeline.push_frame(test_frame(
             TranscriptSource::System,
             samples_for_ms(900, 0.05),
@@ -2472,7 +3771,6 @@ mod tests {
                 start_ms: 0,
             })
         ));
-        assert!(matches!(outputs.get(1), Some(PipelineOutput::Preview(_))));
 
         let repeated_outputs = pipeline.push_frame(test_frame(
             TranscriptSource::System,
@@ -2483,97 +3781,6 @@ mod tests {
             output,
             PipelineOutput::SpeechStarted { .. }
         )));
-    }
-
-    #[test]
-    fn stable_partial_text_only_emits_prefix_shared_by_adjacent_decodes() {
-        let mut stability = HashMap::new();
-
-        assert_eq!(
-            stable_partial_text(
-                &mut stability,
-                TranscriptSource::System,
-                1,
-                "The fervently of it is is is is is unique"
-            ),
-            Some("The fervently of it is is is is is unique".to_string())
-        );
-        assert_eq!(
-            stable_partial_text(
-                &mut stability,
-                TranscriptSource::System,
-                1,
-                "The fervently of it is is unique in the sense"
-            ),
-            None
-        );
-        assert_eq!(
-            stable_partial_text(
-                &mut stability,
-                TranscriptSource::System,
-                1,
-                "The fervently of it is is unique in the sense that"
-            ),
-            Some("The fervently of it is is unique in the sense".to_string())
-        );
-    }
-
-    #[test]
-    fn stable_partial_text_is_keyed_by_source_and_utterance() {
-        let mut stability = HashMap::new();
-
-        assert_eq!(
-            stable_partial_text(
-                &mut stability,
-                TranscriptSource::System,
-                1,
-                "speaker first guess"
-            ),
-            Some("speaker first guess".to_string())
-        );
-        assert_eq!(
-            stable_partial_text(
-                &mut stability,
-                TranscriptSource::Microphone,
-                1,
-                "microphone first guess"
-            ),
-            Some("microphone first guess".to_string())
-        );
-        assert_eq!(
-            stable_partial_text(
-                &mut stability,
-                TranscriptSource::System,
-                1,
-                "speaker first guess continues"
-            ),
-            None
-        );
-        assert_eq!(
-            stable_partial_text(
-                &mut stability,
-                TranscriptSource::Microphone,
-                1,
-                "microphone first guess continues"
-            ),
-            None
-        );
-    }
-
-    #[test]
-    fn final_text_reuses_stable_partial_when_final_only_duplicates_last_word() {
-        let stability = PartialStability {
-            emitted_text: "it happened with like Vim and".to_string(),
-            previous_raw_text: "it happened with like Vim and".to_string(),
-        };
-
-        assert_eq!(
-            final_text_with_stable_partial(
-                Some(stability),
-                "it happened with like Vim and and".to_string()
-            ),
-            "it happened with like Vim and"
-        );
     }
 
     #[test]
@@ -2609,7 +3816,11 @@ mod tests {
     #[test]
     fn metric_timestamps_are_monotonic_for_endpointing() {
         let clock = PipelineClock::new();
-        let mut pipeline = SourcePipeline::new(clock, EndpointConfig::default());
+        let mut pipeline = SourcePipeline::new(
+            TranscriptSource::System,
+            clock,
+            EndpointConfig::default(),
+        );
         let mut segments = Vec::new();
 
         collect_segments_into(
