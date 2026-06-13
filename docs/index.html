@@ -177,11 +177,14 @@
       }
 
       .download-options summary {
+        align-items: center;
         color: var(--action-text);
         cursor: pointer;
         display: inline-flex;
         font-size: 0.84rem;
         font-weight: 600;
+        gap: 0.45rem;
+        line-height: 1.2;
         list-style: none;
         padding: 0.15rem 0;
       }
@@ -191,14 +194,20 @@
       }
 
       .download-options summary::after {
-        content: "⌄";
-        display: inline-block;
-        margin-left: 0.45rem;
+        border-bottom: 2px solid currentColor;
+        border-right: 2px solid currentColor;
+        content: "";
+        display: block;
+        flex: 0 0 auto;
+        height: 0.42rem;
         transition: transform 0.2s ease;
+        transform: rotate(45deg);
+        transform-origin: center;
+        width: 0.42rem;
       }
 
       .download-options[open] summary::after {
-        transform: rotate(180deg);
+        transform: rotate(225deg);
       }
 
       .download-options summary:hover {
