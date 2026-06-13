@@ -167,4 +167,27 @@ describe('download page hero autodetect', () => {
     expect(primaryDownload(dom).label).toContain('Download Caul Beta .deb for Ubuntu x64');
     expect(primaryDownload(dom).href).toContain('caul-beta-x64.deb');
   });
+
+  it('shows and copies the Homebrew command with a local-file fallback', async () => {
+    const dom = await loadDownloadPage({ architecture: 'arm64', platform: 'macOS' });
+    const document = dom.window.document;
+    let execCommandName = '';
+
+    document.execCommand = (command) => {
+      execCommandName = command;
+      return true;
+    };
+
+    expect(dom.window.getComputedStyle(document.getElementById('homebrew-code')).display).not.toBe('none');
+
+    document.getElementById('homebrew-box').click();
+
+    await new Promise((resolveTick) => {
+      dom.window.setTimeout(resolveTick, 0);
+    });
+
+    expect(document.getElementById('homebrew-code').textContent).toContain('brew tap apotenza92/tap');
+    expect(execCommandName).toBe('copy');
+    expect(document.getElementById('homebrew-copy').textContent).toContain('Copied');
+  });
 });
