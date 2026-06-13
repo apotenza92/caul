@@ -194,20 +194,20 @@
       }
 
       .download-options summary::after {
-        border-bottom: 2px solid currentColor;
-        border-right: 2px solid currentColor;
+        background: currentColor;
+        clip-path: polygon(50% 72%, 12% 34%, 26% 20%, 50% 44%, 74% 20%, 88% 34%);
         content: "";
         display: block;
         flex: 0 0 auto;
-        height: 0.42rem;
+        height: 0.58rem;
         transition: transform 0.2s ease;
-        transform: rotate(45deg);
-        transform-origin: center;
-        width: 0.42rem;
+        transform: rotate(0deg);
+        transform-origin: 50% 50%;
+        width: 0.72rem;
       }
 
       .download-options[open] summary::after {
-        transform: rotate(225deg);
+        transform: rotate(180deg);
       }
 
       .download-options summary:hover {
