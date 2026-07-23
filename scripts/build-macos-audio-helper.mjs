@@ -89,17 +89,28 @@ function resolveDeveloperDirCandidates() {
     return [{ label: explicitDeveloperDir, developerDir: explicitDeveloperDir }];
   }
 
-  const candidates = [{ label: 'selected Swift toolchain', developerDir: null }];
+  const installedXcodeCandidates = [];
 
   for (const xcodePath of ['/Applications/Xcode.app', '/Applications/Xcode-beta.app']) {
     const developerDir = `${xcodePath}/Contents/Developer`;
 
     if (existsSync(developerDir)) {
-      candidates.push({ label: xcodePath, developerDir });
+      installedXcodeCandidates.push({ label: xcodePath, developerDir });
     }
   }
 
-  return candidates;
+  const selectedToolchain = { label: 'selected Swift toolchain', developerDir: null };
+
+  if (selectedDeveloperDirectoryUsesCommandLineTools() && installedXcodeCandidates.length > 0) {
+    return [...installedXcodeCandidates, selectedToolchain];
+  }
+
+  return [selectedToolchain, ...installedXcodeCandidates];
+}
+
+function selectedDeveloperDirectoryUsesCommandLineTools() {
+  const result = spawnSync('xcode-select', ['-p'], { encoding: 'utf8' });
+  return result.status === 0 && result.stdout.trim().endsWith('/CommandLineTools');
 }
 
 function canFallbackFromSwiftFailure(result) {

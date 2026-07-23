@@ -26,9 +26,12 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    environment: github-pages
     steps:
       - name: Checkout Caul
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Prepare public site artefact
         run: |
@@ -44,7 +47,7 @@ jobs:
           cp assets/icons/beta/dark/icon-rounded.png _site/assets/icons/beta/dark/icon-rounded.png
 
       - name: Checkout public Pages repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: apotenza92/apotenza92.github.io
           path: pages-repo

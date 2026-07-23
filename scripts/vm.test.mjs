@@ -172,7 +172,7 @@ describe('VM summary helpers', () => {
 
     const summary = createVmE2eSummary({
       profile: 'win',
-      vmName: 'Windows 11 ARM',
+      vmName: 'Windows 11',
       packagePath: 'C:\\Users\\alex\\caul-e2e\\release\\Caul-windows-arm64-setup.exe',
       packageVersion: '0.1.20',
       gates

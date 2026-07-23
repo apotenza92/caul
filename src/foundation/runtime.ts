@@ -4,7 +4,6 @@ export type RuntimeContext = {
   isMac: boolean;
   appChannel?: 'stable' | 'beta' | 'dev';
   appName?: string;
-  vmTestingTarget: string;
 };
 
 export const browserRuntimeContext: RuntimeContext = {
@@ -12,8 +11,7 @@ export const browserRuntimeContext: RuntimeContext = {
   arch: 'unknown',
   isMac: false,
   appChannel: 'stable',
-  appName: 'Caul',
-  vmTestingTarget: 'Parallels macOS VM'
+  appName: 'Caul'
 };
 
 export async function getRuntimeContext(): Promise<RuntimeContext> {

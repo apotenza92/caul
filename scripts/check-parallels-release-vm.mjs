@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { resolveVmProfile } from './vm/profiles.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -9,14 +10,13 @@ const profiles = {
     envName: 'CAUL_FEDORA_VM_NAME',
     probe: ['/usr/bin/uname', '-a']
   },
+  macos: {
+    probe: ['/usr/bin/uname', '-a']
+  },
   linux: {
-    defaultName: 'Ubuntu 24.04.3 ARM64',
-    envName: 'CAUL_LINUX_VM_NAME',
     probe: ['/usr/bin/uname', '-a']
   },
   win: {
-    defaultName: 'Windows 11 ARM',
-    envName: 'CAUL_WINDOWS_VM_NAME',
     probe: ['cmd.exe', '/c', 'ver']
   }
 };
@@ -25,11 +25,13 @@ const profileName = process.argv[2];
 const profile = profiles[profileName];
 
 if (!profile) {
-  console.error('Usage: node scripts/check-parallels-release-vm.mjs <win|linux|fedora>');
+  console.error('Usage: node scripts/check-parallels-release-vm.mjs <macos|win|linux|fedora>');
   process.exit(1);
 }
 
-const vmName = process.env[profile.envName] ?? profile.defaultName;
+const vmName = profileName === 'fedora'
+  ? process.env[profile.envName] ?? profile.defaultName
+  : resolveVmProfile(profileName).vmName;
 
 async function runPrlctl(args, options = {}) {
   try {

@@ -1,34 +1,139 @@
 name: Build and Release
 
 permissions:
-  contents: write
+  contents: read
 
 on:
   push:
     tags:
       - "v*"
-  workflow_dispatch:
 
 env:
-  NODE_VERSION: "20"
+  NODE_VERSION: "22"
   RUST_TOOLCHAIN: "1.88"
 
+concurrency:
+  group: caul-release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  build-macos:
-    name: Build macOS ARM64
-    runs-on: macos-26
+  prepare:
+    name: Validate release ref
+    runs-on: ubuntu-24.04
+    outputs:
+      channel: ${{ steps.release.outputs.channel }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+      release_environment: ${{ steps.release.outputs.release_environment }}
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref_name }}
+          persist-credentials: false
+
+      - name: Verify tag commit is on main
+        env:
+          CAUL_RELEASE_TAG: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$DEFAULT_BRANCH" != main ]]; then
+            echo "Repository default branch $DEFAULT_BRANCH is not the approved release source main." >&2
+            exit 1
+          fi
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          TAG_COMMIT="$(git rev-parse "refs/tags/$CAUL_RELEASE_TAG^{commit}")"
+          MAIN_COMMIT="$(git rev-parse refs/remotes/origin/main)"
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test "$TAG_COMMIT" = "$RELEASE_SHA"
+          if ! git merge-base --is-ancestor "$TAG_COMMIT" "$MAIN_COMMIT"; then
+            echo "Release tag $CAUL_RELEASE_TAG does not point to a commit on main." >&2
+            exit 1
+          fi
+
+      - name: Validate tag and package version
+        id: release
+        env:
+          CAUL_RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const packageJson = require('./package.json');
+          const tag = process.env.CAUL_RELEASE_TAG;
+          const stable = /^v\d+\.\d+\.\d+$/.test(tag);
+          const prerelease = /^v\d+\.\d+\.\d+-beta\.[1-9]\d*$/.test(tag);
+          if (!stable && !prerelease) {
+            throw new Error(`Release ref must be vX.Y.Z or vX.Y.Z-beta.N with N >= 1; received ${tag}`);
+          }
+          if (packageJson.version !== tag.slice(1)) {
+            throw new Error(`Tag ${tag} does not match package version ${packageJson.version}`);
+          }
+          const values = stable
+            ? ['channel=stable', 'prerelease=false', 'release_environment=stable-release']
+            : ['channel=beta', 'prerelease=true', 'release_environment=beta-release'];
+          values.push(`tag=${tag}`, `version=${tag.slice(1)}`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `${values.join('\n')}\n`);
+          NODE
+
+  release-policy:
+    name: Verify hosted release policy
+    needs: prepare
+    runs-on: ubuntu-24.04
+    environment: release-policy
+    permissions:
+      contents: read
+    steps:
+      - name: Require immutable GitHub releases
+        env:
+          GH_TOKEN: ${{ secrets.IMMUTABLE_RELEASES_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN" || {
+            echo 'IMMUTABLE_RELEASES_READ_TOKEN is required in the release-policy environment.' >&2
+            exit 1
+          }
+          enabled="$(gh api \
+            --header 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/immutable-releases" \
+            --jq .enabled)"
+          if [[ "$enabled" != true ]]; then
+            echo 'Immutable GitHub releases must be enabled before publication.' >&2
+            exit 1
+          fi
+
+  quality:
+    name: Required checks
+    needs: prepare
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.prepare.outputs.tag }}
+
+  build-macos:
+    name: Build macOS ARM64
+    needs: [prepare, quality]
+    runs-on: macos-26
+    environment: release-signing
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
@@ -36,47 +141,51 @@ jobs:
         run: npm ci
         timeout-minutes: 10
 
-      - name: Build macOS artefacts
+      - name: Prepare macOS resources
+        run: npm run package:prepare:mac
+        timeout-minutes: 45
+
+      - name: Build, sign, notarise and verify macOS artefacts
         run: |
           set -euo pipefail
 
-          npm run dist:mac
+          npm run release:mac:signed -- --channel "$CAUL_RELEASE_CHANNEL" --skip-prepare
 
-          if [[ "$GITHUB_REF_NAME" != *alpha* && "$GITHUB_REF_NAME" != *beta* && "$GITHUB_REF_NAME" != *rc* ]]; then
+          if [[ "$CAUL_RELEASE_CHANNEL" == stable ]]; then
             mkdir -p release/stable-yml-backup
             cp release/*.yml release/stable-yml-backup/ || true
-            FORCE_BETA_BUILD=true npx electron-builder --config electron-builder.config.cjs --mac --publish=never
+            npm run release:mac:signed -- --channel beta --skip-prepare
             cp release/stable-yml-backup/latest*.yml release/ || true
             rm -rf release/stable-yml-backup
           fi
         timeout-minutes: 75
         env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_NOTARYTOOL_ISSUER_ID: ${{ vars.APPLE_NOTARYTOOL_ISSUER_ID }}
+          APPLE_NOTARYTOOL_KEY_ID: ${{ vars.APPLE_NOTARYTOOL_KEY_ID }}
+          APPLE_NOTARYTOOL_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARYTOOL_KEY_P8_BASE64 }}
+          APPLE_SIGNING_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_SIGNING_CERTIFICATE_P12_BASE64 }}
+          APPLE_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_SIGNING_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_CERTIFICATE_SHA256: ${{ vars.APPLE_SIGNING_CERTIFICATE_SHA256 }}
+          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          CAUL_RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
 
       - name: Verify macOS app signatures
+        env:
+          APPLE_SIGNING_CERTIFICATE_SHA256: ${{ vars.APPLE_SIGNING_CERTIFICATE_SHA256 }}
+          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          CAUL_RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
         run: |
           set -euo pipefail
 
-          rm -rf verified-release
-          mkdir -p verified-release
-
-          shopt -s nullglob
-          for zip_path in release/Caul*-macos-arm64.zip; do
-            app_dir="verified-release/$(basename "${zip_path%.zip}")"
-            mkdir -p "$app_dir"
-            unzip -q "$zip_path" -d "$app_dir"
-
-            app_path="$(find "$app_dir" -maxdepth 1 -name '*.app' -type d | head -n 1)"
-            test -n "$app_path"
-            codesign --verify --deep --strict --verbose=2 "$app_path"
-            spctl -a -vv "$app_path"
-          done
+          node scripts/verify-macos-package.mjs --channel "$CAUL_RELEASE_CHANNEL" --require-checksum
+          if [[ "$CAUL_RELEASE_CHANNEL" == stable ]]; then
+            node scripts/verify-macos-package.mjs --channel beta --require-checksum
+          fi
 
       - name: Upload macOS artefacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-macos-arm64
           path: |
@@ -84,10 +193,13 @@ jobs:
             release/latest*.yml
             release/beta*.yml
             release/*.blockmap
+            release/*.sha256
+            release/notarization-*.json
           if-no-files-found: error
 
   build-windows:
     name: Build Windows ${{ matrix.arch }}
+    needs: [prepare, quality]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -99,16 +211,19 @@ jobs:
             runner: windows-2025
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
@@ -122,8 +237,9 @@ jobs:
           $ErrorActionPreference = "Stop"
 
           npm run dist:win:${{ matrix.arch }}
+          node scripts/verify-native-package.mjs --platform windows --arch ${{ matrix.arch }} --channel $env:CAUL_RELEASE_CHANNEL
 
-          if (-not ($env:GITHUB_REF_NAME.Contains("alpha") -or $env:GITHUB_REF_NAME.Contains("beta") -or $env:GITHUB_REF_NAME.Contains("rc"))) {
+          if ($env:CAUL_RELEASE_CHANNEL -eq "stable") {
             $env:FORCE_BETA_BUILD = "true"
             $env:CAUL_PACKAGE_PLATFORM = "win"
             $env:CAUL_PACKAGE_ARCH = "${{ matrix.arch }}"
@@ -131,12 +247,15 @@ jobs:
               $env:USE_SYSTEM_7ZA = "true"
               node scripts/prepare-windows-7za.mjs
             }
-            npx electron-builder --config electron-builder.config.cjs --win nsis --${{ matrix.arch }} --publish=never
+            npx --no-install electron-builder --config electron-builder.config.cjs --win nsis --${{ matrix.arch }} --publish=never
+            node scripts/verify-native-package.mjs --platform windows --arch ${{ matrix.arch }} --channel beta
           }
         timeout-minutes: 75
+        env:
+          CAUL_RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
 
       - name: Upload Windows artefacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-windows-${{ matrix.arch }}
           path: |
@@ -144,8 +263,37 @@ jobs:
             release/*windows-${{ matrix.arch }}-setup.exe.blockmap
           if-no-files-found: error
 
+      - name: Install, launch and uninstall published NSIS packages
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installers = Get-ChildItem release -File -Filter "*windows-${{ matrix.arch }}-setup.exe"
+          if ($installers.Count -ne ${{ needs.prepare.outputs.channel == 'stable' && 2 || 1 }}) {
+            throw "Unexpected NSIS installer count: $($installers.Count)"
+          }
+          foreach ($installer in $installers) {
+            $installRoot = Join-Path $env:RUNNER_TEMP ([IO.Path]::GetFileNameWithoutExtension($installer.Name))
+            $arguments = @('/S', "/D=$installRoot")
+            $process = Start-Process -FilePath $installer.FullName -ArgumentList $arguments -Wait -PassThru
+            if ($process.ExitCode -ne 0) { throw "$($installer.Name) installation failed: $($process.ExitCode)" }
+            $product = if ($installer.Name -like 'Caul-Beta-*') { 'Caul Beta' } else { 'Caul' }
+            $executable = Join-Path $installRoot "$product.exe"
+            if (-not (Test-Path $executable)) { throw "Installed executable missing: $executable" }
+            $env:CAUL_DISABLE_MODEL_AUTO_DOWNLOAD = '1'
+            $env:CAUL_DISABLE_UPDATE_CHECKS = '1'
+            $env:CAUL_PACKAGED_LAUNCH_SMOKE_MS = '250'
+            $env:CAUL_USER_DATA_DIR = Join-Path $installRoot 'smoke-user-data'
+            & $executable
+            if ($LASTEXITCODE -ne 0) { throw "$product launch failed: $LASTEXITCODE" }
+            $uninstaller = Get-ChildItem $installRoot -File -Filter 'Uninstall*.exe' | Select-Object -First 1
+            if (-not $uninstaller) { throw "Uninstaller missing from $installRoot" }
+            $process = Start-Process -FilePath $uninstaller.FullName -ArgumentList '/S' -Wait -PassThru
+            if ($process.ExitCode -ne 0) { throw "$product uninstall failed: $($process.ExitCode)" }
+          }
+
   build-linux:
     name: Build Linux ${{ matrix.arch }}
+    needs: [prepare, quality]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -157,21 +305,24 @@ jobs:
             runner: ubuntu-24.04
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
       - name: Install Linux build dependencies
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+        run: sudo apt-get update && sudo apt-get install -y cpio libasound2-dev rpm xvfb
 
       - name: Install dependencies
         run: npm ci
@@ -182,19 +333,23 @@ jobs:
           set -euo pipefail
 
           npm run dist:linux:${{ matrix.arch }}
+          node scripts/verify-native-package.mjs --platform linux --arch ${{ matrix.arch }} --channel "$CAUL_RELEASE_CHANNEL"
 
-          if [[ "$GITHUB_REF_NAME" != *alpha* && "$GITHUB_REF_NAME" != *beta* && "$GITHUB_REF_NAME" != *rc* ]]; then
-            linux_targets="AppImage rpm"
+          if [[ "$CAUL_RELEASE_CHANNEL" == stable ]]; then
+            linux_targets=(AppImage rpm)
             if [[ "${{ matrix.arch }}" == "arm64" ]]; then
-              linux_targets="AppImage"
+              linux_targets=(AppImage)
             fi
-            FORCE_BETA_BUILD=true CAUL_PACKAGE_PLATFORM=linux CAUL_PACKAGE_ARCH=${{ matrix.arch }} npx electron-builder --config electron-builder.config.cjs --linux ${linux_targets} --${{ matrix.arch }} --publish=never
+            FORCE_BETA_BUILD=true CAUL_PACKAGE_PLATFORM=linux CAUL_PACKAGE_ARCH=${{ matrix.arch }} npx --no-install electron-builder --config electron-builder.config.cjs --linux "${linux_targets[@]}" --${{ matrix.arch }} --publish=never
             FORCE_BETA_BUILD=true node scripts/build-linux-deb.mjs ${{ matrix.arch }}
+            node scripts/verify-native-package.mjs --platform linux --arch ${{ matrix.arch }} --channel beta
           fi
         timeout-minutes: 75
+        env:
+          CAUL_RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
 
       - name: Upload Linux artefacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-linux-${{ matrix.arch }}
           path: |
@@ -203,38 +358,265 @@ jobs:
             release/*-${{ matrix.arch }}.rpm
           if-no-files-found: error
 
+  test-macos-updater:
+    name: macOS updater ${{ matrix.scenario }} (${{ matrix.variant }})
+    needs: [prepare, build-macos]
+    runs-on: macos-15
+    environment:
+      name: ${{ matrix.variant }}-updater-verification
+    permissions:
+      attestations: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [corrupt, signature, valid]
+        variant: ${{ fromJSON(needs.prepare.outputs.channel == 'stable' && '["stable","beta"]' || '["beta"]') }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install test dependencies
+        run: npm ci
+
+      - name: Download current signed candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-macos-arm64
+          path: candidate
+
+      - name: Resolve previous public channel release
+        id: previous
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          RELEASE_VARIANT: ${{ matrix.variant }}
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > releases.json
+          node <<'NODE'
+          const fs = require('node:fs');
+          const releases = JSON.parse(fs.readFileSync('releases.json', 'utf8')).flat();
+          const variant = process.env.RELEASE_VARIANT;
+          const asset = variant === 'beta' ? 'Caul-Beta-macos-arm64.zip' : 'Caul-macos-arm64.zip';
+          const previous = releases
+            .filter(release => !release.draft && release.tag_name !== process.env.RELEASE_TAG)
+            .filter(release => variant === 'beta' || !release.prerelease)
+            .filter(release => release.assets.some(candidate => candidate.name === asset))
+            .sort((left, right) => String(right.published_at).localeCompare(String(left.published_at)))[0];
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, previous
+            ? `available=true\ntag=${previous.tag_name}\nasset=${asset}\n`
+            : `available=false\nasset=${asset}\n`);
+          NODE
+
+      - name: Authorise first-channel bootstrap
+        if: steps.previous.outputs.available != 'true'
+        env:
+          MACOS_UPDATER_BOOTSTRAP_TAG: ${{ vars.MACOS_UPDATER_BOOTSTRAP_TAG }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          test -n "$MACOS_UPDATER_BOOTSTRAP_TAG"
+          test "$MACOS_UPDATER_BOOTSTRAP_TAG" = "$RELEASE_TAG"
+          mkdir updater-evidence
+          printf '{"result":"bootstrap-no-prior-public-release","tag":"%s","channel":"%s","scenario":"%s"}\n' \
+            "$RELEASE_TAG" "${{ matrix.variant }}" "${{ matrix.scenario }}" \
+            > "updater-evidence/${{ matrix.scenario }}-${{ matrix.variant }}.json"
+
+      - name: Download and verify previous public package
+        if: steps.previous.outputs.available == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir previous
+          gh release download "${{ steps.previous.outputs.tag }}" --repo "$GITHUB_REPOSITORY" \
+            --pattern "${{ steps.previous.outputs.asset }}" --dir previous
+          if gh release download "${{ steps.previous.outputs.tag }}" --repo "$GITHUB_REPOSITORY" \
+            --pattern SHA256SUMS --dir previous; then
+            awk -v expected="${{ steps.previous.outputs.asset }}" '$2 == expected { print }' previous/SHA256SUMS > previous/PRIOR_SHA256SUM
+            test "$(wc -l < previous/PRIOR_SHA256SUM | tr -d ' ')" = 1
+            (cd previous && shasum -a 256 -c PRIOR_SHA256SUM)
+            gh attestation verify "previous/${{ steps.previous.outputs.asset }}" --repo "$GITHUB_REPOSITORY"
+          else
+            node scripts/verify-legacy-updater-baseline.mjs \
+              --tag "${{ steps.previous.outputs.tag }}" \
+              --asset "${{ steps.previous.outputs.asset }}" \
+              --file "previous/${{ steps.previous.outputs.asset }}"
+          fi
+
+      - name: Run updater integration scenario
+        if: steps.previous.outputs.available == 'true'
+        env:
+          APPLE_PRIOR_SIGNING_CERTIFICATE_SHA256: ${{ vars.APPLE_PRIOR_SIGNING_CERTIFICATE_SHA256 }}
+          APPLE_SIGNING_CERTIFICATE_SHA256: ${{ vars.APPLE_SIGNING_CERTIFICATE_SHA256 }}
+          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          RELEASE_SCENARIO: ${{ matrix.scenario }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          RELEASE_VARIANT: ${{ matrix.variant }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          CANDIDATE="candidate/${{ steps.previous.outputs.asset }}"
+          TEST_CANDIDATE="$CANDIDATE"
+          if [[ "$RELEASE_SCENARIO" == signature ]]; then
+            mkdir adversarial
+            ditto -x -k "$CANDIDATE" adversarial/extracted
+            PRODUCT='Caul'
+            [[ "$RELEASE_VARIANT" == beta ]] && PRODUCT='Caul Beta'
+            APP="adversarial/extracted/$PRODUCT.app"
+            printf 'signature rejection fixture\n' > "$APP/Contents/Resources/update-signature-rejection.txt"
+            codesign --force --deep --sign - "$APP"
+            TEST_CANDIDATE="adversarial/${{ steps.previous.outputs.asset }}"
+            ditto -c -k --sequesterRsrc --keepParent "$APP" "$TEST_CANDIDATE"
+          fi
+          npm run test:macos-updater -- \
+            --prior-zip "previous/${{ steps.previous.outputs.asset }}" \
+            --candidate-zip "$TEST_CANDIDATE" \
+            --trusted-candidate-zip "$CANDIDATE" \
+            --channel "$RELEASE_VARIANT" \
+            --scenario "$RELEASE_SCENARIO" \
+            --candidate-tag "$RELEASE_TAG" \
+            --expected-version "$RELEASE_VERSION"
+          mkdir updater-evidence
+          printf '{"result":"passed","priorTag":"%s","candidateTag":"%s","channel":"%s","scenario":"%s"}\n' \
+            "${{ steps.previous.outputs.tag }}" "$RELEASE_TAG" "$RELEASE_VARIANT" "$RELEASE_SCENARIO" \
+            > "updater-evidence/$RELEASE_SCENARIO-$RELEASE_VARIANT.json"
+
+      - name: Upload updater evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: updater-macos-arm64-${{ matrix.variant }}-${{ matrix.scenario }}
+          path: updater-evidence
+          if-no-files-found: error
+          retention-days: 30
+
   publish-release:
     name: Publish GitHub release
     needs:
+      - prepare
       - build-macos
       - build-windows
       - build-linux
+      - test-macos-updater
+      - release-policy
     runs-on: ubuntu-24.04
+    environment:
+      name: ${{ needs.prepare.outputs.release_environment }}
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
     steps:
+      - name: Checkout release scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          persist-credentials: false
+
       - name: Download release artefacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          path: release
-          merge-multiple: true
+          path: downloaded-artifacts
+          pattern: release-*
 
-      - name: List release artefacts
-        run: find release -maxdepth 1 -type f -print | sort
+      - name: Assemble exact release asset set
+        env:
+          CAUL_RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
+        run: node scripts/assemble-release-assets.mjs --input downloaded-artifacts --output release-assets --channel "$CAUL_RELEASE_CHANNEL"
 
-      - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+      - name: Attest release assets
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
         with:
-          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
-          files: release/*
+          subject-path: release-assets/**/*
+
+      - name: Stage, verify and publish exact release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          find release-assets -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort > expected-assets.txt
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true || {
+              echo 'Refusing to mutate an already-published release.' >&2
+              exit 1
+            }
+          else
+            CREATE_ARGS=("$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "Caul ${RELEASE_TAG#v}" --generate-notes --draft)
+            [[ "$RELEASE_PRERELEASE" == true ]] && CREATE_ARGS+=(--prerelease)
+            gh release create "${CREATE_ARGS[@]}"
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq '.assets[].name' | LC_ALL=C sort > existing-assets.txt
+          comm -23 existing-assets.txt expected-assets.txt > unexpected-assets.txt
+          if [[ -s unexpected-assets.txt ]]; then
+            echo 'Draft contains unexpected immutable assets:' >&2
+            cat unexpected-assets.txt >&2
+            exit 1
+          fi
+          mkdir existing-download
+          if [[ -s existing-assets.txt ]]; then
+            gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir existing-download
+            while IFS= read -r asset_name; do
+              cmp "release-assets/$asset_name" "existing-download/$asset_name"
+            done < existing-assets.txt
+          fi
+          comm -13 existing-assets.txt expected-assets.txt > missing-assets.txt
+          while IFS= read -r asset_name; do
+            gh release upload "$RELEASE_TAG" "release-assets/$asset_name" --repo "$GITHUB_REPOSITORY"
+          done < missing-assets.txt
+          mkdir verified-download
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir verified-download
+          find verified-download -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort > actual-assets.txt
+          diff --unified expected-assets.txt actual-assets.txt
+          cmp release-assets/SHA256SUMS verified-download/SHA256SUMS
+          (cd verified-download && sha256sum --check SHA256SUMS)
+          if [[ "$RELEASE_PRERELEASE" == true ]]; then
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease --latest=false
+          else
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease=false --latest
+          fi
+
+          immutable=false
+          for _ in {1..12}; do
+            immutable="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq .immutable)"
+            [[ "$immutable" == true ]] && break
+            sleep 5
+          done
+          if [[ "$immutable" != true ]]; then
+            echo 'Published release is not immutable; refusing to publish updater or Homebrew references.' >&2
+            exit 1
+          fi
 
   update-homebrew:
     name: Update Homebrew (Stable)
-    needs: publish-release
-    runs-on: ubuntu-24.04
-    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, 'alpha') && !contains(github.ref, 'beta') && !contains(github.ref, 'rc')
+    needs: [prepare, publish-release]
+    runs-on: macos-15
+    environment: homebrew-release
+    permissions:
+      contents: read
+    if: needs.prepare.outputs.channel == 'stable'
     steps:
+      - name: Checkout release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          persist-credentials: false
+
       - name: Extract version from tag
         id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+        run: echo "VERSION=${{ needs.prepare.outputs.version }}" >> "$GITHUB_OUTPUT"
 
       - name: Download release assets and calculate hashes
         id: hashes
@@ -253,8 +635,6 @@ jobs:
           echo "BETA_SHA256=${BETA_SHA256}" >> "$GITHUB_OUTPUT"
 
       - name: Update Homebrew casks
-        env:
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -262,73 +642,48 @@ jobs:
           STABLE_SHA256="${{ steps.hashes.outputs.STABLE_SHA256 }}"
           BETA_SHA256="${{ steps.hashes.outputs.BETA_SHA256 }}"
 
-          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/apotenza92/homebrew-tap.git"
-          cd homebrew-tap
+          brew tap apotenza92/tap
+          TAP_PATH="$(brew --repository apotenza92/tap)"
+          cd "$TAP_PATH"
           rm -f Casks/susura.rb 'Casks/susura@beta.rb'
+          CHECKSUMS="$RUNNER_TEMP/caul-homebrew-SHA256SUMS"
+          printf '%s  %s\n%s  %s\n' \
+            "$STABLE_SHA256" 'Caul-macos-arm64.zip' \
+            "$BETA_SHA256" 'Caul-Beta-macos-arm64.zip' > "$CHECKSUMS"
+          node "$GITHUB_WORKSPACE/scripts/generate-homebrew-casks.mjs" \
+            --channel stable --version "$VERSION" --sha256sums "$CHECKSUMS" --output Casks
 
-          cat > Casks/caul.rb << EOF
-          cask "caul" do
-            version "${VERSION}"
-
-            on_arm do
-              url "https://github.com/apotenza92/caul/releases/download/v#{version}/Caul-macos-arm64.zip"
-              sha256 "${STABLE_SHA256}"
-            end
-
-            name "Caul"
-            desc "Private desktop assistant for live calls and screen work"
-            homepage "https://github.com/apotenza92/caul"
-
-            livecheck do
-              url :url
-              strategy :github_latest
-            end
-
-            app "Caul.app"
-
-            zap trash: [
-              "~/Library/Application Support/Caul",
-              "~/Library/Caches/dev.caul.app",
-              "~/Library/Caches/dev.caul.app.ShipIt",
-              "~/Library/Preferences/dev.caul.app.plist",
-              "~/Library/Saved Application State/dev.caul.app.savedState",
-            ]
-          end
-          EOF
-
-          cat > 'Casks/caul@beta.rb' << EOF
-          cask "caul@beta" do
-            version "${VERSION}"
-
-            on_arm do
-              url "https://github.com/apotenza92/caul/releases/download/v#{version}/Caul-Beta-macos-arm64.zip"
-              sha256 "${BETA_SHA256}"
-            end
-
-            name "Caul Beta"
-            desc "Beta channel for Caul"
-            homepage "https://github.com/apotenza92/caul"
-
-            livecheck do
-              url "https://api.github.com/repos/apotenza92/caul/releases"
-              strategy :json do |json|
-                json
-                  .reject { |release| release["draft"] }
-                  .map { |release| release["tag_name"] }
-              end
-            end
-
-            app "Caul Beta.app"
-
-            zap trash: [
-              "~/Library/Application Support/Caul Beta",
-              "~/Library/Caches/dev.caul.app.beta",
-              "~/Library/Caches/dev.caul.app.beta.ShipIt",
-              "~/Library/Preferences/dev.caul.app.beta.plist",
-              "~/Library/Saved Application State/dev.caul.app.beta.savedState",
-            ]
-          end
-          EOF
+          export HOMEBREW_NO_AUTO_UPDATE=1
+          brew style --cask apotenza92/tap/caul apotenza92/tap/caul@beta
+          brew audit --cask --online apotenza92/tap/caul apotenza92/tap/caul@beta
+          installed_cask=''
+          cleanup() {
+            if [[ -n "$installed_cask" ]]; then
+              brew uninstall --cask "$installed_cask" >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup EXIT
+          for cask in caul 'caul@beta'; do
+            installed_cask="apotenza92/tap/${cask}"
+            brew install --cask "$installed_cask"
+            if [[ "$cask" == caul ]]; then
+              app_path='/Applications/Caul.app'
+              executable_path='/Applications/Caul.app/Contents/MacOS/Caul'
+            else
+              app_path='/Applications/Caul Beta.app'
+              executable_path='/Applications/Caul Beta.app/Contents/MacOS/Caul Beta'
+            fi
+            xcrun stapler validate "$app_path"
+            spctl --assess --type execute --verbose=4 "$app_path"
+            smoke_dir="$(mktemp -d "$RUNNER_TEMP/caul-homebrew-smoke.XXXXXX")"
+            env -i HOME="$smoke_dir" PATH=/usr/bin:/bin:/usr/sbin:/sbin TMPDIR="$smoke_dir" \
+              CAUL_DISABLE_UPDATE_CHECKS=1 CAUL_SMOKE_EXIT_MS=1000 CAUL_USER_DATA_DIR="$smoke_dir/user-data" \
+              "$executable_path"
+            brew uninstall --cask "$installed_cask"
+            installed_cask=''
+            test ! -e "$app_path"
+          done
+          trap - EXIT
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -340,17 +695,44 @@ jobs:
           fi
 
           git commit -m "Update caul to v${VERSION} (stable + beta casks)"
-          git push
+
+      - name: Push validated Homebrew casks
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd "$(brew --repository apotenza92/tap)"
+          ASKPASS="$(mktemp)"
+          trap 'rm -f "$ASKPASS"' EXIT
+          cat > "$ASKPASS" <<'SH'
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s\n' x-access-token ;;
+            *Password*) printf '%s\n' "$HOMEBREW_TAP_TOKEN" ;;
+            *) exit 1 ;;
+          esac
+          SH
+          chmod 700 "$ASKPASS"
+          GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 git -c credential.helper= push origin HEAD
 
   update-homebrew-beta:
     name: Update Homebrew (Beta)
-    needs: publish-release
-    runs-on: ubuntu-24.04
-    if: startsWith(github.ref, 'refs/tags/v') && (contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc'))
+    needs: [prepare, publish-release]
+    runs-on: macos-15
+    environment: homebrew-release
+    permissions:
+      contents: read
+    if: needs.prepare.outputs.channel == 'beta'
     steps:
+      - name: Checkout release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          persist-credentials: false
+
       - name: Extract version from tag
         id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+        run: echo "VERSION=${{ needs.prepare.outputs.version }}" >> "$GITHUB_OUTPUT"
 
       - name: Download release assets and calculate hash
         id: hashes
@@ -363,51 +745,38 @@ jobs:
           echo "BETA_SHA256=${BETA_SHA256}" >> "$GITHUB_OUTPUT"
 
       - name: Update Homebrew beta cask
-        env:
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           set -euo pipefail
 
           VERSION="${{ steps.version.outputs.VERSION }}"
           BETA_SHA256="${{ steps.hashes.outputs.BETA_SHA256 }}"
 
-          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/apotenza92/homebrew-tap.git"
-          cd homebrew-tap
+          brew tap apotenza92/tap
+          TAP_PATH="$(brew --repository apotenza92/tap)"
+          cd "$TAP_PATH"
           rm -f 'Casks/susura@beta.rb'
+          CHECKSUMS="$RUNNER_TEMP/caul-homebrew-SHA256SUMS"
+          printf '%s  %s\n' "$BETA_SHA256" 'Caul-Beta-macos-arm64.zip' > "$CHECKSUMS"
+          node "$GITHUB_WORKSPACE/scripts/generate-homebrew-casks.mjs" \
+            --channel beta --version "$VERSION" --sha256sums "$CHECKSUMS" --output Casks
 
-          cat > 'Casks/caul@beta.rb' << EOF
-          cask "caul@beta" do
-            version "${VERSION}"
-
-            on_arm do
-              url "https://github.com/apotenza92/caul/releases/download/v#{version}/Caul-Beta-macos-arm64.zip"
-              sha256 "${BETA_SHA256}"
-            end
-
-            name "Caul Beta"
-            desc "Beta channel for Caul"
-            homepage "https://github.com/apotenza92/caul"
-
-            livecheck do
-              url "https://api.github.com/repos/apotenza92/caul/releases"
-              strategy :json do |json|
-                json
-                  .reject { |release| release["draft"] }
-                  .map { |release| release["tag_name"] }
-              end
-            end
-
-            app "Caul Beta.app"
-
-            zap trash: [
-              "~/Library/Application Support/Caul Beta",
-              "~/Library/Caches/dev.caul.app.beta",
-              "~/Library/Caches/dev.caul.app.beta.ShipIt",
-              "~/Library/Preferences/dev.caul.app.beta.plist",
-              "~/Library/Saved Application State/dev.caul.app.beta.savedState",
-            ]
-          end
-          EOF
+          export HOMEBREW_NO_AUTO_UPDATE=1
+          brew style --cask apotenza92/tap/caul@beta
+          brew audit --cask --online apotenza92/tap/caul@beta
+          installed_cask='apotenza92/tap/caul@beta'
+          cleanup() { brew uninstall --cask "$installed_cask" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          brew install --cask "$installed_cask"
+          xcrun stapler validate '/Applications/Caul Beta.app'
+          spctl --assess --type execute --verbose=4 '/Applications/Caul Beta.app'
+          smoke_dir="$(mktemp -d "$RUNNER_TEMP/caul-homebrew-smoke.XXXXXX")"
+          env -i HOME="$smoke_dir" PATH=/usr/bin:/bin:/usr/sbin:/sbin TMPDIR="$smoke_dir" \
+            CAUL_DISABLE_UPDATE_CHECKS=1 CAUL_SMOKE_EXIT_MS=1000 CAUL_USER_DATA_DIR="$smoke_dir/user-data" \
+            '/Applications/Caul Beta.app/Contents/MacOS/Caul Beta'
+          brew uninstall --cask "$installed_cask"
+          installed_cask=''
+          test ! -e '/Applications/Caul Beta.app'
+          trap - EXIT
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -419,4 +788,22 @@ jobs:
           fi
 
           git commit -m "Update caul@beta to v${VERSION}"
-          git push
+
+      - name: Push validated Homebrew beta cask
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd "$(brew --repository apotenza92/tap)"
+          ASKPASS="$(mktemp)"
+          trap 'rm -f "$ASKPASS"' EXIT
+          cat > "$ASKPASS" <<'SH'
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s\n' x-access-token ;;
+            *Password*) printf '%s\n' "$HOMEBREW_TAP_TOKEN" ;;
+            *) exit 1 ;;
+          esac
+          SH
+          chmod 700 "$ASKPASS"
+          GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 git -c credential.helper= push origin HEAD

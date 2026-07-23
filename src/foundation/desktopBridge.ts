@@ -274,6 +274,7 @@ export type UpdateStatus = {
   appChannel: 'stable' | 'beta' | 'dev' | string;
   appName: string;
   appVersion: string;
+  automaticInstall?: boolean;
   availableUpdate: null | {
     downloadUrl?: string;
     prerelease: boolean;

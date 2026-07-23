@@ -18,7 +18,15 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true
+    sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          markdown: ['react-markdown'],
+          ui: ['@base-ui/react', 'react', 'react-dom', 'react-dom/client']
+        }
+      }
+    }
   },
   test: {
     environment: 'jsdom',

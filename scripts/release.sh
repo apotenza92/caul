@@ -38,8 +38,8 @@ if [ -z "$VERSION" ]; then
   exit 1
 fi
 
-if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
-  echo "Error: Invalid version format. Use semver, for example 0.1.0 or 0.1.1-beta.1."
+if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-beta\.[1-9][0-9]*$ ]]; then
+  echo "Error: Version must match X.Y.Z or X.Y.Z-beta.N with N >= 1."
   exit 1
 fi
 
@@ -53,15 +53,18 @@ fi
 BRANCH="$(git branch --show-current)"
 
 if [ "$BRANCH" != "main" ]; then
-  echo "Warning: currently on '$BRANCH', not 'main'."
-  read -r -p "Continue anyway? (y/N) " confirmation
-  if [[ ! "$confirmation" =~ ^[Yy]$ ]]; then
-    exit 1
-  fi
+  echo "Error: releases must be tagged from main, not '$BRANCH'."
+  exit 1
 fi
 
 if ! git diff-index --quiet HEAD --; then
   echo "Error: uncommitted changes are present. Commit or stash them before releasing."
+  exit 1
+fi
+
+git fetch --quiet origin main
+if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+  echo "Error: main must exactly match origin/main before tagging a release."
   exit 1
 fi
 
@@ -76,8 +79,6 @@ if [ "$PACKAGE_VERSION" != "$VERSION" ]; then
   echo "Error: package.json version ($PACKAGE_VERSION) does not match release version ($VERSION)."
   exit 1
 fi
-
-node scripts/assert-vm-e2e-summaries.mjs
 
 echo "Release: $TAG"
 

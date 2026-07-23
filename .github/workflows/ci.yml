@@ -1,0 +1,119 @@
+name: CI
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to validate when called by another workflow
+        required: false
+        type: string
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: "22"
+  RUST_TOOLCHAIN: "1.88"
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ inputs.ref || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deterministic:
+    name: Static checks and deterministic tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Install Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
+      - name: Install dependencies
+        run: npm ci
+        timeout-minutes: 10
+
+      - name: Check renderer and TypeScript
+        run: npm run check
+
+      - name: Test Rust workspace
+        run: cargo test --workspace --locked
+
+      - name: Verify bundled dependency licences
+        run: node scripts/verify-pi-licences.cjs
+
+  platform-preflight:
+    name: Build preflight (${{ matrix.label }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS ARM64
+            runner: macos-26
+            platform: mac
+            arch: arm64
+            package_script: package:prepare:mac
+          - label: Windows x64
+            runner: windows-2025
+            platform: win
+            arch: x64
+            package_script: package:prepare:win
+          - label: Linux x64
+            runner: ubuntu-24.04
+            platform: linux
+            arch: x64
+            package_script: package:prepare:linux
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
+      - name: Install dependencies
+        run: npm ci
+        timeout-minutes: 10
+
+      - name: Build platform resources
+        run: npm run ${{ matrix.package_script }}
+        env:
+          CAUL_PACKAGE_PLATFORM: ${{ matrix.platform }}
+          CAUL_PACKAGE_ARCH: ${{ matrix.arch }}
