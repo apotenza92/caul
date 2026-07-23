@@ -103,7 +103,7 @@ function resolveBackendTargetTriple(platform, arch) {
   const targetArch = arch ?? process.arch;
   const normalisedPlatform = platform === 'win' ? 'win32' : platform === 'mac' ? 'darwin' : platform;
 
-  if (normalisedPlatform === process.platform && targetArch === process.arch) {
+  if (!arch && normalisedPlatform === process.platform) {
     return null;
   }
 
