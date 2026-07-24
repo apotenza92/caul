@@ -4,10 +4,6 @@ permissions:
   contents: read
 
 on:
-  pull_request:
-  push:
-    branches:
-      - main
   workflow_call:
     inputs:
       ref:
@@ -21,7 +17,7 @@ env:
   RUST_TOOLCHAIN: "1.88"
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ inputs.ref || github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.workflow }}-${{ inputs.ref || github.ref }}
   cancel-in-progress: true
 
 jobs:

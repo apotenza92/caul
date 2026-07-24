@@ -14,7 +14,10 @@ import {
   validateNotarisationRecord,
   validateSignatureMetadata
 } from './macos-release-contract.mjs';
-import { validateUpdateMetadata } from './verify-macos-package.mjs';
+import {
+  validateMachOArchitectures,
+  validateUpdateMetadata
+} from './verify-macos-package.mjs';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '..');
 const require = createRequire(import.meta.url);
@@ -58,6 +61,15 @@ function loadBuilderConfig(environment) {
 }
 
 describe('macOS release contract', () => {
+  it('accepts native and universal arm64 code while rejecting foreign-only slices', () => {
+    expect(() => validateMachOArchitectures(['arm64'], 'native helper')).not.toThrow();
+    expect(() => validateMachOArchitectures(['x86_64', 'arm64'], 'universal helper')).not.toThrow();
+    expect(() => validateMachOArchitectures(['x86_64'], 'foreign helper'))
+      .toThrow(/must include arm64/);
+    expect(() => validateMachOArchitectures(['arm64', 'ppc64'], 'unsupported helper'))
+      .toThrow(/supported Darwin slices/);
+  });
+
   it('keeps stable and beta identities separate while remaining Apple Silicon only', () => {
     expect(resolveMacReleaseContract('stable')).toMatchObject({
       appName: 'Caul.app',
@@ -250,16 +262,16 @@ describe('macOS release contract', () => {
     }
   });
 
-  it('keeps pull-request workflows outside secret-bearing environments', () => {
-    for (const name of ['ci.yml', 'pages.yml', 'release.yml']) {
-      const workflow = loadWorkflow(name);
-      if (workflow.on.pull_request === undefined) continue;
+  it('keeps verification manual or release-called and publication deliberate', () => {
+    const ci = loadWorkflow('ci.yml');
+    expect(Object.keys(ci.on).sort()).toEqual(['workflow_call', 'workflow_dispatch']);
 
-      expect(JSON.stringify(workflow.jobs), `${name} references a secret`).not.toContain('${{ secrets.');
-      for (const [jobName, job] of Object.entries(workflow.jobs)) {
-        expect(job.environment, `${name}:${jobName} uses an environment`).toBeUndefined();
-      }
-    }
+    const pages = loadWorkflow('pages.yml');
+    expect(Object.keys(pages.on)).toEqual(['workflow_dispatch']);
+
+    const release = loadWorkflow('release.yml');
+    expect(Object.keys(release.on)).toEqual(['push']);
+    expect(release.on.push).toEqual({ tags: ['v*'] });
   });
 
   it('scopes the public site deploy key to the maintained Pages environment', () => {
@@ -271,7 +283,7 @@ describe('macOS release contract', () => {
   it('serialises releases by selected tag and validates that exact ref', () => {
     const ci = loadWorkflow('ci.yml');
     expect(ci.concurrency).toEqual({
-      group: 'ci-${{ github.workflow }}-${{ inputs.ref || github.event.pull_request.number || github.ref }}',
+      group: 'ci-${{ github.workflow }}-${{ inputs.ref || github.ref }}',
       'cancel-in-progress': true
     });
 
@@ -363,6 +375,15 @@ describe('macOS release contract', () => {
     expect(packageVerifier).toContain("'bin', 'CaulAudioHelper'");
     expect(packageVerifier).toContain("['--fixture-live-pipeline']");
     expect(packageVerifier).toContain("['--capabilities']");
+    expect(packageVerifier).not.toContain('.map(realpathSync)');
+    expect(packageVerifier).toContain('map((bundlePath) => realpathSync(bundlePath))');
+    expect(packageVerifier).toContain('map((filePath) => realpathSync(filePath))');
+    const afterPack = readFileSync(path.join(repositoryRoot, 'scripts', 'after-pack.cjs'), 'utf8');
+    expect(afterPack).toContain("'app.asar.unpacked'");
+    expect(afterPack).toContain("'pi-tui'");
+    expect(afterPack).toContain("'darwin-x64'");
+    expect(afterPack).toContain("'clipboard-darwin-x64'");
+    expect(afterPack).toContain('fs.rmSync');
     expect(source).toContain('verify-legacy-updater-baseline.mjs');
     expect(source).toContain('--candidate-tag "$RELEASE_TAG"');
 

@@ -4,19 +4,6 @@ permissions:
   contents: read
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "docs/**"
-      - "assets/icons/icon-32.png"
-      - "assets/icons/icon-256.png"
-      - "assets/icons/icon-rounded.png"
-      - "assets/icons/dark/icon-32.png"
-      - "assets/icons/dark/icon-rounded.png"
-      - "assets/icons/beta/icon-rounded.png"
-      - "assets/icons/beta/dark/icon-rounded.png"
-      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 concurrency:

@@ -41,3 +41,9 @@ Caul is a calm, private desktop assistant for live calls and screen work. Priori
 - Use `npm run dist:mac:dev` and `npm run launch:mac:dev` only for packaged identity, permissions, onboarding, signing, icons, release layout or app `userData` behaviour.
 - Do not reset macOS TCC permissions unless permission-prompt testing is explicitly required. Never run an all-app `tccutil reset ScreenCapture` or `tccutil reset AudioCapture` during ordinary iteration.
 - Follow `docs/release-validation.md` for packaged release gates. Do not store VM passwords in the repository.
+
+## GitHub automation
+
+- Keep deterministic verification manually dispatchable and callable by the tag-only release workflow. Do not run routine push or pull-request CI.
+- Keep the download-page publisher manual-only because it writes to another repository.
+- Keep releases restricted to deliberate `v*` tags whose commits are reachable from `main`.

@@ -232,8 +232,8 @@ function collectCodeObjects(appPath) {
   }
   visit(appPath);
   return {
-    bundles: [...new Set(bundles.map(realpathSync))].sort(),
-    machOFiles: [...new Set(machOFiles.map(realpathSync))].sort()
+    bundles: [...new Set(bundles.map((bundlePath) => realpathSync(bundlePath)))].sort(),
+    machOFiles: [...new Set(machOFiles.map((filePath) => realpathSync(filePath)))].sort()
   };
 }
 
@@ -302,11 +302,20 @@ function validateCodeObject(targetPath, context, options = {}) {
   context.certificateIndex += 1;
   if (options.machO) {
     const architectures = run('lipo', ['-archs', targetPath]).stdout.trim().split(/\s+/).filter(Boolean);
-    if (architectures.length !== 1 || architectures[0] !== CAUL_MAC_ARCH) {
-      fail(`${label} architectures ${architectures.join(', ') || 'missing'} do not exactly match arm64`);
-    }
+    validateMachOArchitectures(architectures, label);
   }
   return metadata;
+}
+
+export function validateMachOArchitectures(architectures, label) {
+  const allowedArchitectures = new Set([CAUL_MAC_ARCH, 'x86_64']);
+  if (!architectures.includes(CAUL_MAC_ARCH)
+    || architectures.some((architecture) => !allowedArchitectures.has(architecture))) {
+    fail(
+      `${label} architectures ${architectures.join(', ') || 'missing'} `
+      + `must include ${CAUL_MAC_ARCH} and contain only supported Darwin slices`
+    );
+  }
 }
 
 function readPlistValue(plistPath, key) {
