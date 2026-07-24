@@ -599,11 +599,10 @@ jobs:
             exit 1
           fi
 
-  update-homebrew:
-    name: Update Homebrew (Stable)
+  prepare-homebrew-publication:
+    name: Prepare Homebrew publication (Stable)
     needs: [prepare, publish-release]
     runs-on: macos-15
-    environment: homebrew-release
     permissions:
       contents: read
     if: needs.prepare.outputs.channel == 'stable'
@@ -634,7 +633,7 @@ jobs:
           BETA_SHA256="$(shasum -a 256 beta.zip | cut -d' ' -f1)"
           echo "BETA_SHA256=${BETA_SHA256}" >> "$GITHUB_OUTPUT"
 
-      - name: Update Homebrew casks
+      - name: Generate and validate Homebrew casks
         run: |
           set -euo pipefail
 
@@ -685,41 +684,40 @@ jobs:
           done
           trap - EXIT
 
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A Casks
+          mkdir -p "$GITHUB_WORKSPACE/publication/Casks"
+          cp Casks/caul.rb 'Casks/caul@beta.rb' "$GITHUB_WORKSPACE/publication/Casks/"
 
-          if git diff --cached --quiet; then
-            echo "Homebrew casks are already up to date."
-            exit 0
-          fi
-
-          git commit -m "Update caul to v${VERSION} (stable + beta casks)"
-
-      - name: Push validated Homebrew casks
-        env:
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      - name: Seal Homebrew publication bundle
         run: |
           set -euo pipefail
-          cd "$(brew --repository apotenza92/tap)"
-          ASKPASS="$(mktemp)"
-          trap 'rm -f "$ASKPASS"' EXIT
-          cat > "$ASKPASS" <<'SH'
-          #!/bin/sh
-          case "$1" in
-            *Username*) printf '%s\n' x-access-token ;;
-            *Password*) printf '%s\n' "$HOMEBREW_TAP_TOKEN" ;;
-            *) exit 1 ;;
-          esac
-          SH
-          chmod 700 "$ASKPASS"
-          GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 git -c credential.helper= push origin HEAD
+          casks="$(find publication/Casks -maxdepth 1 -type f -exec basename {} \; | LC_ALL=C sort | paste -sd ' ' -)"
+          [[ "$casks" == 'caul.rb caul@beta.rb' ]]
+          (
+            cd publication
+            find Casks -type f -name '*.rb' -print0 |
+              LC_ALL=C sort -z |
+              xargs -0 shasum -a 256 > SHA256SUMS
+          )
+          printf '%s\n' \
+            "Caul Homebrew publication bundle" \
+            "release-tag=${{ needs.prepare.outputs.tag }}" \
+            "release-commit=${{ github.sha }}" \
+            "destination=apotenza92/homebrew-tap:Casks/" \
+            "Apply these exact natively validated bytes manually after the release approval gate." \
+            > publication/PUBLICATION.txt
 
-  update-homebrew-beta:
-    name: Update Homebrew (Beta)
+      - name: Upload Homebrew publication bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: caul-homebrew-publication-${{ needs.prepare.outputs.tag }}
+          path: publication
+          if-no-files-found: error
+          retention-days: 14
+
+  prepare-homebrew-beta-publication:
+    name: Prepare Homebrew publication (Beta)
     needs: [prepare, publish-release]
     runs-on: macos-15
-    environment: homebrew-release
     permissions:
       contents: read
     if: needs.prepare.outputs.channel == 'beta'
@@ -744,7 +742,7 @@ jobs:
           BETA_SHA256="$(shasum -a 256 beta.zip | cut -d' ' -f1)"
           echo "BETA_SHA256=${BETA_SHA256}" >> "$GITHUB_OUTPUT"
 
-      - name: Update Homebrew beta cask
+      - name: Generate and validate Homebrew beta cask
         run: |
           set -euo pipefail
 
@@ -778,32 +776,32 @@ jobs:
           test ! -e '/Applications/Caul Beta.app'
           trap - EXIT
 
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A Casks
+          mkdir -p "$GITHUB_WORKSPACE/publication/Casks"
+          cp 'Casks/caul@beta.rb' "$GITHUB_WORKSPACE/publication/Casks/"
 
-          if git diff --cached --quiet; then
-            echo "Homebrew beta cask is already up to date."
-            exit 0
-          fi
-
-          git commit -m "Update caul@beta to v${VERSION}"
-
-      - name: Push validated Homebrew beta cask
-        env:
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      - name: Seal Homebrew beta publication bundle
         run: |
           set -euo pipefail
-          cd "$(brew --repository apotenza92/tap)"
-          ASKPASS="$(mktemp)"
-          trap 'rm -f "$ASKPASS"' EXIT
-          cat > "$ASKPASS" <<'SH'
-          #!/bin/sh
-          case "$1" in
-            *Username*) printf '%s\n' x-access-token ;;
-            *Password*) printf '%s\n' "$HOMEBREW_TAP_TOKEN" ;;
-            *) exit 1 ;;
-          esac
-          SH
-          chmod 700 "$ASKPASS"
-          GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 git -c credential.helper= push origin HEAD
+          casks="$(find publication/Casks -maxdepth 1 -type f -exec basename {} \; | LC_ALL=C sort | paste -sd ' ' -)"
+          [[ "$casks" == 'caul@beta.rb' ]]
+          (
+            cd publication
+            find Casks -type f -name '*.rb' -print0 |
+              LC_ALL=C sort -z |
+              xargs -0 shasum -a 256 > SHA256SUMS
+          )
+          printf '%s\n' \
+            "Caul Beta Homebrew publication bundle" \
+            "release-tag=${{ needs.prepare.outputs.tag }}" \
+            "release-commit=${{ github.sha }}" \
+            "destination=apotenza92/homebrew-tap:Casks/" \
+            "Apply this exact natively validated byte stream manually after the release approval gate." \
+            > publication/PUBLICATION.txt
+
+      - name: Upload Homebrew beta publication bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: caul-homebrew-publication-${{ needs.prepare.outputs.tag }}
+          path: publication
+          if-no-files-found: error
+          retention-days: 14

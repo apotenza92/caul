@@ -274,10 +274,28 @@ describe('macOS release contract', () => {
     expect(release.on.push).toEqual({ tags: ['v*'] });
   });
 
-  it('scopes the public site deploy key to the maintained Pages environment', () => {
+  it('prepares a checksum-sealed public site bundle without deploy credentials', () => {
     const pages = loadWorkflow('pages.yml');
-    expect(pages.jobs.publish.environment).toBe('github-pages');
-    expect(JSON.stringify(pages.jobs.publish)).toContain('PAGES_DEPLOY_KEY');
+    const preparation = JSON.stringify(pages.jobs.prepare);
+    expect(preparation).toContain('caul-pages-publication-');
+    expect(preparation).toContain('SHA256SUMS');
+    expect(preparation).toContain('Apply these exact reviewed bytes manually');
+    expect(preparation).not.toContain('PAGES_DEPLOY_KEY');
+    expect(preparation).not.toContain('git commit');
+    expect(preparation).not.toContain('git push');
+  });
+
+  it('never commits or pushes publication changes from workflows', () => {
+    for (const name of ['ci.yml', 'pages.yml', 'release.yml']) {
+      const source = readFileSync(path.join(repositoryRoot, '.github', 'workflows', name), 'utf8');
+      expect(source).not.toMatch(/\bgit (?:commit|push)\b/);
+      expect(source).not.toContain('HOMEBREW_TAP_TOKEN');
+      expect(source).not.toContain('PAGES_DEPLOY_KEY');
+    }
+    const release = readFileSync(path.join(repositoryRoot, '.github', 'workflows', 'release.yml'), 'utf8');
+    expect(release).toContain('prepare-homebrew-publication:');
+    expect(release).toContain('prepare-homebrew-beta-publication:');
+    expect(release).toContain('Apply these exact natively validated bytes manually');
   });
 
   it('serialises releases by selected tag and validates that exact ref', () => {
