@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 const require = createRequire(import.meta.url);
 const { createLocalLlmService } = require('./localLlm.cjs');
 const catalogue = JSON.parse(readFileSync(resolve(import.meta.dirname, '..', 'model-catalog.json'), 'utf8'));
+const mlxIt = process.platform === 'darwin' && process.arch === 'arm64' ? it : it.skip;
 
 function createService() {
   const root = mkdtempSync(join(tmpdir(), 'caul-local-llm-test-'));
@@ -857,7 +858,7 @@ describe('local LLM service', () => {
     }
   });
 
-  it('installs the Caul-managed MLX runtime and prepares the MLX model on Apple Silicon', async () => {
+  mlxIt('installs the Caul-managed MLX runtime and prepares the MLX model on Apple Silicon', async () => {
     const root = mkdtempSync(join(tmpdir(), 'caul-local-mlx-test-'));
     const progressEvents = [];
 
@@ -889,7 +890,7 @@ describe('local LLM service', () => {
     }
   });
 
-  it('does not run a validation prompt during MLX model download', async () => {
+  mlxIt('does not run a validation prompt during MLX model download', async () => {
     const root = mkdtempSync(join(tmpdir(), 'caul-local-mlx-test-'));
     const requests = [];
 
@@ -913,7 +914,7 @@ describe('local LLM service', () => {
     }
   });
 
-  it('uses catalogue metadata to disable Qwen3 thinking for MLX local AI requests', async () => {
+  mlxIt('uses catalogue metadata to disable Qwen3 thinking for MLX local AI requests', async () => {
     const root = mkdtempSync(join(tmpdir(), 'caul-local-mlx-test-'));
     const requests = [];
 
@@ -939,7 +940,7 @@ describe('local LLM service', () => {
     }
   });
 
-  it('does not disable thinking from a Qwen3 model name without catalogue metadata', async () => {
+  mlxIt('does not disable thinking from a Qwen3 model name without catalogue metadata', async () => {
     const root = mkdtempSync(join(tmpdir(), 'caul-local-mlx-test-'));
     const requests = [];
     const qwenCatalogueWithoutThinkingControl = createMlxOnlyCatalogue();
@@ -971,7 +972,7 @@ describe('local LLM service', () => {
     }
   });
 
-  it('keeps Qwen3 thinking enabled for MLX local AI requests when local thinking is enabled', async () => {
+  mlxIt('keeps Qwen3 thinking enabled for MLX local AI requests when local thinking is enabled', async () => {
     const root = mkdtempSync(join(tmpdir(), 'caul-local-mlx-test-'));
     const requests = [];
 
@@ -1000,7 +1001,7 @@ describe('local LLM service', () => {
     }
   });
 
-  it('warms the loopback MLX server without sending a chat completion', async () => {
+  mlxIt('warms the loopback MLX server without sending a chat completion', async () => {
     const root = mkdtempSync(join(tmpdir(), 'caul-local-mlx-test-'));
     const requests = [];
 
@@ -1034,7 +1035,7 @@ describe('local LLM service', () => {
     }
   });
 
-  it('does not run synchronous process checks while reporting installed MLX status', () => {
+  mlxIt('does not run synchronous process checks while reporting installed MLX status', () => {
     const root = mkdtempSync(join(tmpdir(), 'caul-local-mlx-test-'));
 
     try {
@@ -1062,7 +1063,7 @@ describe('local LLM service', () => {
     }
   });
 
-  it('does not report MLX ready while Hugging Face weight blobs are incomplete', () => {
+  mlxIt('does not report MLX ready while Hugging Face weight blobs are incomplete', () => {
     const root = mkdtempSync(join(tmpdir(), 'caul-local-mlx-test-'));
 
     try {

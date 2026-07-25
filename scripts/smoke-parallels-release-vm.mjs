@@ -60,7 +60,7 @@ const profiles = {
     defaultModelDir: '/home/parallels/.local/share/com.pais.handy/models/parakeet-tdt-0.6b-v3-int8'
   },
   win: {
-    defaultName: 'Windows 11 ARM',
+    defaultName: 'Windows 11',
     envName: 'CAUL_WINDOWS_VM_NAME',
     packageEnv: 'CAUL_WINDOWS_PACKAGE_PATH',
     repoEnv: 'CAUL_WINDOWS_VM_REPO',
@@ -189,13 +189,13 @@ if (!ready) {
       `State: ${state}`,
       `Guest Tools: ${guestTools}`,
       `IP Addresses: ${ipAddresses || 'none'}`,
-      `Start the VM, install Parallels Tools if needed, then rerun npm run vm:smoke:${profileName}.`
+      `Start the VM, install Parallels Tools if needed, then rerun npm run vm:e2e:${profileName}.`
     ].join('\n')
   });
 }
 
 if (!packagePath) {
-  await failVmE2e(`${profile.packageEnv} must point to a packaged Caul artefact before vm:smoke:${profileName} can run.`, {
+  await failVmE2e(`${profile.packageEnv} must point to a packaged Caul artefact before vm:e2e:${profileName} can run.`, {
     blocked: true,
     details: 'This smoke is intentionally packaged-app gated, not a Vite-only reachability check.'
   });

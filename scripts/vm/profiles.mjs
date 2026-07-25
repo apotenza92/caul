@@ -25,7 +25,7 @@ const profiles = {
     repoPath: 'C:\\Users\\alex\\caul-e2e\\repo',
     stagedPackagePath: 'C:\\Users\\alex\\caul-e2e\\release\\Caul-windows-arm64-setup.exe',
     user: 'alex',
-    vmName: 'Windows 11 ARM'
+    vmName: 'Windows 11'
   },
   linux: {
     backendPath: '/opt/Caul/resources/bin/caul-desktop-backend',

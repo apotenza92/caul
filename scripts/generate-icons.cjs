@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const pngToIco = require('png-to-ico');
@@ -44,23 +45,28 @@ const palettes = {
 const variants = [
   {
     dir: iconsDir,
+    packaged: true,
     palette: palettes.stable,
-    source: markSource
+    pageSizes: [32, 256],
+    readmeIcon: true
   },
   {
     dir: path.join(iconsDir, 'beta'),
+    packaged: true,
     palette: palettes.beta,
-    source: markSource
+    pageSizes: []
   },
   {
     dir: path.join(iconsDir, 'dark'),
+    packaged: false,
     palette: palettes.stableDark,
-    source: markSource
+    pageSizes: [32]
   },
   {
     dir: path.join(iconsDir, 'beta', 'dark'),
+    packaged: false,
     palette: palettes.betaDark,
-    source: markSource
+    pageSizes: []
   }
 ];
 
@@ -77,7 +83,7 @@ const iconsetSizes = [
   { name: 'icon_512x512@2x.png', size: 1024 }
 ];
 
-const pngSizes = [512, 256, 128, 96, 72, 64, 48, 32, 24, 22, 16];
+const linuxSizes = [512, 256, 128, 96, 72, 64, 48, 32, 24, 22, 16];
 const icoSizes = [256, 128, 64, 48, 32, 24, 16];
 
 function ensureDir(dir) {
@@ -126,17 +132,6 @@ function hexToRgb(hex) {
   };
 }
 
-async function trimTransparentPadding(imageBuffer) {
-  return sharp(imageBuffer)
-    .ensureAlpha()
-    .trim({
-      background: { r: 0, g: 0, b: 0, alpha: 0 },
-      threshold: 10
-    })
-    .png()
-    .toBuffer();
-}
-
 async function renderGlyph(svgBuffer, size, colour) {
   const { r, g, b } = hexToRgb(colour);
   const { data, info } = await sharp(svgBuffer)
@@ -157,47 +152,34 @@ async function renderGlyph(svgBuffer, size, colour) {
       height: info.height,
       channels: 4
     }
-  })
-    .png()
-    .toBuffer();
+  }).png().toBuffer();
 }
 
 async function renderIcon(svgBuffer, size, outputPath, palette, backgroundScale = 0.83, glyphScale = 0.9) {
   const backgroundSvg = renderBackgroundSvg(size, palette, backgroundScale);
   const glyphSize = Math.floor(size * glyphScale);
-  const glyphPaddingX = Math.floor((size - glyphSize) / 2);
-  const glyphPaddingY = Math.floor((size - glyphSize) / 2);
+  const glyphPadding = Math.floor((size - glyphSize) / 2);
   const glyph = await renderGlyph(svgBuffer, glyphSize, '#ffffff');
 
   await sharp(Buffer.from(backgroundSvg))
-    .composite([{ input: glyph, left: glyphPaddingX, top: glyphPaddingY }])
+    .composite([{ input: glyph, left: glyphPadding, top: glyphPadding }])
     .withMetadata({ icc: 'srgb' })
     .png()
     .toFile(outputPath);
 }
 
-async function renderPlainPng(svgBuffer, size, outputPath, palette) {
-  await renderIcon(svgBuffer, size, outputPath, palette, 0.85, 0.9);
-}
-
-async function generateVariant(variant) {
-  const svgBuffer = fs.readFileSync(variant.source);
-  const iconsetDir = path.join(variant.dir, 'icon.iconset');
+async function generatePackagedIcons(svgBuffer, variant, temporaryDir) {
+  const iconsetDir = path.join(temporaryDir, 'icon.iconset');
+  const icoDir = path.join(temporaryDir, 'ico');
   const linuxDir = path.join(variant.dir, 'linux');
-  const icoDir = path.join(variant.dir, 'ico-rounded');
 
-  ensureDir(variant.dir);
   ensureDir(iconsetDir);
-  ensureDir(linuxDir);
   ensureDir(icoDir);
+  ensureDir(linuxDir);
 
-  for (const size of pngSizes) {
-    await renderPlainPng(svgBuffer, size, path.join(variant.dir, `icon-${size}.png`), variant.palette);
-    await renderPlainPng(svgBuffer, size, path.join(linuxDir, `${size}x${size}.png`), variant.palette);
+  for (const size of linuxSizes) {
+    await renderIcon(svgBuffer, size, path.join(linuxDir, `${size}x${size}.png`), variant.palette, 0.85);
   }
-
-  await renderPlainPng(svgBuffer, 512, path.join(variant.dir, 'icon.png'), variant.palette);
-  await renderPlainPng(svgBuffer, 512, path.join(variant.dir, 'icon-rounded.png'), variant.palette);
 
   for (const { name, size } of iconsetSizes) {
     await renderIcon(svgBuffer, size, path.join(iconsetDir, name), variant.palette);
@@ -213,27 +195,48 @@ async function generateVariant(variant) {
         throw error;
       }
 
-      console.warn(`iconutil rejected ${path.relative(rootDir, iconsetDir)}; keeping existing ${path.relative(rootDir, icnsPath)}.`);
+      console.warn(`iconutil rejected generated input; keeping existing ${path.relative(rootDir, icnsPath)}.`);
     }
   }
 
   for (const size of icoSizes) {
-    await renderPlainPng(svgBuffer, size, path.join(icoDir, `icon-${size}.png`), variant.palette);
+    await renderIcon(svgBuffer, size, path.join(icoDir, `icon-${size}.png`), variant.palette, 0.85);
   }
 
   const icoBuffer = await pngToIco(icoSizes.map((size) => path.join(icoDir, `icon-${size}.png`)));
   fs.writeFileSync(path.join(variant.dir, 'icon.ico'), icoBuffer);
 }
 
-async function main() {
-  ensureDir(iconsDir);
+async function generateVariant(svgBuffer, variant, temporaryRoot) {
+  ensureDir(variant.dir);
+  await renderIcon(svgBuffer, 512, path.join(variant.dir, 'icon-rounded.png'), variant.palette, 0.85);
 
-  for (const variant of variants) {
-    console.log(`Generating icons in ${path.relative(rootDir, variant.dir)}`);
-    await generateVariant(variant);
+  for (const size of variant.pageSizes) {
+    await renderIcon(svgBuffer, size, path.join(variant.dir, `icon-${size}.png`), variant.palette, 0.85);
   }
 
-  fs.copyFileSync(path.join(iconsDir, 'icon-rounded.png'), path.join(iconsDir, 'icon-rounded-readme.png'));
+  if (variant.packaged) {
+    const temporaryDir = path.join(temporaryRoot, path.relative(iconsDir, variant.dir) || 'stable');
+    await generatePackagedIcons(svgBuffer, variant, temporaryDir);
+  }
+
+  if (variant.readmeIcon) {
+    fs.copyFileSync(path.join(variant.dir, 'icon-rounded.png'), path.join(variant.dir, 'icon-rounded-readme.png'));
+  }
+}
+
+async function main() {
+  const svgBuffer = fs.readFileSync(markSource);
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'caul-icons-'));
+
+  try {
+    for (const variant of variants) {
+      console.log(`Generating icons in ${path.relative(rootDir, variant.dir)}`);
+      await generateVariant(svgBuffer, variant, temporaryRoot);
+    }
+  } finally {
+    fs.rmSync(temporaryRoot, { recursive: true, force: true });
+  }
 }
 
 main().catch((error) => {

@@ -1212,17 +1212,18 @@ func tapSmoke(writer: EventWriter) throws {
 }
 
 @available(macOS 14.2, *)
-func startCaptureWithTimeout(
-  _ capture: SystemAudioCapture,
-  recording: Bool = true,
-  writer: EventWriter,
-  timeout: TimeInterval = 4
-) throws {
-  let semaphore = DispatchSemaphore(value: 0)
-  let resultLock = NSLock()
-  var result: Result<Void, Error>?
+private final class CaptureStartOperation: @unchecked Sendable {
+  private let capture: SystemAudioCapture
+  private let recording: Bool
+  private let resultLock = NSLock()
+  private var result: Result<Void, Error>?
 
-  DispatchQueue.global(qos: .userInitiated).async {
+  init(capture: SystemAudioCapture, recording: Bool) {
+    self.capture = capture
+    self.recording = recording
+  }
+
+  func run() {
     let captureResult: Result<Void, Error>
 
     do {
@@ -1235,6 +1236,27 @@ func startCaptureWithTimeout(
     resultLock.lock()
     result = captureResult
     resultLock.unlock()
+  }
+
+  func readResult() -> Result<Void, Error>? {
+    resultLock.lock()
+    defer { resultLock.unlock() }
+    return result
+  }
+}
+
+@available(macOS 14.2, *)
+func startCaptureWithTimeout(
+  _ capture: SystemAudioCapture,
+  recording: Bool = true,
+  writer: EventWriter,
+  timeout: TimeInterval = 4
+) throws {
+  let semaphore = DispatchSemaphore(value: 0)
+  let operation = CaptureStartOperation(capture: capture, recording: recording)
+
+  DispatchQueue.global(qos: .userInitiated).async {
+    operation.run()
     semaphore.signal()
   }
 
@@ -1248,11 +1270,7 @@ func startCaptureWithTimeout(
     exit(1)
   }
 
-  resultLock.lock()
-  let startResult = result
-  resultLock.unlock()
-
-  try startResult?.get()
+  try operation.readResult()?.get()
 }
 
 @available(macOS 14.2, *)

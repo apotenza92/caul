@@ -182,6 +182,7 @@ function createLocalLlmService({
         phase: 'runtime',
         totalBytes: runtimeAsset.sizeBytes ?? null
       },
+      file: null,
       request: null
     };
     activeDownload = downloadState;
@@ -219,6 +220,10 @@ function createLocalLlmService({
     const cancelledModelId = activeDownload?.modelId ?? null;
     if (activeDownload) {
       activeDownload.cancelled = true;
+    }
+    if (activeDownload?.file) {
+      activeDownload.file.destroy();
+      activeDownload.file = null;
     }
     if (activeDownload?.request) {
       activeDownload.request.destroy(new Error(DOWNLOAD_CANCELLED_MESSAGE));
@@ -375,6 +380,7 @@ function createLocalLlmService({
         phase: 'runtime',
         totalBytes: null
       },
+      file: null,
       request: null
     };
     activeDownload = downloadState;
@@ -663,10 +669,40 @@ function createLocalLlmService({
       fs.rmSync(destinationPath, { force: true });
       fs.mkdirSync(pathModule.dirname(destinationPath), { recursive: true });
       const file = fs.createWriteStream(destinationPath);
+      downloadState.file = file;
+      let delegated = false;
+      let settled = false;
+
+      const clearActiveFile = () => {
+        if (downloadState.file === file) {
+          downloadState.file = null;
+        }
+      };
+      const rejectOnce = (error) => {
+        if (settled || delegated) {
+          return;
+        }
+        settled = true;
+        clearActiveFile();
+        fs.rmSync(destinationPath, { force: true });
+        reject(downloadState.cancelled ? new Error(DOWNLOAD_CANCELLED_MESSAGE) : error);
+      };
+      const resolveOnce = () => {
+        if (settled || delegated) {
+          return;
+        }
+        settled = true;
+        clearActiveFile();
+        resolve();
+      };
+
+      file.once('error', rejectOnce);
 
       const request = httpsModule.get(url, { agent: false }, (response) => {
         if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-          file.close();
+          delegated = true;
+          file.destroy();
+          clearActiveFile();
           fs.rmSync(destinationPath, { force: true });
           downloadFile(new URL(response.headers.location, url).toString(), destinationPath, downloadState, progressBase)
             .then(resolve, reject);
@@ -674,9 +710,8 @@ function createLocalLlmService({
         }
 
         if (response.statusCode !== 200) {
-          file.close();
-          fs.rmSync(destinationPath, { force: true });
-          reject(new Error(`Download failed with HTTP ${response.statusCode}.`));
+          rejectOnce(new Error(`Download failed with HTTP ${response.statusCode}.`));
+          file.destroy();
           return;
         }
 
@@ -707,15 +742,20 @@ function createLocalLlmService({
         response.pipe(file);
         file.once('finish', () => {
           emitStatus(status(downloadState.modelId));
-          file.close(resolve);
+          file.close((error) => {
+            if (error) {
+              rejectOnce(error);
+            } else {
+              resolveOnce();
+            }
+          });
         });
       });
 
       downloadState.request = request;
       request.once('error', (error) => {
-        file.close();
-        fs.rmSync(destinationPath, { force: true });
-        reject(error);
+        rejectOnce(error);
+        file.destroy();
       });
     });
   }

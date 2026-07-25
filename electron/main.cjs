@@ -6908,6 +6908,16 @@ async function runOnboardingSmokeIfRequested(window) {
             const textOf = (element) => (element?.textContent || '').replace(/\\s+/g, ' ').trim();
             const findButton = (name) => Array.from(document.querySelectorAll('button'))
               .find((button) => textOf(button) === name);
+            const findProgressText = () => {
+              const body = document.body.textContent || '';
+
+              return [
+                'Requesting local AI download',
+                'Preparing local AI',
+                'Downloading local AI runtime',
+                'Downloading local AI model'
+              ].find((label) => body.includes(label)) ?? null;
+            };
             const waitFor = async (predicate, timeoutMs = 1500) => {
               const startedAt = performance.now();
 
@@ -6925,20 +6935,14 @@ async function runOnboardingSmokeIfRequested(window) {
             };
             const smoke = window.__caulLocalAiLagSmoke;
             let clickMethod = 'electron-input';
-            let progressText = await waitFor(() => {
-              const body = document.body.textContent || '';
-              return body.includes('Preparing local AI') ? 'Preparing local AI' : null;
-            }, 250);
+            let progressText = await waitFor(findProgressText, 250);
 
             if (!progressText) {
               clickMethod = 'renderer-smoke-event';
               smoke.clickedAt = performance.now();
               window.dispatchEvent(new CustomEvent('caul:onboarding-smoke-download-local-ai'));
 
-              progressText = await waitFor(() => {
-                const body = document.body.textContent || '';
-                return body.includes('Preparing local AI') ? 'Preparing local AI' : null;
-              }, 250);
+              progressText = await waitFor(findProgressText, 250);
             }
 
             if (!progressText) {
@@ -6956,10 +6960,7 @@ async function runOnboardingSmokeIfRequested(window) {
                 button.click();
               }
 
-              progressText = await waitFor(() => {
-                const body = document.body.textContent || '';
-                return body.includes('Preparing local AI') ? 'Preparing local AI' : null;
-              }, 1500);
+              progressText = await waitFor(findProgressText, 1500);
             }
 
             const visibleFeedbackMs = performance.now() - smoke.clickedAt;
@@ -8987,8 +8988,7 @@ ipcMain.handle('caul:get-runtime-context', () => ({
   arch: process.arch,
   isMac: process.platform === 'darwin',
   appChannel: getAppChannel(),
-  appName: getAppDisplayName(),
-  vmTestingTarget: 'Parallels macOS VM'
+  appName: getAppDisplayName()
 }));
 
 ipcMain.handle('caul:private-overlay-status', () => getPrivateOverlayStatus());

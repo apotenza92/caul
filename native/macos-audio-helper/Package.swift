@@ -19,6 +19,7 @@ let package = Package(
       dependencies: [
         .product(name: "FluidAudio", package: "FluidAudio")
       ],
+      exclude: ["Info.plist"],
       linkerSettings: [
         .unsafeFlags([
           "-Xlinker", "-sectcreate",

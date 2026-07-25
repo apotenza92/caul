@@ -1,22 +1,9 @@
-name: Publish Download Page
+name: Prepare Download Page Publication
 
 permissions:
   contents: read
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "docs/**"
-      - "assets/icons/icon-32.png"
-      - "assets/icons/icon-256.png"
-      - "assets/icons/icon-rounded.png"
-      - "assets/icons/dark/icon-32.png"
-      - "assets/icons/dark/icon-rounded.png"
-      - "assets/icons/beta/icon-rounded.png"
-      - "assets/icons/beta/dark/icon-rounded.png"
-      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 concurrency:
@@ -24,11 +11,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  publish:
+  prepare:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Caul
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Prepare public site artefact
         run: |
@@ -43,26 +32,32 @@ jobs:
           cp assets/icons/beta/icon-rounded.png _site/assets/icons/beta/icon-rounded.png
           cp assets/icons/beta/dark/icon-rounded.png _site/assets/icons/beta/dark/icon-rounded.png
 
-      - name: Checkout public Pages repository
-        uses: actions/checkout@v5
-        with:
-          repository: apotenza92/apotenza92.github.io
-          path: pages-repo
-          ssh-key: ${{ secrets.PAGES_DEPLOY_KEY }}
-
-      - name: Publish Caul page
+      - name: Seal Pages publication bundle
         run: |
-          rm -rf pages-repo/caul
-          mkdir -p pages-repo/caul
-          cp -R _site/. pages-repo/caul/
-          touch pages-repo/.nojekyll
-          cd pages-repo
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .nojekyll caul
-          if git diff --cached --quiet; then
-            echo "No download page changes to publish."
-            exit 0
-          fi
-          git commit -m "Publish Caul download page"
-          git push
+          set -euo pipefail
+          mkdir -p publication/caul
+          cp -R _site/. publication/caul/
+          touch publication/.nojekyll
+          (
+            cd publication
+            {
+              printf '.nojekyll\0'
+              find caul -type f -print0 | LC_ALL=C sort -z
+            } |
+              xargs -0 sha256sum > SHA256SUMS
+          )
+          printf '%s\n' \
+            "Caul download-page publication bundle" \
+            "source-commit=${{ github.sha }}" \
+            "destination=apotenza92/apotenza92.github.io:caul/" \
+            "Apply these exact reviewed bytes manually." \
+            > publication/PUBLICATION.txt
+
+      - name: Upload Pages publication bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: caul-pages-publication-${{ github.sha }}
+          path: publication
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 14

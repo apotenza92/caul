@@ -38,6 +38,12 @@ import {
   TooltipProvider,
   TooltipTrigger
 } from '@/components/ui/tooltip';
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger
+} from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { ArrowUpIcon, BellIcon, CheckCircle2Icon, ChevronDownIcon, ChevronRightIcon, CircleAlertIcon, CopyIcon, DownloadIcon, FastForwardIcon, FileIcon, FileInputIcon, FileTextIcon, FolderOpenIcon, HistoryIcon, ImageIcon, InfoIcon, ListChecksIcon, LoaderCircleIcon, LogOutIcon, MicIcon, MicOffIcon, PaperclipIcon, PencilIcon, PlayIcon, PowerIcon, RotateCcwIcon, SearchIcon, SendIcon, SettingsIcon, SquareIcon, StarIcon, Trash2Icon, Volume2Icon, VolumeXIcon, XCircleIcon, XIcon } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -208,7 +214,6 @@ const layout = {
   promptTemplateSearchInput: 'pl-8',
   pickerList: 'flex flex-col',
   pickerListScrollable: 'max-h-64 overflow-y-auto',
-  pickerItem: 'flex h-8 w-full min-w-0 items-center gap-2 overflow-hidden rounded-md px-2 text-left text-sm text-muted-foreground outline-hidden hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground [&>span:last-child]:truncate',
   pickerItemLabel: 'min-w-0 flex-1 truncate',
   pickerCheckboxItem: 'justify-start',
   pickerRow: 'group/picker-row relative min-w-0',
@@ -261,7 +266,6 @@ const defaultGeneralInstructions = '';
 const generalInstructionsPlaceholder = 'e.g. Always answer in British English.';
 const recommendedMarkerClassName = 'inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-current/30 bg-current/10 text-current opacity-95 shadow-sm hover:bg-current/15';
 const selectedRecommendedMarkerClassName = 'inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-current/45 bg-current/15 text-current opacity-100 shadow-sm hover:bg-current/20';
-const recommendedPillTitle = 'Recommended based on this computer’s power, memory and supported local AI runtimes.';
 const recommendedLocalAiPillMessage = 'Based on this computer’s power, Caul recommends Local because you should still get acceptable private AI results on this machine.';
 const recommendedCloudAiPillMessage = 'Based on this computer’s power, Caul recommends Cloud because local AI probably will not give acceptable results on this machine.';
 const recommendedPillLabel = 'Recommended';
@@ -279,6 +283,122 @@ const privateOverlayHandleSizeOptions: Array<{ label: string; value: PrivateOver
   { label: 'Medium (48 px)', value: 'medium' },
   { label: 'Large (64 px)', value: 'large' }
 ];
+
+const dialogFocusableSelector = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled]):not([type="hidden"])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])'
+].join(',');
+
+function useManagedDialogFocus(open: boolean, onClose: () => void) {
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const siblingInertStates = new Map<HTMLElement, boolean>();
+    let activeBranch = dialogRef.current;
+
+    while (activeBranch?.parentElement && activeBranch.parentElement !== document.body) {
+      const branchParent: HTMLElement = activeBranch.parentElement;
+
+      for (const sibling of Array.from(branchParent.children)) {
+        if (
+          sibling instanceof HTMLElement
+          && sibling !== activeBranch
+          && !sibling.hasAttribute('data-dialog-backdrop')
+        ) {
+          siblingInertStates.set(sibling, sibling.hasAttribute('inert'));
+          sibling.setAttribute('inert', '');
+        }
+      }
+
+      activeBranch = branchParent;
+    }
+    const focusFrame = window.requestAnimationFrame(() => {
+      const firstFocusable = dialogRef.current?.querySelector<HTMLElement>(dialogFocusableSelector);
+      (firstFocusable ?? dialogRef.current)?.focus({ preventScroll: true });
+    });
+
+    function handleKeyDown(event: KeyboardEvent) {
+      const dialog = dialogRef.current;
+
+      if (!dialog) {
+        return;
+      }
+
+      const eventTarget = event.target instanceof Element ? event.target : null;
+      const isInPortalledControl = Boolean(eventTarget?.closest('[data-base-ui-portal]'));
+
+      if (event.key === 'Escape') {
+        if (event.defaultPrevented || isInPortalledControl) {
+          return;
+        }
+
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+
+      if (event.key !== 'Tab' || isInPortalledControl) {
+        return;
+      }
+
+      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(dialogFocusableSelector))
+        .filter((element) => element.getAttribute('aria-hidden') !== 'true' && element.tabIndex >= 0);
+
+      if (focusable.length === 0) {
+        event.preventDefault();
+        dialog.focus({ preventScroll: true });
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const activeElement = document.activeElement;
+
+      if (event.shiftKey && (activeElement === first || !dialog.contains(activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (activeElement === last || !dialog.contains(activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener('keydown', handleKeyDown);
+
+      for (const [sibling, wasInert] of siblingInertStates) {
+        if (!wasInert) {
+          sibling.removeAttribute('inert');
+        }
+      }
+
+      if (previouslyFocused?.isConnected) {
+        previouslyFocused.focus({ preventScroll: true });
+      }
+    };
+  }, [open]);
+
+  return dialogRef;
+}
 const handleIconStyle = {
   '--caul-handle-icon-url': `url("${caulIconUrl}")`
 } as React.CSSProperties;
@@ -2139,31 +2259,36 @@ function AiProviderSetup({
   const cloudAiInfo = <CloudAiInfoButton llmModel={llmModel} llmReasoning={llmReasoning} />;
 
   return (
-    <div className="grid gap-3">
-      <div className="inline-flex w-full rounded-md border border-border bg-muted/30 p-0.5" role="tablist" aria-label="AI provider">
-        {(['local', 'cloud'] as AiProvider[]).map((provider) => (
-          <button
-            key={provider}
-            aria-label={provider === 'local' ? 'Local' : 'Cloud'}
-            aria-selected={selectedProvider === provider}
-            className={`inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-[6px] px-3 text-sm font-medium transition-colors ${selectedProvider === provider ? '!bg-primary !text-primary-foreground shadow-sm hover:!bg-primary/90 dark:!bg-primary dark:!text-primary-foreground dark:hover:!bg-primary/90' : 'text-muted-foreground hover:text-foreground'}`}
-            onClick={() => onSelectProvider(provider)}
-            role="tab"
-            type="button"
-          >
-            <span>{provider === 'local' ? 'Local' : 'Cloud'}</span>
-            {ai?.recommended === provider ? (
-              <RecommendedMarker
-                message={getAiProviderRecommendationMessage(provider)}
-                selected={selectedProvider === provider}
-              />
-            ) : null}
-          </button>
-        ))}
+    <Tabs className="grid gap-3" value={selectedProvider}>
+      <div className="flex min-w-0 items-center gap-2">
+        <TabsList aria-label="AI provider" className="h-auto w-full rounded-md border border-border bg-muted/30 p-0.5">
+          {(['local', 'cloud'] as AiProvider[]).map((provider) => (
+            <TabsTrigger
+              key={provider}
+              activeVariant="primary"
+              aria-label={provider === 'local' ? 'Local' : 'Cloud'}
+              className="h-9 rounded-[6px] px-3"
+              onClick={() => onSelectProvider(provider)}
+              value={provider}
+            >
+              <span>{provider === 'local' ? 'Local' : 'Cloud'}</span>
+              {ai?.recommended === provider ? (
+                <RecommendedMarker selected={selectedProvider === provider} />
+              ) : null}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        {ai?.recommended && ai.recommended !== 'none' ? (
+          <SettingInfoButton
+            label="Why this is recommended"
+            message={getAiProviderRecommendationMessage(ai.recommended)}
+          />
+        ) : null}
       </div>
 
-      {selectedProvider === 'local' ? (
-        <div role="tabpanel" className="grid gap-3 text-left">
+      <TabsContent className="grid gap-3 text-left" value="local">
+        {selectedProvider === 'local' ? (
+          <>
           <p className="text-sm leading-5 text-muted-foreground">
             Data stays local and private. Slower and less intelligent than Cloud.
           </p>
@@ -2178,9 +2303,12 @@ function AiProviderSetup({
             statusPlacement="inline"
             status={caulLocalStatus}
           />
-        </div>
-      ) : (
-        <div role="tabpanel" className="grid gap-3 text-left">
+          </>
+        ) : null}
+      </TabsContent>
+      <TabsContent className="grid gap-3 text-left" value="cloud">
+        {selectedProvider === 'cloud' ? (
+          <>
           <p className="text-sm leading-5 text-muted-foreground">
             Sends to a cloud model like ChatGPT. Faster and smarter than Local.
           </p>
@@ -2193,9 +2321,10 @@ function AiProviderSetup({
             setupLabel="Cloud AI setup"
             statusPlacement="inline"
           />
-        </div>
-      )}
-    </div>
+          </>
+        ) : null}
+      </TabsContent>
+    </Tabs>
   );
 }
 
@@ -2326,20 +2455,19 @@ function LocalAiDownloadAction({
   const combinedInfo = getCombinedLocalAiDownloadInfo(info, tradeoffInfo);
 
   return (
-    <div className="relative inline-flex shrink-0">
+    <div className="relative inline-flex shrink-0 items-center gap-1.5">
       <Button
         aria-label="Download local AI"
-        className={combinedInfo ? 'gap-2' : undefined}
         disabled={disabled}
         onClick={onDownload}
         type="button"
       >
         <span>Download local AI</span>
-        {combinedInfo}
-        {!combinedInfo && tradeoffInfo ? (
-          <IssueActionInfoIcon label={tradeoffInfo.label} message={tradeoffInfo.message} />
-        ) : null}
       </Button>
+      {combinedInfo}
+      {!combinedInfo && tradeoffInfo ? (
+        <IssueActionInfoIcon label={tradeoffInfo.label} message={tradeoffInfo.message} />
+      ) : null}
     </div>
   );
 }
@@ -2417,25 +2545,16 @@ function IssueActionInfoIcon({
 }) {
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <span
+      <TooltipTrigger
+        render={<Button
           aria-label={label}
-          className="inline-flex size-4 shrink-0 items-center justify-center rounded-full text-primary-foreground/85 hover:bg-primary-foreground/15 hover:text-primary-foreground"
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-          }}
-          onKeyDown={(event) => {
-            event.stopPropagation();
-          }}
-          onPointerDown={(event) => {
-            event.stopPropagation();
-          }}
-          role="button"
-          tabIndex={0}
-        >
-          <InfoIcon className="size-3" />
-        </span>
+          className="inline-flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+          size="icon-sm"
+          type="button"
+          variant="ghost"
+        />}
+      >
+        <InfoIcon className="size-3" />
       </TooltipTrigger>
       <TooltipContent className="w-72 px-3 py-2 text-left text-sm leading-5" side="top">
         {message}
@@ -2547,14 +2666,16 @@ function SettingInfoButton({
 }) {
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <button
+      <TooltipTrigger
+        render={<Button
           aria-label={label}
           className="inline-flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          size="icon-sm"
           type="button"
-        >
-          <InfoIcon className="size-3.5" />
-        </button>
+          variant="ghost"
+        />}
+      >
+        <InfoIcon className="size-3.5" />
       </TooltipTrigger>
       <TooltipContent className="w-64 px-3 py-2 text-left font-normal leading-5" side="bottom">
         {message}
@@ -2574,23 +2695,16 @@ function EmbeddedInfoTooltip({
 }) {
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <span
+      <TooltipTrigger
+        render={<Button
           aria-label={label}
           className="inline-flex size-5 shrink-0 items-center justify-center rounded-full text-current opacity-85 hover:bg-current/10 hover:opacity-100"
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-          }}
-          onKeyDown={(event) => {
-            event.stopPropagation();
-          }}
-          onPointerDown={(event) => event.stopPropagation()}
-          role="button"
-          tabIndex={0}
-        >
-          <InfoIcon className="size-3.5" />
-        </span>
+          size="icon-sm"
+          type="button"
+          variant="ghost"
+        />}
+      >
+        <InfoIcon className="size-3.5" />
       </TooltipTrigger>
       <TooltipContent className="w-72 p-3" side={side}>
         {children}
@@ -2601,51 +2715,19 @@ function EmbeddedInfoTooltip({
 
 function RecommendedMarker({
   className,
-  infoAsButton = true,
   infoIconClassName,
-  message = recommendedPillTitle,
   selected = false
 }: {
   className?: string;
-  infoAsButton?: boolean;
   infoIconClassName?: string;
-  message?: string;
   selected?: boolean;
 }) {
-  const infoButtonProps = infoAsButton ? {
-    role: 'button',
-    tabIndex: 0
-  } : {};
-
   return (
     <span
-      className="relative inline-flex shrink-0 items-center"
+      aria-hidden="true"
+      className={className ?? (selected ? selectedRecommendedMarkerClassName : recommendedMarkerClassName)}
     >
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span
-            aria-label="Why this is recommended"
-            className={className ?? (selected ? selectedRecommendedMarkerClassName : recommendedMarkerClassName)}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-            }}
-            onKeyDown={(event) => {
-              event.stopPropagation();
-            }}
-            onPointerDown={(event) => event.stopPropagation()}
-            {...infoButtonProps}
-          >
-            <StarIcon aria-hidden="true" className={infoIconClassName ?? 'size-3.5'} fill="currentColor" />
-          </span>
-        </TooltipTrigger>
-        <TooltipContent className="w-64 px-3 py-2 text-left font-normal leading-5" side="bottom">
-          <div className="grid gap-1">
-            <div className="font-medium">Recommended</div>
-            <div>{message}</div>
-          </div>
-        </TooltipContent>
-      </Tooltip>
+      <StarIcon aria-hidden="true" className={infoIconClassName ?? 'size-3.5'} fill="currentColor" />
     </span>
   );
 }
@@ -2707,9 +2789,7 @@ function TruncatedTextTooltip({
 
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        {label}
-      </TooltipTrigger>
+      <TooltipTrigger render={label} />
       {isTruncated ? (
         <TooltipContent className="max-w-64 truncate" side="bottom">
           {tooltip}
@@ -2784,9 +2864,7 @@ function LocalAiRecommendationInfoButton({
 
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        {trigger}
-      </TooltipTrigger>
+      <TooltipTrigger render={trigger!} />
       <TooltipContent align="end" className="w-72 p-3" side="top">
         {content}
       </TooltipContent>
@@ -3039,62 +3117,70 @@ function TranscriptionModelRow({
   );
 
   return (
-    <div className={`grid ${rootGapClassName}`}>
+    <Tabs className={`grid ${rootGapClassName}`} value={selectedModelId}>
       <div className={controlWrapperClassName}>
-        <div className={`inline-flex ${controlWidthClassName} min-w-0 rounded-md border border-border bg-muted/30 p-0.5`} role="tablist" aria-label="Transcription model">
-          {localTranscriptionModelOptions.map((option) => {
-            const isSelected = selectedModelId === option.value;
-            const isRecommended = recommendedModelId === option.value;
+        <div className="flex min-w-0 items-center gap-2">
+          <TabsList className={`h-auto ${controlWidthClassName} min-w-0 rounded-md border border-border bg-muted/30 p-0.5`} aria-label="Transcription model">
+            {localTranscriptionModelOptions.map((option) => {
+              const isSelected = selectedModelId === option.value;
+              const isRecommended = recommendedModelId === option.value;
 
-            return (
-              <button
-                key={option.value}
-                aria-label={`${option.label}${isRecommended ? ` ${recommendedPillLabel}` : ''}`}
-                aria-selected={isSelected}
-                className={`${optionButtonClassName} ${isSelected ? '!bg-primary !text-primary-foreground shadow-sm hover:!bg-primary/90 dark:!bg-primary dark:!text-primary-foreground dark:hover:!bg-primary/90' : 'text-muted-foreground hover:text-foreground'}`}
-                onClick={() => onSelectModel(option.value)}
-                role="tab"
-                type="button"
-              >
-                <TruncatedTextTooltip className={optionLabelClassName} tooltip={option.label}>
-                  {option.label}
-                </TruncatedTextTooltip>
-                {isRecommended ? (
-                  <RecommendedMarker
-                    message={transcriptionModelRecommendationMessage}
-                    selected={isSelected}
-                  />
-                ) : null}
-              </button>
-            );
-          })}
+              return (
+                <TabsTrigger
+                  key={option.value}
+                  activeVariant="primary"
+                  aria-label={`${option.label}${isRecommended ? ` ${recommendedPillLabel}` : ''}`}
+                  className={optionButtonClassName}
+                  onClick={() => onSelectModel(option.value)}
+                  value={option.value}
+                >
+                  <TruncatedTextTooltip className={optionLabelClassName} tooltip={option.label}>
+                    {option.label}
+                  </TruncatedTextTooltip>
+                  {isRecommended ? <RecommendedMarker selected={isSelected} /> : null}
+                </TabsTrigger>
+              );
+            })}
+          </TabsList>
+          {recommendedModelId ? (
+            <SettingInfoButton
+              label="Why this is recommended"
+              message={transcriptionModelRecommendationMessage}
+            />
+          ) : null}
         </div>
         <input name="transcription-model" readOnly type="hidden" value={selectedModelId} />
       </div>
-      <div role="tabpanel" className={`grid ${widthClassName} ${rootGapClassName} text-left`}>
-        <p className={layout.settingsDescription}>{selectedModel.detail}</p>
-        <div className={downloadRowClassName}>
-          {isDownloading ? (
+      {localTranscriptionModelOptions.map((option) => (
+        <TabsContent key={option.value} className={`grid ${widthClassName} ${rootGapClassName} text-left`} value={option.value}>
+          {selectedModelId === option.value ? (
             <>
-              <Button onClick={onCancel} size={downloadButtonSize} type="button" variant="outline">Cancel</Button>
-              <span aria-label={downloadProgress.accessibleLabel} aria-live="polite" className="min-w-0 truncate text-sm tabular-nums text-muted-foreground" title={downloadProgress.accessibleLabel}>
-                {downloadProgress.label}
-              </span>
+              <p className={layout.settingsDescription}>{selectedModel.detail}</p>
+              <div className={downloadRowClassName}>
+                {isDownloading ? (
+                  <>
+                    <Button onClick={onCancel} size={downloadButtonSize} type="button" variant="outline">Cancel</Button>
+                    <span aria-label={downloadProgress.accessibleLabel} aria-live="polite" className="min-w-0 truncate text-sm tabular-nums text-muted-foreground" title={downloadProgress.accessibleLabel}>
+                      {downloadProgress.label}
+                    </span>
+                  </>
+                ) : isSelectedModelReady || isSelectedModelInUse ? (
+                  <ReadySetupPill info={selectedModelInfo} />
+                ) : (
+                  <>
+                    <Button aria-label="Download" disabled={!canDownload} onClick={() => onDownload(selectedModelId)} size={downloadButtonSize} type="button">
+                      Download
+                    </Button>
+                    {selectedModelInfo}
+                    <span aria-live="polite" className="text-sm text-muted-foreground">Not downloaded yet</span>
+                  </>
+                )}
+              </div>
             </>
-          ) : isSelectedModelReady || isSelectedModelInUse ? (
-            <ReadySetupPill info={selectedModelInfo} />
-          ) : (
-            <>
-              <Button aria-label="Download" className="gap-2" disabled={!canDownload} onClick={() => onDownload(selectedModelId)} size={downloadButtonSize} type="button">
-                Download
-                {selectedModelInfo}
-              </Button>
-              <span aria-live="polite" className="text-sm text-muted-foreground">Not downloaded yet</span>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
+          ) : null}
+        </TabsContent>
+      ))}
+    </Tabs>
   );
 }
 
@@ -3289,14 +3375,16 @@ function PermissionSetupRow({
             </span>
           ) : null}
           <Tooltip>
-            <TooltipTrigger asChild>
-              <button
+            <TooltipTrigger
+              render={<Button
                 aria-label={`${permission.label} permission info`}
                 className="inline-flex size-6 shrink-0 cursor-default items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                size="icon-sm"
                 type="button"
-              >
-                <InfoIcon className="size-3.5" />
-              </button>
+                variant="ghost"
+              />}
+            >
+              <InfoIcon className="size-3.5" />
             </TooltipTrigger>
             <TooltipContent>
               <span className="block max-w-72">
@@ -3481,16 +3569,15 @@ function PrivateOverlayResizeHandles() {
   const handles: Array<{
     className: string;
     direction: OverlayResizeDirection;
-    label: string;
   }> = [
-    { className: layout.overlayResizeHandleN, direction: 'n', label: 'Resize window from top edge' },
-    { className: layout.overlayResizeHandleE, direction: 'e', label: 'Resize window from right edge' },
-    { className: layout.overlayResizeHandleS, direction: 's', label: 'Resize window from bottom edge' },
-    { className: layout.overlayResizeHandleW, direction: 'w', label: 'Resize window from left edge' },
-    { className: layout.overlayResizeHandleNE, direction: 'ne', label: 'Resize window from top right corner' },
-    { className: layout.overlayResizeHandleSE, direction: 'se', label: 'Resize window from bottom right corner' },
-    { className: layout.overlayResizeHandleSW, direction: 'sw', label: 'Resize window from bottom left corner' },
-    { className: layout.overlayResizeHandleNW, direction: 'nw', label: 'Resize window from top left corner' }
+    { className: layout.overlayResizeHandleN, direction: 'n' },
+    { className: layout.overlayResizeHandleE, direction: 'e' },
+    { className: layout.overlayResizeHandleS, direction: 's' },
+    { className: layout.overlayResizeHandleW, direction: 'w' },
+    { className: layout.overlayResizeHandleNE, direction: 'ne' },
+    { className: layout.overlayResizeHandleSE, direction: 'se' },
+    { className: layout.overlayResizeHandleSW, direction: 'sw' },
+    { className: layout.overlayResizeHandleNW, direction: 'nw' }
   ];
 
   function getResizePoint(event: PointerEvent<HTMLDivElement>, direction: OverlayResizeDirection) {
@@ -3559,8 +3646,9 @@ function PrivateOverlayResizeHandles() {
       {handles.map((handle) => (
         <div
           key={handle.direction}
-          aria-label={handle.label}
+          aria-hidden="true"
           className={`${layout.overlayResizeHandle} ${handle.className}`}
+          data-resize-direction={handle.direction}
           onPointerCancel={handlePointerEnd}
           onPointerDown={(event) => handlePointerDown(event, handle.direction)}
           onPointerMove={handlePointerMove}
@@ -3692,6 +3780,7 @@ function PrivateOverlayWindowTitleBar({
   const quitConfirmationContent = (
     <PopoverContent
       align={isMac ? 'start' : 'end'}
+      aria-label="Quit Caul confirmation"
       className="w-56 gap-3"
       side="bottom"
       sideOffset={8}
@@ -3737,16 +3826,16 @@ function PrivateOverlayWindowTitleBar({
               type="button"
             />
             <Popover open={isQuitConfirmationOpen} onOpenChange={setIsQuitConfirmationOpen}>
-              <PopoverTrigger asChild>
-                <button
+              <PopoverTrigger
+                render={<button
                   aria-label="Quit Caul"
                   className={layout.windowTitleBarMacQuitButton}
                   data-platform="macos"
                   title="Quit Caul completely"
                   type="button"
-                >
-                  <PowerIcon />
-                </button>
+                />}
+              >
+                <PowerIcon />
               </PopoverTrigger>
               {quitConfirmationContent}
             </Popover>
@@ -3766,8 +3855,8 @@ function PrivateOverlayWindowTitleBar({
               <XIcon />
             </Button>
             <Popover open={isQuitConfirmationOpen} onOpenChange={setIsQuitConfirmationOpen}>
-              <PopoverTrigger asChild>
-                <Button
+              <PopoverTrigger
+                render={<Button
                   aria-label="Quit Caul"
                   className={layout.windowTitleBarQuitButton}
                   data-platform="desktop"
@@ -3775,24 +3864,24 @@ function PrivateOverlayWindowTitleBar({
                   title="Quit Caul completely"
                   type="button"
                   variant="ghost"
-                >
-                  <PowerIcon />
-                </Button>
+                />}
+              >
+                <PowerIcon />
               </PopoverTrigger>
               {quitConfirmationContent}
             </Popover>
           </>
         )}
         <Tooltip>
-          <TooltipTrigger asChild>
-            <button
+          <TooltipTrigger
+            render={<button
               aria-label="Open history folder"
               className={`${layout.windowTitleBarSettingsButton} ${isMac ? layout.windowTitleBarHistoryButtonMac : layout.windowTitleBarHistoryButtonDesktop}`}
               onClick={onOpenHistoryFolder}
               type="button"
-            >
-              <HistoryIcon className="mx-auto size-4" />
-            </button>
+            />}
+          >
+            <HistoryIcon className="mx-auto size-4" />
           </TooltipTrigger>
           <TooltipContent side="bottom">Open history folder</TooltipContent>
         </Tooltip>
@@ -3804,16 +3893,16 @@ function PrivateOverlayWindowTitleBar({
           />
         ) : null}
         <Tooltip>
-          <TooltipTrigger asChild>
-            <button
+          <TooltipTrigger
+            render={<button
               aria-label="Caul Settings"
               aria-pressed={isSettingsOpen}
               className={`${layout.windowTitleBarSettingsButton} ${isMac ? layout.windowTitleBarSettingsButtonMac : layout.windowTitleBarSettingsButtonDesktop} ${isSettingsOpen ? 'bg-muted text-foreground' : ''}`}
               onClick={onToggleSettings}
               type="button"
-            >
-              <SettingsIcon className="mx-auto size-4" />
-            </button>
+            />}
+          >
+            <SettingsIcon className="mx-auto size-4" />
           </TooltipTrigger>
           <TooltipContent side="bottom">Open Caul settings</TooltipContent>
         </Tooltip>
@@ -3836,22 +3925,24 @@ function MainNotificationButton({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button
+      <PopoverTrigger
+        render={<Button
           aria-label="Caul notifications"
           className={className}
           data-notification-tone={hasError ? 'error' : 'attention'}
+          size="icon"
           type="button"
-        >
-          <BellIcon className="mx-auto size-4" />
-          <span className={`absolute right-1 top-1 size-1.5 rounded-full ${hasError ? 'bg-destructive' : 'bg-primary'}`} />
-        </button>
+          variant="ghost"
+        />}
+      >
+        <BellIcon className="mx-auto size-4" />
+        <span className={`absolute right-1 top-1 size-1.5 rounded-full ${hasError ? 'bg-destructive' : 'bg-primary'}`} />
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-64 gap-2" side="bottom" sideOffset={8}>
+      <PopoverContent aria-label="Caul notifications" align="end" className="w-64 gap-2" side="bottom" sideOffset={8}>
         <h2 className="text-sm font-medium text-foreground">Needs attention</h2>
         <div className="grid gap-1">
           {notifications.map((notification) => (
-            <button
+            <Button
               key={notification.id}
               className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               onClick={() => {
@@ -3859,10 +3950,11 @@ function MainNotificationButton({
                 onOpenSettingsTarget(notification.target);
               }}
               type="button"
+              variant="ghost"
             >
               <span>{notification.label}</span>
               <ChevronRightIcon className="size-4 text-muted-foreground" />
-            </button>
+            </Button>
           ))}
         </div>
       </PopoverContent>
@@ -4718,13 +4810,15 @@ function PanelIssueRecovery({
   } else if (issue.kind === 'local-ai') {
     if (isCloudAiReady && !isLocalAiDownloading) {
       swapControl = (
-        <Button aria-label="Swap to Cloud" onClick={() => onSelectAiProvider('cloud')} type="button">
-          <span>Swap to Cloud</span>
+        <div className="inline-flex items-center gap-1.5">
+          <Button aria-label="Swap to Cloud" onClick={() => onSelectAiProvider('cloud')} type="button">
+            <span>Swap to Cloud</span>
+          </Button>
           <IssueActionInfoIcon
             label="Cloud AI tradeoff details"
             message="Cloud AI is usually faster and more capable, but prompts and transcript context are sent to the cloud provider."
           />
-        </Button>
+        </div>
       );
     }
     recoveryControl = (
@@ -4739,13 +4833,15 @@ function PanelIssueRecovery({
   } else if (issue.kind === 'cloud-ai') {
     if (recommendedLocalAiModelReady) {
       swapControl = (
-        <Button aria-label="Swap to Local" onClick={() => onSelectAiProvider('local')} type="button">
-          <span>Swap to Local</span>
+        <div className="inline-flex items-center gap-1.5">
+          <Button aria-label="Swap to Local" onClick={() => onSelectAiProvider('local')} type="button">
+            <span>Swap to Local</span>
+          </Button>
           <IssueActionInfoIcon
             label="Local AI tradeoff details"
             message="Local AI keeps prompts and transcript context on this computer, but it may be slower than Cloud."
           />
-        </Button>
+        </div>
       );
     }
     recoveryControl = (
@@ -4813,25 +4909,29 @@ function GeneralInstructionsDialog({
   onSave: (instructions: string) => void;
   open: boolean;
 }) {
+  const dialogRef = useManagedDialogFocus(open, () => onOpenChange(false));
+
   if (!open) {
     return null;
   }
 
   return (
     <>
-      <button
+      <div
+        aria-hidden="true"
         aria-label="Close general instructions backdrop"
         className={layout.settingsBackdrop}
+        data-dialog-backdrop="general-instructions"
         onClick={() => onOpenChange(false)}
-        type="button"
       />
       <section
+        ref={dialogRef}
         aria-describedby="general-instructions-dialog-description"
         aria-labelledby="general-instructions-dialog-title"
-        aria-modal="false"
+        aria-modal="true"
         className={layout.generalInstructionsDialog}
-        data-state="open"
         role="dialog"
+        tabIndex={-1}
       >
         <PlatformDialogCloseButton isMac={isMac} label="Close general instructions" onClick={() => onOpenChange(false)} />
         <div className={`${layout.promptTemplateHeader} ${isMac ? layout.promptTemplateHeaderMac : ''}`}>
@@ -5286,8 +5386,8 @@ function ConfirmClearButton({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <TooltipButton
+      <PopoverTrigger
+        render={<TooltipButton
           aria-label={ariaLabel}
           className={className}
           disabled={disabled}
@@ -5296,12 +5396,12 @@ function ConfirmClearButton({
           tooltipSide={tooltipSide}
           type="button"
           variant="outline"
-        >
-          <Trash2Icon />
-          <span className={showLabels ? layout.expandedToolbarButtonLabel : 'sr-only'}>Clear</span>
-        </TooltipButton>
+        />}
+      >
+        <Trash2Icon />
+        <span className={showLabels ? layout.expandedToolbarButtonLabel : 'sr-only'}>Clear</span>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-64 gap-3" side={tooltipSide}>
+      <PopoverContent aria-label={title} align="end" className="w-64 gap-3" side={tooltipSide}>
         <div>
           <div className="text-sm font-medium">{title}</div>
           <p className="text-sm text-muted-foreground">{description}</p>
@@ -6096,10 +6196,8 @@ function SectionCollapseButton({
   }
 
   return (
-    <Tooltip disableHoverableContent={false}>
-      <TooltipTrigger asChild>
-        {button}
-      </TooltipTrigger>
+    <Tooltip disableHoverablePopup={false}>
+      <TooltipTrigger render={button} />
       <TooltipContent className={layout.sectionPreviewTooltip} collisionPadding={12} side="bottom">
         <div className="markdown-output">
           <ReactMarkdown>{formatPreviewMarkdown(preview)}</ReactMarkdown>
@@ -6225,29 +6323,32 @@ function PromptTemplateSelector({
           setIsOpen(open);
         }}
       >
-        <Tooltip open={isOpen || isEditTooltipActive ? false : undefined}>
-          <TooltipTrigger asChild>
-            <PopoverTrigger asChild>
-              <Button
+        <Tooltip
+          key={isOpen || isEditTooltipActive ? 'closed' : 'automatic'}
+          open={isOpen || isEditTooltipActive ? false : undefined}
+        >
+          <TooltipTrigger
+            render={<PopoverTrigger
+              render={<Button
                 aria-label="Prompt template"
                 className={isCompact ? layout.promptTemplateTriggerVertical : layout.promptTemplateTrigger}
                 size={isCompact ? 'icon-lg' : 'lg'}
                 type="button"
                 variant="outline"
-              >
-                <ListChecksIcon className={layout.promptTemplateCompactIcon} />
-                <span className={isCompact ? 'sr-only' : 'prompt-template-trigger-label min-w-0 flex-1 truncate text-left'}>
-                  {selectedTemplateName}
-                </span>
-                <ChevronDownIcon className="prompt-template-trigger-chevron" />
-              </Button>
-            </PopoverTrigger>
-          </TooltipTrigger>
+              />}
+            >
+              <ListChecksIcon className={layout.promptTemplateCompactIcon} />
+              <span className={isCompact ? 'sr-only' : 'prompt-template-trigger-label min-w-0 flex-1 truncate text-left'}>
+                {selectedTemplateName}
+              </span>
+              <ChevronDownIcon className="prompt-template-trigger-chevron" />
+            </PopoverTrigger>}
+          />
           <TooltipContent className="max-w-64 whitespace-pre-line break-words leading-4" collisionPadding={8} side={tooltipSide}>
             {selectedTemplateTooltip}
           </TooltipContent>
         </Tooltip>
-        <PopoverContent align="start" className="w-80">
+        <PopoverContent aria-label="Prompt templates" align="start" className="w-80">
           <div className={layout.promptTemplateSearch}>
             <SearchIcon className={layout.promptTemplateSearchIcon} />
             <Input
@@ -6259,31 +6360,34 @@ function PromptTemplateSelector({
             />
           </div>
           <div className={`${layout.pickerList} ${layout.pickerListScrollable}`}>
-            <button
+            <Button
               aria-current={selectedTemplateIds.length === 0 ? 'true' : undefined}
-              className={layout.pickerItem}
               data-active={selectedTemplateIds.length === 0}
               onClick={clearTemplates}
               type="button"
+              size="picker"
+              variant="picker"
             >
               <span className={layout.pickerItemLabel}>No template</span>
-            </button>
+            </Button>
             {filteredTemplates.map((template) => {
               const isSelected = selectedTemplateIds.includes(template.id);
 
               return (
-                <button
+                <Button
                   key={template.id}
                   aria-current={isSelected ? 'true' : undefined}
                   aria-pressed={isSelected}
-                  className={`${layout.pickerItem} ${layout.pickerCheckboxItem}`}
+                  className={layout.pickerCheckboxItem}
                   data-active={isSelected}
                   onClick={() => toggleTemplate(template.id)}
                   type="button"
+                  size="picker"
+                  variant="picker"
                 >
                   <CheckboxDisplay aria-hidden="true" checked={isSelected} />
                   <span className={layout.pickerItemLabel}>{template.name}</span>
-                </button>
+                </Button>
               );
             })}
             {filteredTemplates.length === 0 ? (
@@ -6345,15 +6449,11 @@ function PromptTemplateDialog({
   const [deleteConfirmationId, setDeleteConfirmationId] = useState<string | null>(null);
   const draftAttachments = draft.attachments ?? [];
   const modelAttachmentSupport = getLlmModelAttachmentSupport(currentModel);
+  const dialogRef = useManagedDialogFocus(open, () => onOpenChange(false));
 
   useEffect(() => {
     if (open) {
       setVisibleTemplates(templates);
-      setActiveId((current) => (
-        current && templates.some((template) => template.id === current)
-          ? current
-          : templates[0]?.id ?? null
-      ));
     }
   }, [open, templates]);
 
@@ -6363,15 +6463,10 @@ function PromptTemplateDialog({
       return;
     }
 
-    if (activeId && !visibleTemplates.some((template) => template.id === activeId)) {
-      return;
-    }
-
-    const nextTemplate = visibleTemplates.find((template) => template.id === activeId) ?? visibleTemplates[0] ?? createPromptTemplate({ name: '', prompt: '' });
+    const nextTemplate = templates.find((template) => template.id === activeId) ?? templates[0] ?? createPromptTemplate({ name: '', prompt: '' });
     setActiveId(nextTemplate.id);
     setDraft(nextTemplate);
-    setDeleteConfirmationId((id) => (id && visibleTemplates.some((template) => template.id === id) ? id : null));
-  }, [activeId, draft.id, open, visibleTemplates]);
+  }, [open]);
 
   function createNewTemplate() {
     const template = withPromptTemplateTimestamp(createPromptTemplate({ name: '', prompt: '' }));
@@ -6439,19 +6534,21 @@ function PromptTemplateDialog({
 
   return (
     <>
-      <button
+      <div
+        aria-hidden="true"
         aria-label="Close prompt templates backdrop"
         className={layout.settingsBackdrop}
+        data-dialog-backdrop="prompt-templates"
         onClick={() => onOpenChange(false)}
-        type="button"
       />
       <section
+        ref={dialogRef}
         aria-describedby="prompt-templates-dialog-description"
         aria-labelledby="prompt-templates-dialog-title"
-        aria-modal="false"
+        aria-modal="true"
         className={layout.promptTemplateDialog}
-        data-state="open"
         role="dialog"
+        tabIndex={-1}
       >
         <PlatformDialogCloseButton isMac={isMac} label="Close prompt templates" onClick={() => onOpenChange(false)} />
         <div className={`${layout.promptTemplateHeader} ${isMac ? layout.promptTemplateHeaderMac : ''}`}>
@@ -6468,31 +6565,38 @@ function PromptTemplateDialog({
             <div className={`${layout.pickerList} ${layout.pickerListScrollable}`}>
               {visibleTemplates.map((template) => (
                 <div key={template.id} className={layout.pickerRow}>
-                  <button
+                  <Button
                     aria-current={activeId === template.id ? 'true' : undefined}
-                    className={`${layout.pickerItem} ${layout.pickerRowButton}`}
+                    className={layout.pickerRowButton}
                     data-active={activeId === template.id}
                     onClick={() => selectTemplate(template)}
                     type="button"
+                    size="picker"
+                    variant="picker"
                   >
                     <span className={layout.pickerItemLabel}>{getPromptTemplateDisplayName(template)}</span>
-                  </button>
+                  </Button>
                   <Popover
                     open={deleteConfirmationId === template.id}
                     onOpenChange={(nextOpen) => setDeleteConfirmationId(nextOpen ? template.id : null)}
                   >
-                    <PopoverTrigger asChild>
-                      <Button
+                    <PopoverTrigger
+                      render={<Button
                         aria-label={`Delete ${getPromptTemplateDisplayName(template)}`}
                         className={layout.pickerRowDelete}
                         size="icon-sm"
                         type="button"
                         variant="ghost"
-                      >
-                        <XIcon />
-                      </Button>
+                      />}
+                    >
+                      <XIcon />
                     </PopoverTrigger>
-                    <PopoverContent align="end" className="w-64 gap-3" side="right">
+                    <PopoverContent
+                      aria-label={`Delete ${getPromptTemplateDisplayName(template)}`}
+                      align="end"
+                      className="w-64 gap-3"
+                      side="right"
+                    >
                       <div>
                         <div className="text-sm font-medium">Delete this template?</div>
                         <p className="text-sm text-muted-foreground">
@@ -6876,11 +6980,7 @@ function PlatformDialogCloseButton({
     </Button>
   );
 
-  return onClick ? closeButton : (
-    <DialogClose asChild>
-      {closeButton}
-    </DialogClose>
-  );
+  return onClick ? closeButton : <DialogClose render={closeButton} />;
 }
 
 function mergePromptTemplateAttachments(
@@ -6955,10 +7055,10 @@ function DownloadTranscriptPopover({
 }) {
   return (
     <Popover>
-      <Tooltip disableHoverableContent={preview ? false : undefined}>
-        <TooltipTrigger asChild>
-          <PopoverTrigger asChild>
-            <Button
+      <Tooltip disableHoverablePopup={preview ? false : undefined}>
+        <TooltipTrigger
+          render={<PopoverTrigger
+            render={<Button
               aria-label={label}
               className={triggerClassName}
               disabled={disabled}
@@ -6966,17 +7066,17 @@ function DownloadTranscriptPopover({
               size={triggerSize}
               type="button"
               variant="outline"
-            >
-              <DownloadIcon />
-              <span className={showTriggerLabel ? layout.expandedToolbarButtonLabel : 'sr-only'}>{triggerLabel}</span>
-            </Button>
-          </PopoverTrigger>
-        </TooltipTrigger>
+            />}
+          >
+            <DownloadIcon />
+            <span className={showTriggerLabel ? layout.expandedToolbarButtonLabel : 'sr-only'}>{triggerLabel}</span>
+          </PopoverTrigger>}
+        />
         <TooltipContent className={preview ? layout.sectionPreviewTooltip : undefined} side={tooltipSide}>
           {getActionTooltipWithPreview(label, preview)}
         </TooltipContent>
       </Tooltip>
-      <PopoverContent align="end" className="w-48">
+      <PopoverContent aria-label={label ?? 'Download options'} align="end" className="w-48">
         <TooltipButton
           className="justify-start"
           onClick={() => onDownload('txt')}
@@ -7033,7 +7133,9 @@ function TooltipButton({
     }
   }, []);
 
-  function handleClick(event: MouseEvent<HTMLButtonElement>) {
+  function handleClick(
+    event: Parameters<NonNullable<React.ComponentProps<typeof Button>['onClick']>>[0]
+  ) {
     onClick?.(event);
 
     if (!flashTooltipOnClick || event.defaultPrevented) {
@@ -7067,10 +7169,8 @@ function TooltipButton({
   }
 
   return (
-    <Tooltip disableHoverableContent={tooltipInteractive ? false : undefined} {...tooltipProps}>
-      <TooltipTrigger asChild>
-        {button}
-      </TooltipTrigger>
+    <Tooltip disableHoverablePopup={tooltipInteractive ? false : undefined} {...tooltipProps}>
+      <TooltipTrigger render={button} />
       <TooltipContent className={tooltipClassName} side={tooltipSide}>
         {tooltip}
       </TooltipContent>
@@ -7484,6 +7584,7 @@ function SettingsPage({
   setLlmReasoning: (reasoning: LlmReasoning) => void;
   setLocalLlmReasoning: (reasoning: LlmReasoning) => void;
 }) {
+  const dialogRef = useManagedDialogFocus(true, onClose);
   const [isResetDialogOpen, setIsResetDialogOpen] = useState(false);
   const [isQuitConfirmationOpen, setIsQuitConfirmationOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection);
@@ -7505,7 +7606,9 @@ function SettingsPage({
   const hasInitialisedTranscriptionModelRef = useRef(false);
   const autoSelectingReadyModelRef = useRef<LocalTranscriptionModelId | null>(null);
   const hasDownloadedUpdate = isUpdateDownloaded(updateStatus);
-  const isRestartingForUpdate = isInstallingUpdate || isUpdateInstalling(updateStatus);
+  const automaticallyInstallsUpdates = updateStatus?.automaticInstall !== false;
+  const isRestartingForUpdate = automaticallyInstallsUpdates
+    && (isInstallingUpdate || isUpdateInstalling(updateStatus));
   const isCloudAiReady = Boolean(onboardingStatus?.pi.connected);
   const recommendedLocalAiModel = onboardingStatus?.ai.recommended === 'local' ? onboardingStatus.ai.recommendedModel : null;
   const recommendedLocalAiModelReady = Boolean(
@@ -7849,18 +7952,21 @@ function SettingsPage({
 
   return (
     <>
-      <button
+      <div
+        aria-hidden="true"
         aria-label="Close settings backdrop"
         className={layout.settingsBackdrop}
+        data-dialog-backdrop="settings"
         onClick={onClose}
-        type="button"
       />
       <section
+        ref={dialogRef}
         aria-describedby="settings-dialog-description"
         aria-labelledby="settings-dialog-title"
-        aria-modal="false"
+        aria-modal="true"
         className={layout.settingsDialog}
         role="dialog"
+        tabIndex={-1}
       >
         <PlatformDialogCloseButton isMac={isMac} label="Close settings" onClick={onClose} />
         <div className={`${layout.settingsHeader} ${isMac ? layout.settingsHeaderMac : ''}`}>
@@ -7872,16 +7978,17 @@ function SettingsPage({
         <div className={layout.settingsContent}>
           <nav aria-label="Settings sections" className={layout.settingsSidebar}>
             {settingsSections.map((section) => (
-              <button
+              <Button
                 key={section.id}
                 aria-current={activeSection === section.id ? 'page' : undefined}
-                className={layout.pickerItem}
                 data-active={activeSection === section.id}
                 onClick={() => setActiveSection(section.id)}
                 type="button"
+                size="picker"
+                variant="picker"
               >
                 <span className={layout.pickerItemLabel}>{section.label}</span>
-              </button>
+              </Button>
             ))}
           </nav>
           <div className={layout.settingsPanel}>
@@ -7892,6 +7999,7 @@ function SettingsPage({
                     <Field className="w-auto">
                       <FieldLabel htmlFor="floating-button-size">Size</FieldLabel>
                       <Select
+                        items={privateOverlayHandleSizeOptions}
                         name="floating-button-size"
                         value={privateOverlayStatus?.handle.size ?? 'medium'}
                         onValueChange={(value) => onSetPrivateOverlayHandleSize(value as PrivateOverlayHandleSize)}
@@ -7969,6 +8077,7 @@ function SettingsPage({
                           <FieldLabel htmlFor="update-frequency">Automatic checks</FieldLabel>
                           <Select
                             disabled={!updateStatus?.enabled || updateStatus.checking || updateStatus.downloading || isRestartingForUpdate}
+                            items={updateFrequencyOptions}
                             name="update-frequency"
                             value={updateStatus?.frequency ?? 'weekly'}
                             onValueChange={(value) => void getSettingsBridge()?.updates?.setFrequency(value as UpdateFrequency)}
@@ -8012,7 +8121,7 @@ function SettingsPage({
                             {updateStatus.downloading ? <LoaderCircleIcon className="animate-spin" /> : <DownloadIcon />}
                             Download
                           </TooltipButton>
-                        ) : (
+                        ) : automaticallyInstallsUpdates ? (
                           <TooltipButton
                             disabled={isRestartingForUpdate}
                             onClick={() => void restartToInstallUpdate()}
@@ -8022,6 +8131,15 @@ function SettingsPage({
                           >
                             {isRestartingForUpdate ? <LoaderCircleIcon className="animate-spin" /> : null}
                             {isRestartingForUpdate ? 'Restarting...' : 'Restart to update'}
+                          </TooltipButton>
+                        ) : (
+                          <TooltipButton
+                            disabled
+                            size="default"
+                            tooltip="The package is ready in Downloads"
+                            type="button"
+                          >
+                            Downloaded
                           </TooltipButton>
                         )}
                         {updateStatus?.availableUpdate ? (
@@ -8057,6 +8175,7 @@ function SettingsPage({
                           <FieldLabel htmlFor="model-catalogue-refresh-frequency">Automatic refresh</FieldLabel>
                           <Select
                             disabled={!catalogueRefreshStatus?.enabled || isListening || isBusy || isRefreshingCatalogue}
+                            items={updateFrequencyOptions}
                             name="model-catalogue-refresh-frequency"
                             value={catalogueRefreshStatus?.frequency ?? 'monthly'}
                             onValueChange={(value) => void setCatalogueRefreshFrequency(value as UpdateFrequency)}
@@ -8121,13 +8240,11 @@ function SettingsPage({
                     <div className="flex w-fit max-w-full flex-col items-start gap-2">
                       <div className="flex">
                         <Popover open={isQuitConfirmationOpen} onOpenChange={setIsQuitConfirmationOpen}>
-                          <PopoverTrigger asChild>
-                            <Button size="default" type="button" variant="destructive">
-                              <LogOutIcon />
-                              Quit Caul
-                            </Button>
+                          <PopoverTrigger render={<Button size="default" type="button" variant="destructive" />}>
+                            <LogOutIcon />
+                            Quit Caul
                           </PopoverTrigger>
-                          <PopoverContent align="start" className="w-56 gap-3" side="right" sideOffset={8}>
+                          <PopoverContent aria-label="Quit Caul confirmation" align="start" className="w-56 gap-3" side="right" sideOffset={8}>
                             <div className="space-y-1">
                               <h2 className="text-sm font-medium text-foreground">Quit Caul?</h2>
                               <p className="text-xs text-muted-foreground">
@@ -8215,32 +8332,37 @@ function SettingsPage({
                     <p className={layout.settingsDescription}>
                       Controls how Caul writes answers after it has a transcript.
                     </p>
-                    <FieldGroup>
-                      <div className="inline-flex w-full max-w-sm rounded-md border border-border bg-muted/30 p-0.5" role="tablist" aria-label="AI provider">
-                        {(['local', 'cloud'] as AiProvider[]).map((provider) => (
-                          <button
-                            key={provider}
-                            aria-label={`${provider === 'local' ? 'Local' : 'Cloud'}${onboardingStatus?.ai?.recommended === provider ? ` ${recommendedPillLabel}` : ''}`}
-                            aria-selected={selectedAiProvider === provider}
-                            className={`inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-[6px] px-3 text-sm font-medium transition-colors ${selectedAiProvider === provider ? '!bg-primary !text-primary-foreground shadow-sm hover:!bg-primary/90 dark:!bg-primary dark:!text-primary-foreground dark:hover:!bg-primary/90' : 'text-muted-foreground hover:text-foreground'}`}
-                            disabled={isListening || isBusy}
-                            onClick={() => void selectAiProvider(provider)}
-                            role="tab"
-                            type="button"
-                          >
-                            <span>{provider === 'local' ? 'Local' : 'Cloud'}</span>
-                            {onboardingStatus?.ai?.recommended === provider ? (
-                              <RecommendedMarker
-                                message={getAiProviderRecommendationMessage(provider)}
-                                selected={selectedAiProvider === provider}
-                              />
-                            ) : null}
-                          </button>
-                        ))}
+                    <Tabs className="gap-3" value={selectedAiProvider}>
+                      <div className="flex min-w-0 max-w-sm items-center gap-2">
+                        <TabsList aria-label="AI provider" className="h-auto w-full rounded-md border border-border bg-muted/30 p-0.5">
+                          {(['local', 'cloud'] as AiProvider[]).map((provider) => (
+                            <TabsTrigger
+                              key={provider}
+                              activeVariant="primary"
+                              aria-label={`${provider === 'local' ? 'Local' : 'Cloud'}${onboardingStatus?.ai?.recommended === provider ? ` ${recommendedPillLabel}` : ''}`}
+                              className="h-8 rounded-[6px] px-3"
+                              disabled={isListening || isBusy}
+                              onClick={() => void selectAiProvider(provider)}
+                              value={provider}
+                            >
+                              <span>{provider === 'local' ? 'Local' : 'Cloud'}</span>
+                              {onboardingStatus?.ai?.recommended === provider ? (
+                                <RecommendedMarker selected={selectedAiProvider === provider} />
+                              ) : null}
+                            </TabsTrigger>
+                          ))}
+                        </TabsList>
+                        {onboardingStatus?.ai?.recommended && onboardingStatus.ai.recommended !== 'none' ? (
+                          <SettingInfoButton
+                            label="Why this is recommended"
+                            message={getAiProviderRecommendationMessage(onboardingStatus.ai.recommended)}
+                          />
+                        ) : null}
                       </div>
 
-                      {selectedAiProvider === 'local' ? (
-                        <FieldGroup className="max-w-2xl text-sm">
+                      <TabsContent className="max-w-2xl text-sm" value="local">
+                        {selectedAiProvider === 'local' ? (
+                          <FieldGroup>
                           <p className={layout.settingsDescription}>Data stays local and private. Slower and less intelligent than Cloud.</p>
                           <LocalAiDownloadControl
                             align="start"
@@ -8259,6 +8381,7 @@ function SettingsPage({
                               <FieldLabel htmlFor="local-llm-reasoning">Thinking</FieldLabel>
                               <Select
                                 disabled={isListening || isBusy}
+                                items={llmReasoningLevels}
                                 name="local-llm-reasoning"
                                 value={localLlmReasoning}
                                 onValueChange={(value) => setLocalLlmReasoning(value as LlmReasoning)}
@@ -8280,9 +8403,12 @@ function SettingsPage({
                               </Select>
                             </Field>
                           </FieldGroup>
-                        </FieldGroup>
-                      ) : (
-                        <FieldGroup className="max-w-2xl text-sm">
+                          </FieldGroup>
+                        ) : null}
+                      </TabsContent>
+                      <TabsContent className="max-w-2xl text-sm" value="cloud">
+                        {selectedAiProvider === 'cloud' ? (
+                          <FieldGroup>
                           <p className={layout.settingsDescription}>Sends to a cloud model like ChatGPT. Faster and smarter than Local.</p>
                           <CloudSignInControl
                             align="start"
@@ -8300,6 +8426,7 @@ function SettingsPage({
                                   <FieldLabel htmlFor="llm-model">Model</FieldLabel>
                                   <Select
                                     disabled={isListening || isBusy}
+                                    items={llmModels}
                                     name="llm-model"
                                     value={llmModel}
                                     onValueChange={(value) => setLlmModel(value as LlmModel)}
@@ -8325,6 +8452,7 @@ function SettingsPage({
                                   <FieldLabel htmlFor="llm-reasoning">Reasoning</FieldLabel>
                                   <Select
                                     disabled={isListening || isBusy}
+                                    items={llmReasoningLevels}
                                     name="llm-reasoning"
                                     value={llmReasoning}
                                     onValueChange={(value) => setLlmReasoning(value as LlmReasoning)}
@@ -8348,8 +8476,9 @@ function SettingsPage({
                               </FieldGroup>
                             </>
                           ) : null}
-                        </FieldGroup>
-                      )}
+                          </FieldGroup>
+                        ) : null}
+                      </TabsContent>
                       <FieldGroup className={layout.settingsSectionBody}>
                         <ModelAutoUpdateCheckbox
                           checked={onboardingStatus?.autoUpdate?.ai ?? true}
@@ -8375,7 +8504,7 @@ function SettingsPage({
                           </FieldContent>
                         </Field>
                       </FieldGroup>
-                    </FieldGroup>
+                    </Tabs>
                   </FieldGroup>
                   </SettingsSectionBlock>
                 ) : null}
@@ -8388,8 +8517,7 @@ function SettingsPage({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Reset settings?</DialogTitle>
-            <DialogDescription asChild>
-              <div>
+            <DialogDescription render={<div />}>
                 <p>This will restore:</p>
                 <ul className="mt-2 list-disc space-y-1 pl-5">
                   <li>Window size and location</li>
@@ -8400,14 +8528,11 @@ function SettingsPage({
                 <p className="mt-3">
                   Your user prompt templates will be backed up to {promptTemplateBackupFolder}, then removed from active prompts.
                 </p>
-              </div>
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <DialogClose asChild>
-              <Button type="button" variant="outline">
-                Cancel
-              </Button>
+            <DialogClose render={<Button type="button" variant="outline" />}>
+              Cancel
             </DialogClose>
             <Button onClick={confirmResetSettings} type="button" variant="destructive">
               Reset Settings

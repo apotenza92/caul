@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import axe from 'axe-core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { initialCaptureStatus, type CaptureRunState } from './foundation/capture';
@@ -62,6 +63,37 @@ describe('App', () => {
     expect(screen.getByTestId('home-panels')).toHaveAttribute('data-panel-flow', 'side-by-side');
   });
 
+  it('has no automated accessibility violations on the main app and settings surfaces', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByRole('button', { name: 'Start Listening' });
+    const homeResults = await axe.run(document.body, {
+      rules: { 'color-contrast': { enabled: false } }
+    });
+    expect(homeResults.violations).toEqual([]);
+
+    await user.click(screen.getByRole('button', { name: 'Caul Settings' }));
+    await screen.findByRole('dialog', { name: 'Settings' });
+    const settingsResults = await axe.run(document.body, {
+      rules: { 'color-contrast': { enabled: false } }
+    });
+    expect(settingsResults.violations).toEqual([]);
+  });
+
+  it('has no automated accessibility violations on onboarding tabs and panels', async () => {
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
+    installTestBridge();
+    render(<App />);
+
+    await openOnboardingStep(userEvent.setup(), 'AI responses');
+    const results = await axe.run(document.body, {
+      rules: { 'color-contrast': { enabled: false } }
+    });
+
+    expect(results.violations).toEqual([]);
+  });
+
   it('shows the running app flavour in the open window title', async () => {
     installTestBridge({
       runtimeContext: testRuntimeContext({
@@ -110,6 +142,39 @@ describe('App', () => {
     expect(screen.queryByRole('dialog', { name: 'Settings' })).not.toBeInTheDocument();
   });
 
+  it('traps focus in desktop sheets, closes them with Escape, and restores their openers', async () => {
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    const settingsOpener = await screen.findByRole('button', { name: 'Caul Settings' });
+    await user.click(settingsOpener);
+    const settingsDialog = await screen.findByRole('dialog', { name: 'Settings' });
+    expect(screen.getByTestId('home-panels').closest('[inert]')).not.toBeNull();
+    expect(settingsOpener.closest('[inert]')).not.toBeNull();
+    const settingsClose = within(settingsDialog).getByRole('button', { name: 'Close settings' });
+    await waitFor(() => expect(settingsClose).toHaveFocus());
+    await user.tab({ shift: true });
+    expect(settingsDialog).toContainElement(document.activeElement as HTMLElement);
+    settingsClose.focus();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(settingsOpener).toHaveFocus());
+
+    const templatesOpener = screen.getByRole('button', { name: 'Manage prompt templates' });
+    await user.click(templatesOpener);
+    const templatesDialog = await screen.findByRole('dialog', { name: 'Prompt templates' });
+    await waitFor(() => expect(within(templatesDialog).getByRole('button', { name: 'Close prompt templates' })).toHaveFocus());
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(templatesOpener).toHaveFocus());
+
+    const instructionsOpener = screen.getByRole('button', { name: 'Instructions' });
+    await user.click(instructionsOpener);
+    const instructionsDialog = await screen.findByRole('dialog', { name: 'Instructions' });
+    await waitFor(() => expect(within(instructionsDialog).getByRole('button', { name: 'Close general instructions' })).toHaveFocus());
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(instructionsOpener).toHaveFocus());
+  });
+
   it('opens the history folder from the title bar', async () => {
     const user = userEvent.setup();
     const bridge = installTestBridge();
@@ -134,14 +199,14 @@ describe('App', () => {
 
     await openSettings(user);
 
-    expect(await screen.findByLabelText('Save HTML history')).toBeChecked();
+    expect(await screen.findByRole('checkbox', { name: 'Save HTML history' })).toBeChecked();
     expect(screen.getByText('/Users/alex/Documents/Caul')).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'History and storage' })).toBeInTheDocument();
     expect(screen.getByText('Moved Caul folder, but 1 HTML history file could not be moved.')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Open Caul Folder' }));
     await user.click(screen.getByRole('button', { name: 'Change Folder' }));
-    await user.click(screen.getByLabelText('Save HTML history'));
+    await user.click(screen.getByRole('checkbox', { name: 'Save HTML history' }));
 
     expect(bridge.historyFolderOpens).toBe(1);
     expect(bridge.historyFolderChooses).toBe(1);
@@ -156,9 +221,10 @@ describe('App', () => {
 
     await user.click(screen.getByRole('button', { name: 'Caul Settings' }));
     expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Close settings backdrop' })).toHaveClass('cursor-default');
+    const settingsBackdrop = document.querySelector<HTMLElement>('[data-dialog-backdrop="settings"]');
+    expect(settingsBackdrop).toHaveClass('cursor-default');
 
-    await user.click(screen.getByRole('button', { name: 'Close settings backdrop' }));
+    await user.click(settingsBackdrop!);
 
     expect(screen.queryByRole('dialog', { name: 'Settings' })).not.toBeInTheDocument();
   });
@@ -1599,9 +1665,11 @@ describe('App', () => {
 
     render(<App />);
 
-    const resizeHandle = await screen.findByLabelText('Resize window from left edge');
+    await screen.findByRole('button', { name: 'Start Listening' });
+    const resizeHandle = document.querySelector('[data-resize-direction="w"]') as HTMLElement;
+    const topResizeHandle = document.querySelector('[data-resize-direction="n"]') as HTMLElement;
 
-    expect(screen.getByLabelText('Resize window from top edge')).toHaveClass('top-0', 'h-[11px]');
+    expect(topResizeHandle).toHaveClass('top-0', 'h-[11px]');
     expect(resizeHandle).toHaveClass('left-0', 'w-[11px]');
 
     fireEvent.pointerDown(resizeHandle, {
@@ -2877,9 +2945,9 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Prompt template' }));
     expect(await screen.findByText('STAR')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'CV' }).querySelector('[data-slot="checkbox"]'))
-      .toHaveAttribute('data-state', 'unchecked');
+      .not.toHaveAttribute('data-checked');
     expect(screen.getByRole('button', { name: 'STAR' }).querySelector('[data-slot="checkbox"]'))
-      .toHaveAttribute('data-state', 'unchecked');
+      .not.toHaveAttribute('data-checked');
     expect(screen.getByRole('button', { name: 'No template' }).querySelector('[data-slot="checkbox"]'))
       .not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'No template' })).toHaveAttribute('data-active', 'true');
@@ -3049,7 +3117,7 @@ describe('App', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Manage prompt templates' }));
 
-    expect(screen.getByRole('dialog', { name: 'Prompt templates' })).toHaveAttribute('data-state', 'open');
+    expect(screen.getByRole('dialog', { name: 'Prompt templates' })).toBeVisible();
     expect(document.querySelector('[data-slot="dialog-overlay"]')).not.toBeInTheDocument();
   });
 
@@ -3063,7 +3131,7 @@ describe('App', () => {
 
     const instructionsDialog = screen.getByRole('dialog', { name: 'Instructions' });
     const instructionsInput = within(instructionsDialog).getByRole('textbox', { name: 'Instructions' });
-    expect(instructionsDialog).toHaveAttribute('data-state', 'open');
+    expect(instructionsDialog).toBeVisible();
     expect(instructionsDialog).toHaveClass('caul-large-modal-shell', 'h-[85vh]', 'w-[85vw]');
     expect(instructionsInput).toHaveValue('');
     expect(instructionsInput).toHaveAttribute('placeholder', 'e.g. Always answer in British English.');
@@ -6556,8 +6624,7 @@ function testRuntimeContext(overrides: Partial<RuntimeContext> = {}): RuntimeCon
     appChannel: overrides.appChannel ?? 'stable',
     appName: overrides.appName ?? 'Caul',
     isMac: overrides.isMac ?? true,
-    platform: overrides.platform ?? 'darwin',
-    vmTestingTarget: overrides.vmTestingTarget ?? 'test'
+    platform: overrides.platform ?? 'darwin'
   };
 }
 
