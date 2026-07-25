@@ -670,13 +670,39 @@ function createLocalLlmService({
       fs.mkdirSync(pathModule.dirname(destinationPath), { recursive: true });
       const file = fs.createWriteStream(destinationPath);
       downloadState.file = file;
+      let delegated = false;
+      let settled = false;
+
+      const clearActiveFile = () => {
+        if (downloadState.file === file) {
+          downloadState.file = null;
+        }
+      };
+      const rejectOnce = (error) => {
+        if (settled || delegated) {
+          return;
+        }
+        settled = true;
+        clearActiveFile();
+        fs.rmSync(destinationPath, { force: true });
+        reject(downloadState.cancelled ? new Error(DOWNLOAD_CANCELLED_MESSAGE) : error);
+      };
+      const resolveOnce = () => {
+        if (settled || delegated) {
+          return;
+        }
+        settled = true;
+        clearActiveFile();
+        resolve();
+      };
+
+      file.once('error', rejectOnce);
 
       const request = httpsModule.get(url, { agent: false }, (response) => {
         if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+          delegated = true;
           file.destroy();
-          if (downloadState.file === file) {
-            downloadState.file = null;
-          }
+          clearActiveFile();
           fs.rmSync(destinationPath, { force: true });
           downloadFile(new URL(response.headers.location, url).toString(), destinationPath, downloadState, progressBase)
             .then(resolve, reject);
@@ -684,12 +710,8 @@ function createLocalLlmService({
         }
 
         if (response.statusCode !== 200) {
+          rejectOnce(new Error(`Download failed with HTTP ${response.statusCode}.`));
           file.destroy();
-          if (downloadState.file === file) {
-            downloadState.file = null;
-          }
-          fs.rmSync(destinationPath, { force: true });
-          reject(new Error(`Download failed with HTTP ${response.statusCode}.`));
           return;
         }
 
@@ -720,23 +742,20 @@ function createLocalLlmService({
         response.pipe(file);
         file.once('finish', () => {
           emitStatus(status(downloadState.modelId));
-          file.close(() => {
-            if (downloadState.file === file) {
-              downloadState.file = null;
+          file.close((error) => {
+            if (error) {
+              rejectOnce(error);
+            } else {
+              resolveOnce();
             }
-            resolve();
           });
         });
       });
 
       downloadState.request = request;
       request.once('error', (error) => {
+        rejectOnce(error);
         file.destroy();
-        if (downloadState.file === file) {
-          downloadState.file = null;
-        }
-        fs.rmSync(destinationPath, { force: true });
-        reject(error);
       });
     });
   }
