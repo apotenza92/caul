@@ -2,6 +2,11 @@
 
 All notable Caul changes are recorded here.
 
+## [0.1.36]
+
+- Kept hosted Windows N-1 installations on the same volume as the NSIS plug-in directory so the legacy atomic update path is tested without an artificial cross-volume deadlock.
+- Made the Windows installer recover the exact incomplete `0.1.21` ARM64 registration by safely overwriting its partial files without deleting user data or an arbitrary installation directory.
+
 ## [0.1.35]
 
 - Added an exact-tag recovery gate for the immutable `0.1.21` Windows ARM64 partial installers while retaining the full x64 N-1 launch, upgrade and user-data checks.
