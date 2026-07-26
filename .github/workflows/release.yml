@@ -217,10 +217,6 @@ jobs:
             $env:FORCE_BETA_BUILD = "true"
             $env:CAUL_PACKAGE_PLATFORM = "win"
             $env:CAUL_PACKAGE_ARCH = "${{ matrix.arch }}"
-            if ("${{ matrix.arch }}" -eq "arm64") {
-              $env:USE_SYSTEM_7ZA = "true"
-              node scripts/prepare-windows-7za.mjs
-            }
             npx --no-install electron-builder --config electron-builder.config.cjs --win nsis --${{ matrix.arch }} --publish=never
             node scripts/verify-native-package.mjs --platform windows --arch ${{ matrix.arch }} --channel beta
           }

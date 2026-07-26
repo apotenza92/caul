@@ -21,6 +21,8 @@ Before publication, native Windows and Linux runners install the previous public
 
 Windows installer checks keep Microsoft Defender active. If an expected executable disappears during installation, the workflow records matching Defender detections and operational-log events before failing. It must not add scanning exclusions or disable real-time protection to make a package pass.
 
+Windows ARM64 NSIS payloads force the established BCJ executable filter. Modern 7-Zip otherwise selects its newer ARM64 filter automatically, which the bundled NSIS extractor cannot restore. Electron Builder supplies the checksum-pinned native 7-Zip toolset; do not reintroduce a machine-level 7za shim.
+
 Releases are tag-push only. Every validation and packaging job checks out that exact tag, verifies that the tagged commit is on `main`, and publication uses the validated tag rather than a mutable branch ref. The migration does not require a release-tag ruleset for the current single-owner repository; add broader branch or tag rules only after separately reviewing the collaboration model and release-authoring threat boundary.
 
 Both publication environments must be restricted to `v*` tags, with the workflow's strict grammar selecting the channel. `stable-release` requires the final human approval, while `beta-release` runs automatically after its required checks. The release workflow verifies tag-to-main provenance, exact assets and checksums without requiring a repository Administration token.

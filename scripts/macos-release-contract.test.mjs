@@ -355,6 +355,8 @@ describe('macOS release contract', () => {
     expect(source).toContain('/^v\\d+\\.\\d+\\.\\d+-beta\\.[1-9]\\d*$/');
     expect(source).toContain('cmp "release-assets/$asset_name" "existing-download/$asset_name"');
     expect(source).toContain('Install, launch and uninstall published NSIS packages');
+    expect(source).not.toContain('prepare-windows-7za');
+    expect(source).not.toContain('USE_SYSTEM_7ZA');
     expect(source).toContain('gh attestation verify "$asset_path"');
     expect(source).toContain('env -u GH_TOKEN curl --fail --location');
     expect(source).toContain('Windows N-1 upgrade');
@@ -434,6 +436,7 @@ describe('macOS release contract', () => {
 
     const builderSource = readFileSync(path.join(repositoryRoot, 'electron-builder.config.cjs'), 'utf8');
     expect(builderSource).toContain('/^\\d+\\.\\d+\\.\\d+-beta\\.[1-9]\\d*$/');
+    expect(builderSource).toContain("process.env.ELECTRON_BUILDER_7Z_FILTER = 'BCJ'");
     expect(builderSource).not.toContain("version.includes('-alpha')");
     expect(builderSource).not.toContain("version.includes('-rc')");
   });
