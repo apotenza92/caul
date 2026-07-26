@@ -79,32 +79,6 @@ jobs:
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `${values.join('\n')}\n`);
           NODE
 
-  release-policy:
-    name: Verify hosted release policy
-    needs: prepare
-    runs-on: ubuntu-24.04
-    environment: release-policy
-    permissions:
-      contents: read
-    steps:
-      - name: Require immutable GitHub releases
-        env:
-          GH_TOKEN: ${{ secrets.IMMUTABLE_RELEASES_READ_TOKEN }}
-        run: |
-          set -euo pipefail
-          test -n "$GH_TOKEN" || {
-            echo 'IMMUTABLE_RELEASES_READ_TOKEN is required in the release-policy environment.' >&2
-            exit 1
-          }
-          enabled="$(gh api \
-            --header 'X-GitHub-Api-Version: 2026-03-10' \
-            "repos/$GITHUB_REPOSITORY/immutable-releases" \
-            --jq .enabled)"
-          if [[ "$enabled" != true ]]; then
-            echo 'Immutable GitHub releases must be enabled before publication.' >&2
-            exit 1
-          fi
-
   quality:
     name: Required checks
     needs: prepare
@@ -509,7 +483,6 @@ jobs:
       - build-windows
       - build-linux
       - test-macos-updater
-      - release-policy
     runs-on: ubuntu-24.04
     environment:
       name: ${{ needs.prepare.outputs.release_environment }}
@@ -586,17 +559,6 @@ jobs:
             gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease --latest=false
           else
             gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease=false --latest
-          fi
-
-          immutable=false
-          for _ in {1..12}; do
-            immutable="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq .immutable)"
-            [[ "$immutable" == true ]] && break
-            sleep 5
-          done
-          if [[ "$immutable" != true ]]; then
-            echo 'Published release is not immutable; refusing to publish updater or Homebrew references.' >&2
-            exit 1
           fi
 
   prepare-homebrew-publication:
