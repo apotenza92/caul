@@ -361,6 +361,8 @@ describe('macOS release contract', () => {
     expect(source).toContain('Linux N-1 upgrade');
     expect(source).toContain('Stable and beta Windows applications did not coexist after upgrade');
     expect(source).toContain('upgraded launch failed');
+    expect(source).toContain('Start-Process -FilePath $executable -Wait -PassThru');
+    expect(source).not.toContain('$LASTEXITCODE');
     expect(source).toContain('brew upgrade --cask apotenza92/tap/caul apotenza92/tap/caul@beta');
     expect(source).toContain('Independently verify public macOS packages');
     const nativeVerifier = readFileSync(path.join(repositoryRoot, 'scripts', 'verify-native-package.mjs'), 'utf8');
