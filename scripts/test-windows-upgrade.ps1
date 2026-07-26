@@ -10,7 +10,11 @@ param(
 
   [Parameter(Mandatory)]
   [ValidatePattern('^v\d+\.\d+\.\d+(?:-beta\.[1-9]\d*)?$')]
-  [string]$PriorTag
+  [string]$PriorTag,
+
+  [Parameter(Mandatory)]
+  [ValidatePattern('^v\d+\.\d+\.\d+(?:-beta\.[1-9]\d*)?$')]
+  [string]$CandidateTag
 )
 
 $ErrorActionPreference = 'Stop'
@@ -35,9 +39,20 @@ function Invoke-BoundedProcess {
   $startedAt = Get-Date
   Write-Host "Starting bounded process for ${FailureLabel}: $FilePath"
   $process = Start-Process -FilePath $FilePath -ArgumentList $Arguments -PassThru
-  if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-    throw "$FailureLabel timed out after $TimeoutSeconds seconds"
+  while (-not $process.HasExited) {
+    $elapsedSeconds = [math]::Round(((Get-Date) - $startedAt).TotalSeconds, 1)
+    $remainingMilliseconds = [math]::Max(
+      0,
+      [math]::Min(30000, ($TimeoutSeconds * 1000) - [int]($elapsedSeconds * 1000))
+    )
+    if ($remainingMilliseconds -eq 0 -or -not $process.WaitForExit($remainingMilliseconds)) {
+      $elapsedSeconds = [math]::Round(((Get-Date) - $startedAt).TotalSeconds, 1)
+      if ($elapsedSeconds -ge $TimeoutSeconds) {
+        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        throw "$FailureLabel timed out after $TimeoutSeconds seconds"
+      }
+      Write-Host "$FailureLabel remains active after $elapsedSeconds seconds"
+    }
   }
   if ($process.ExitCode -ne 0) {
     throw "${FailureLabel}: $($process.ExitCode)"
@@ -103,6 +118,12 @@ if ($Channel -eq 'stable') {
   ) + $variants
 }
 
+$legacyArm64BootstrapEnabled = (
+  $Architecture -eq 'arm64' `
+    -and $PriorTag -eq 'v0.1.21' `
+    -and $env:WINDOWS_ARM64_LEGACY_PUBLIC_BOOTSTRAP_TAG -eq $CandidateTag
+)
+
 try {
   foreach ($variant in $variants) {
     $variant.InstallRoot = Join-Path $env:RUNNER_TEMP "caul-$($variant.Channel)-install"
@@ -116,15 +137,33 @@ try {
 
     $executable = Join-Path $variant.InstallRoot "$($variant.Product).exe"
     if (-not (Test-Path $executable)) {
-      throw "Previous executable missing: $executable"
+      if (-not $legacyArm64BootstrapEnabled) {
+        throw "Previous executable missing: $executable"
+      }
+      $legacyUninstaller = Get-ChildItem `
+        $variant.InstallRoot `
+        -File `
+        -Filter 'Uninstall*.exe' `
+        -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+      if (-not $legacyUninstaller) {
+        throw "The exact legacy ARM64 partial-install signature was not found in $($variant.InstallRoot)."
+      }
+      Write-Warning (
+        "Authenticated $PriorTag ARM64 installer reproduced its known partial-install state for " `
+          + "$($variant.Product). Candidate recovery and user-data preservation will now be verified."
+      )
+      $variant.LegacyPartialInstall = $true
     }
 
     New-Item -ItemType Directory -Force $variant.UserData | Out-Null
-    Invoke-PackagedLaunch `
-      -Executable $executable `
-      -UserData $variant.UserData `
-      -InstallRoot $variant.InstallRoot `
-      -FailureLabel "$($variant.Product) prior launch failed"
+    if (-not $variant.ContainsKey('LegacyPartialInstall')) {
+      Invoke-PackagedLaunch `
+        -Executable $executable `
+        -UserData $variant.UserData `
+        -InstallRoot $variant.InstallRoot `
+        -FailureLabel "$($variant.Product) prior launch failed"
+    }
 
     Set-Content `
       -Path (Join-Path $variant.UserData 'upgrade-preservation-marker.txt') `
@@ -136,7 +175,7 @@ try {
     Invoke-BoundedProcess `
       -FilePath $candidateInstaller `
       -Arguments "/S /D=$($variant.InstallRoot)" `
-      -TimeoutSeconds 300 `
+      -TimeoutSeconds 900 `
       -FailureLabel "$($variant.Product) candidate installation failed"
 
     $executable = Join-Path $variant.InstallRoot "$($variant.Product).exe"
@@ -168,6 +207,17 @@ try {
     if (-not $stableExists -or -not $betaExists) {
       throw 'Stable and beta Windows applications did not coexist after upgrade.'
     }
+  }
+
+  if ($legacyArm64BootstrapEnabled) {
+    $recoveredVariants = @($variants | Where-Object { $_.ContainsKey('LegacyPartialInstall') })
+    if ($recoveredVariants.Count -ne $variants.Count) {
+      throw 'The one-time Windows ARM64 legacy recovery did not reproduce every expected partial installation.'
+    }
+    Write-Host (
+      "Verified exact-tag Windows ARM64 recovery from authenticated $PriorTag partial installations " `
+        + "to $CandidateTag while preserving stable and beta user data."
+    )
   }
 }
 finally {

@@ -393,8 +393,14 @@ describe('macOS release contract', () => {
     expect(windowsUpgrade).toContain('verify-windows-packaged-launch.mjs');
     expect(windowsUpgrade).toContain('Get-CimInstance Win32_Process');
     expect(windowsUpgrade).toContain('ExecutablePath.StartsWith($installPrefix');
-    expect(windowsUpgrade).toContain('$process.WaitForExit($TimeoutSeconds * 1000)');
+    expect(windowsUpgrade).toContain('$process.WaitForExit($remainingMilliseconds)');
     expect(windowsUpgrade).toContain('-TimeoutSeconds 300');
+    expect(windowsUpgrade).toContain('-TimeoutSeconds 900');
+    expect(windowsUpgrade).toContain("PriorTag -eq 'v0.1.21'");
+    expect(windowsUpgrade).toContain(
+      '$env:WINDOWS_ARM64_LEGACY_PUBLIC_BOOTSTRAP_TAG -eq $CandidateTag'
+    );
+    expect(windowsUpgrade).toContain('LegacyPartialInstall');
     expect(windowsUpgrade).not.toContain('-Wait -PassThru');
     expect(windowsUpgrade).toContain("ValidateSet('x64', 'arm64')");
     expect(windowsUpgrade).toContain("ValidateSet('stable', 'beta')");
@@ -405,7 +411,10 @@ describe('macOS release contract', () => {
     expect(windowsLaunchVerifier).toContain("validatePackagedLaunchProcessResult('windows'");
     expect(windowsLaunchVerifier).toContain("CAUL_SMOKE_OUTPUT_FILE: smokeOutputPath");
     expect(windowsLaunchVerifier).toContain('timeout: 30_000');
-    expect(release.jobs['test-windows-upgrade']['timeout-minutes']).toBe(45);
+    expect(release.jobs['test-windows-upgrade']['timeout-minutes']).toBe(65);
+    expect(source).toContain(
+      'WINDOWS_ARM64_LEGACY_PUBLIC_BOOTSTRAP_TAG: ${{ vars.WINDOWS_ARM64_LEGACY_PUBLIC_BOOTSTRAP_TAG }}'
+    );
     const ciSource = readFileSync(path.join(repositoryRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
     expect(ciSource).toContain('Verify Windows release script syntax');
     expect(ciSource).toContain('./scripts/test-windows-upgrade.ps1');
@@ -437,6 +446,7 @@ describe('macOS release contract', () => {
     expect(releaseGuide).toContain('stable-updater-verification');
     expect(releaseGuide).toContain('beta-updater-verification');
     expect(releaseGuide).toContain("MACOS_UPDATER_BOOTSTRAP_TAG` in that channel's updater-verification environment");
+    expect(releaseGuide).toContain('WINDOWS_ARM64_LEGACY_PUBLIC_BOOTSTRAP_TAG');
     expect(releaseGuide).not.toContain('`MACOS_UPDATER_BOOTSTRAP_TAG` repository variable');
     const packageVerifier = readFileSync(path.join(repositoryRoot, 'scripts', 'verify-macos-package.mjs'), 'utf8');
     expect(packageVerifier).toContain("'bin', 'caul-desktop-backend'");

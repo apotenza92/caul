@@ -2,6 +2,11 @@
 
 All notable Caul changes are recorded here.
 
+## [0.1.35]
+
+- Added an exact-tag recovery gate for the immutable `0.1.21` Windows ARM64 partial installers while retaining the full x64 N-1 launch, upgrade and user-data checks.
+- Kept Windows installer operations bounded with progress evidence and enough time for legacy NSIS uninstall and extraction work on hosted runners.
+
 ## [0.1.34]
 
 - Kept Windows N-1 installer operations bounded while allowing the authenticated legacy installers and their in-place uninstall helpers enough time to complete on hosted x64 and ARM64 runners.
