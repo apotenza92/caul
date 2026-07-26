@@ -2,7 +2,7 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.22-beta.1]
+## [0.1.22]
 
 - Added separate stable and beta identities for Apple Silicon macOS, Windows ARM64/x64, and Linux ARM64/x64 packages.
 - Hardened hosted macOS releases with Developer ID signing, nested Rust and Swift helper verification, notarisation, stapling, Gatekeeper assessment, checksums, provenance, and native N-1 update tests.

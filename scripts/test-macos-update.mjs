@@ -1,7 +1,7 @@
 import { _electron as electron } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
@@ -216,6 +216,13 @@ try {
   });
   const page = await appProcess.firstWindow({ timeout: 60_000 });
   await page.waitForFunction(() => Boolean(window.caul?.settings?.updates));
+  const preservedStatePath = join(userData, 'upgrade-preservation-marker.json');
+  const preservedState = JSON.stringify({
+    channel,
+    priorVersion,
+    value: 'preserve-through-update'
+  });
+  writeFileSync(preservedStatePath, preservedState);
   const checked = await page.evaluate(() => window.caul.settings.updates.checkNow());
   if (checked.lastResult?.status !== 'available') throw new Error(`Candidate was not available: ${JSON.stringify(checked)}`);
   await page.evaluate(() => window.caul.settings.updates.downloadAndInstall());
@@ -263,6 +270,9 @@ try {
       const updatedPage = await appProcess.firstWindow({ timeout: 60_000 });
       await updatedPage.waitForFunction(() => Boolean(window.caul?.settings?.updates));
     }
+  }
+  if (readFileSync(preservedStatePath, 'utf8') !== preservedState) {
+    throw new Error(`macOS ${channel} updater did not preserve existing user data`);
   }
   console.log(`macOS ${channel} updater ${scenario} scenario passed from ${priorVersion} to ${expectedVersion}.`);
 } finally {

@@ -475,6 +475,264 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  test-windows-upgrade:
+    name: Windows N-1 upgrade (${{ matrix.arch }})
+    needs: [prepare, build-windows]
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: windows-11-arm
+          - arch: x64
+            runner: windows-2025
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install verification dependencies
+        run: npm ci
+
+      - name: Download signed candidate installers
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-windows-${{ matrix.arch }}
+          path: candidate
+
+      - name: Download and authenticate previous public installers
+        shell: pwsh
+        env:
+          CAUL_RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/latest" | ConvertFrom-Json
+          if (-not $release.tag_name -or $release.tag_name -eq '${{ needs.prepare.outputs.tag }}') {
+            throw "A distinct previous stable release is required for the Windows upgrade gate."
+          }
+          New-Item -ItemType Directory -Force prior | Out-Null
+          $names = @('Caul-Beta-windows-${{ matrix.arch }}-setup.exe')
+          if ($env:CAUL_RELEASE_CHANNEL -eq 'stable') {
+            $names = @('Caul-windows-${{ matrix.arch }}-setup.exe') + $names
+          }
+          foreach ($name in $names) {
+            gh release download $release.tag_name --repo $env:GITHUB_REPOSITORY --pattern $name --dir prior
+            $asset = $release.assets | Where-Object name -eq $name
+            if (-not $asset -or -not $asset.digest.StartsWith('sha256:')) {
+              throw "GitHub did not provide a SHA-256 digest for $name."
+            }
+            $actual = (Get-FileHash "prior/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
+            $expected = $asset.digest.Substring(7).ToLowerInvariant()
+            if ($actual -ne $expected) { throw "Previous public installer digest mismatch for $name." }
+          }
+          "PRIOR_TAG=$($release.tag_name)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Upgrade stable and beta while preserving user data
+        shell: pwsh
+        env:
+          CAUL_RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $variants = @(
+            @{
+              Channel = 'beta'
+              Prefix = 'Caul-Beta'
+              Product = 'Caul Beta'
+            }
+          )
+          if ($env:CAUL_RELEASE_CHANNEL -eq 'stable') {
+            $variants = @(
+              @{
+                Channel = 'stable'
+                Prefix = 'Caul'
+                Product = 'Caul'
+              }
+            ) + $variants
+          }
+          try {
+            foreach ($variant in $variants) {
+              $variant.InstallRoot = Join-Path $env:RUNNER_TEMP "caul-$($variant.Channel)-install"
+              $variant.UserData = Join-Path $env:RUNNER_TEMP "caul-$($variant.Channel)-user-data"
+              $priorInstaller = Join-Path $PWD "prior/$($variant.Prefix)-windows-${{ matrix.arch }}-setup.exe"
+              $process = Start-Process -FilePath $priorInstaller -ArgumentList @('/S', "/D=$($variant.InstallRoot)") -Wait -PassThru
+              if ($process.ExitCode -ne 0) { throw "$($variant.Product) prior installation failed: $($process.ExitCode)" }
+              $executable = Join-Path $variant.InstallRoot "$($variant.Product).exe"
+              if (-not (Test-Path $executable)) { throw "Previous executable missing: $executable" }
+              New-Item -ItemType Directory -Force $variant.UserData | Out-Null
+              $env:CAUL_DISABLE_MODEL_AUTO_DOWNLOAD = '1'
+              $env:CAUL_DISABLE_UPDATE_CHECKS = '1'
+              $env:CAUL_PACKAGED_LAUNCH_SMOKE_MS = '250'
+              $env:CAUL_USER_DATA_DIR = $variant.UserData
+              & $executable
+              if ($LASTEXITCODE -ne 0) { throw "$($variant.Product) prior launch failed: $LASTEXITCODE" }
+              Set-Content -Path (Join-Path $variant.UserData 'upgrade-preservation-marker.txt') -Value "$($variant.Channel)-$env:PRIOR_TAG"
+            }
+
+            foreach ($variant in $variants) {
+              $candidateInstaller = Join-Path $PWD "candidate/$($variant.Prefix)-windows-${{ matrix.arch }}-setup.exe"
+              $process = Start-Process -FilePath $candidateInstaller -ArgumentList @('/S', "/D=$($variant.InstallRoot)") -Wait -PassThru
+              if ($process.ExitCode -ne 0) { throw "$($variant.Product) candidate installation failed: $($process.ExitCode)" }
+              $executable = Join-Path $variant.InstallRoot "$($variant.Product).exe"
+              $env:CAUL_USER_DATA_DIR = $variant.UserData
+              & $executable
+              if ($LASTEXITCODE -ne 0) { throw "$($variant.Product) upgraded launch failed: $LASTEXITCODE" }
+              node scripts/verify-native-package.mjs `
+                --platform windows `
+                --arch '${{ matrix.arch }}' `
+                --channel $variant.Channel `
+                --release-dir candidate `
+                --unpacked-dir $variant.InstallRoot
+              $marker = Join-Path $variant.UserData 'upgrade-preservation-marker.txt'
+              if ((Get-Content $marker -Raw).Trim() -ne "$($variant.Channel)-$env:PRIOR_TAG") {
+                throw "$($variant.Product) did not preserve existing user data."
+              }
+            }
+            if ($env:CAUL_RELEASE_CHANNEL -eq 'stable'
+              -and (-not (Test-Path (Join-Path $variants[0].InstallRoot 'Caul.exe'))
+                -or -not (Test-Path (Join-Path $variants[1].InstallRoot 'Caul Beta.exe')))) {
+              throw 'Stable and beta Windows applications did not coexist after upgrade.'
+            }
+          }
+          finally {
+            foreach ($variant in $variants) {
+              if (-not $variant.ContainsKey('InstallRoot')) { continue }
+              $uninstaller = Get-ChildItem $variant.InstallRoot -File -Filter 'Uninstall*.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($uninstaller) {
+                Start-Process -FilePath $uninstaller.FullName -ArgumentList '/S' -Wait | Out-Null
+              }
+            }
+          }
+
+  test-linux-upgrade:
+    name: Linux N-1 upgrade (${{ matrix.arch }})
+    needs: [prepare, build-linux]
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+          - arch: x64
+            runner: ubuntu-24.04
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install verification dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cpio libasound2-dev rpm xvfb
+          npm ci
+
+      - name: Download candidate packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: candidate
+
+      - name: Download and authenticate previous public packages
+        env:
+          CAUL_RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest")"
+          prior_tag="$(jq -r .tag_name <<<"$release_json")"
+          test -n "$prior_tag"
+          test "$prior_tag" != '${{ needs.prepare.outputs.tag }}'
+          mkdir prior
+          names=("caul-beta-${{ matrix.arch }}.deb")
+          if [[ "$CAUL_RELEASE_CHANNEL" == stable ]]; then
+            names=("caul-${{ matrix.arch }}.deb" "${names[@]}")
+          fi
+          for name in "${names[@]}"; do
+            gh release download "$prior_tag" --repo "$GITHUB_REPOSITORY" --pattern "$name" --dir prior
+            expected="$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .digest' <<<"$release_json")"
+            [[ "$expected" == sha256:* ]]
+            actual="$(sha256sum "prior/$name" | cut -d' ' -f1)"
+            test "$actual" = "${expected#sha256:}"
+          done
+          echo "PRIOR_TAG=$prior_tag" >> "$GITHUB_ENV"
+
+      - name: Upgrade stable and beta while preserving user data
+        env:
+          CAUL_RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
+          CAUL_DISABLE_MODEL_AUTO_DOWNLOAD: "1"
+          CAUL_DISABLE_UPDATE_CHECKS: "1"
+          CAUL_PACKAGED_LAUNCH_SMOKE_MS: "250"
+        run: |
+          set -euo pipefail
+          cleanup() {
+            sudo dpkg --remove caul caul-beta >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          prior_packages=("$PWD/prior/caul-beta-${{ matrix.arch }}.deb")
+          candidate_packages=("$PWD/candidate/caul-beta-${{ matrix.arch }}.deb")
+          if [[ "$CAUL_RELEASE_CHANNEL" == stable ]]; then
+            prior_packages=("$PWD/prior/caul-${{ matrix.arch }}.deb" "${prior_packages[@]}")
+            candidate_packages=("$PWD/candidate/caul-${{ matrix.arch }}.deb" "${candidate_packages[@]}")
+          fi
+          sudo apt-get install -y "${prior_packages[@]}"
+          stable_data="$RUNNER_TEMP/caul-stable-user-data"
+          beta_data="$RUNNER_TEMP/caul-beta-user-data"
+          mkdir -p "$stable_data" "$beta_data"
+          if [[ "$CAUL_RELEASE_CHANNEL" == stable ]]; then
+            CAUL_USER_DATA_DIR="$stable_data" xvfb-run -a caul --no-sandbox
+            printf 'stable-%s\n' "$PRIOR_TAG" > "$stable_data/upgrade-preservation-marker.txt"
+          fi
+          CAUL_USER_DATA_DIR="$beta_data" xvfb-run -a caul-beta --no-sandbox
+          printf 'beta-%s\n' "$PRIOR_TAG" > "$beta_data/upgrade-preservation-marker.txt"
+
+          sudo apt-get install -y "${candidate_packages[@]}"
+          if [[ "$CAUL_RELEASE_CHANNEL" == stable ]]; then
+            test "$(dpkg-query -W -f='${Version}' caul)" = '${{ needs.prepare.outputs.version }}'
+            node scripts/verify-native-package.mjs \
+              --platform linux \
+              --arch '${{ matrix.arch }}' \
+              --channel stable \
+              --release-dir candidate \
+              --public-only true
+            CAUL_USER_DATA_DIR="$stable_data" xvfb-run -a caul --no-sandbox
+            test "$(cat "$stable_data/upgrade-preservation-marker.txt")" = "stable-$PRIOR_TAG"
+            command -v caul
+          fi
+          test "$(dpkg-query -W -f='${Version}' caul-beta)" = '${{ needs.prepare.outputs.version }}'
+          node scripts/verify-native-package.mjs \
+            --platform linux \
+            --arch '${{ matrix.arch }}' \
+            --channel beta \
+            --release-dir candidate \
+            --public-only true
+          CAUL_USER_DATA_DIR="$beta_data" xvfb-run -a caul-beta --no-sandbox
+          test "$(cat "$beta_data/upgrade-preservation-marker.txt")" = "beta-$PRIOR_TAG"
+          command -v caul-beta
+          trap - EXIT
+          cleanup
+
   publish-release:
     name: Publish GitHub release
     needs:
@@ -483,6 +741,8 @@ jobs:
       - build-windows
       - build-linux
       - test-macos-updater
+      - test-windows-upgrade
+      - test-linux-upgrade
     runs-on: ubuntu-24.04
     environment:
       name: ${{ needs.prepare.outputs.release_environment }}
@@ -561,9 +821,259 @@ jobs:
             gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease=false --latest
           fi
 
+  verify-public-release:
+    name: Verify public release provenance
+    needs: [prepare, publish-release]
+    runs-on: ubuntu-24.04
+    permissions:
+      attestations: read
+      contents: read
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          persist-credentials: false
+
+      - name: Re-download and verify every public asset
+        env:
+          CAUL_RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir public-release
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir public-release
+          (
+            cd public-release
+            sha256sum --check SHA256SUMS
+          )
+          node --input-type=module <<'NODE'
+          import { readdirSync } from 'node:fs';
+          import { expectedReleaseAssetNames } from './scripts/assemble-release-assets.mjs';
+          const expected = [...expectedReleaseAssetNames(process.env.CAUL_RELEASE_CHANNEL), 'SHA256SUMS'].sort();
+          const actual = readdirSync('public-release').sort();
+          if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+            throw new Error(`Public release asset mismatch.\nExpected: ${expected.join(', ')}\nActual: ${actual.join(', ')}`);
+          }
+          NODE
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG")"
+          test "$(jq -r .draft <<<"$release_json")" = false
+          test "$(jq -r .prerelease <<<"$release_json")" = "$RELEASE_PRERELEASE"
+          test "$(jq -r .tag_name <<<"$release_json")" = "$RELEASE_TAG"
+          if [[ "$RELEASE_PRERELEASE" == false ]]; then
+            test "$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)" = "$RELEASE_TAG"
+          fi
+          while IFS= read -r -d '' asset_path; do
+            gh attestation verify "$asset_path" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --source-ref "refs/tags/$RELEASE_TAG" \
+              --source-digest "$GITHUB_SHA"
+          done < <(find public-release -maxdepth 1 -type f -print0)
+          while IFS= read -r url; do
+            env -u GH_TOKEN curl --fail --location --silent --show-error --head "$url" >/dev/null
+          done < <(jq -r '.assets[].browser_download_url' <<<"$release_json")
+
+  verify-public-windows:
+    name: Verify public Windows packages (${{ matrix.arch }})
+    needs: [prepare, publish-release, verify-public-release]
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: windows-11-arm
+          - arch: x64
+            runner: windows-2025
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install verification dependencies
+        run: npm ci
+
+      - name: Download public Windows packages
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force public-release | Out-Null
+          gh release download '${{ needs.prepare.outputs.tag }}' `
+            --repo $env:GITHUB_REPOSITORY `
+            --pattern 'SHA256SUMS' `
+            --pattern 'Caul*-windows-${{ matrix.arch }}-setup.exe*' `
+            --dir public-release
+          $manifest = Get-Content public-release/SHA256SUMS
+          Get-ChildItem public-release -File | Where-Object Name -ne 'SHA256SUMS' | ForEach-Object {
+            $line = $manifest | Where-Object { $_ -match "  $([regex]::Escape($_.Name))$" }
+            if (-not $line) { throw "Missing public checksum for $($_.Name)" }
+            $expected = ($line -split '\s+')[0].ToLowerInvariant()
+            $actual = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $expected) { throw "Public checksum mismatch for $($_.Name)" }
+          }
+
+      - name: Install, inspect and launch both public variants
+        shell: pwsh
+        env:
+          CAUL_RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $variants = @(
+            @{ Channel = 'beta'; Prefix = 'Caul-Beta'; Product = 'Caul Beta' }
+          )
+          if ($env:CAUL_RELEASE_CHANNEL -eq 'stable') {
+            $variants = @(
+              @{ Channel = 'stable'; Prefix = 'Caul'; Product = 'Caul' }
+            ) + $variants
+          }
+          try {
+            foreach ($variant in $variants) {
+              $variant.InstallRoot = Join-Path $env:RUNNER_TEMP "public-$($variant.Channel)-install"
+              $installer = Join-Path $PWD "public-release/$($variant.Prefix)-windows-${{ matrix.arch }}-setup.exe"
+              $process = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$($variant.InstallRoot)") -Wait -PassThru
+              if ($process.ExitCode -ne 0) { throw "$($variant.Product) public installation failed: $($process.ExitCode)" }
+              node scripts/verify-native-package.mjs `
+                --platform windows `
+                --arch '${{ matrix.arch }}' `
+                --channel $variant.Channel `
+                --release-dir public-release `
+                --unpacked-dir $variant.InstallRoot
+            }
+            if ($env:CAUL_RELEASE_CHANNEL -eq 'stable'
+              -and (-not (Test-Path (Join-Path $variants[0].InstallRoot 'Caul.exe'))
+                -or -not (Test-Path (Join-Path $variants[1].InstallRoot 'Caul Beta.exe')))) {
+              throw 'Stable and beta public Windows applications did not coexist.'
+            }
+          }
+          finally {
+            foreach ($variant in $variants) {
+              if (-not $variant.ContainsKey('InstallRoot')) { continue }
+              $uninstaller = Get-ChildItem $variant.InstallRoot -File -Filter 'Uninstall*.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($uninstaller) {
+                Start-Process -FilePath $uninstaller.FullName -ArgumentList '/S' -Wait | Out-Null
+              }
+            }
+          }
+
+  verify-public-linux:
+    name: Verify public Linux packages (${{ matrix.arch }})
+    needs: [prepare, publish-release, verify-public-release]
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+          - arch: x64
+            runner: ubuntu-24.04
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install verification dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cpio libasound2-dev rpm xvfb
+          npm ci
+
+      - name: Download and authenticate public Linux packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir public-release
+          gh release download '${{ needs.prepare.outputs.tag }}' \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern SHA256SUMS \
+            --pattern '*-${{ matrix.arch }}.AppImage' \
+            --pattern '*-${{ matrix.arch }}.deb' \
+            --dir public-release
+          if [[ '${{ matrix.arch }}' == x64 ]]; then
+            gh release download '${{ needs.prepare.outputs.tag }}' \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern '*-${{ matrix.arch }}.rpm' \
+              --dir public-release
+          fi
+          awk -v arch='${{ matrix.arch }}' '$2 == "SHA256SUMS" || $2 ~ ("-" arch "\\.(AppImage|deb|rpm)$")' \
+            public-release/SHA256SUMS > public-release/PLATFORM_SHA256SUMS
+          (
+            cd public-release
+            sha256sum --check PLATFORM_SHA256SUMS
+          )
+
+      - name: Inspect, install and launch both public variants
+        env:
+          CAUL_RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
+          CAUL_DISABLE_MODEL_AUTO_DOWNLOAD: "1"
+          CAUL_DISABLE_UPDATE_CHECKS: "1"
+          CAUL_PACKAGED_LAUNCH_SMOKE_MS: "250"
+        run: |
+          set -euo pipefail
+          if [[ "$CAUL_RELEASE_CHANNEL" == stable ]]; then
+            node scripts/verify-native-package.mjs \
+              --platform linux \
+              --arch '${{ matrix.arch }}' \
+              --channel stable \
+              --release-dir public-release \
+              --public-only true
+          fi
+          node scripts/verify-native-package.mjs \
+            --platform linux \
+            --arch '${{ matrix.arch }}' \
+            --channel beta \
+            --release-dir public-release \
+            --public-only true
+          cleanup() {
+            sudo dpkg --remove caul caul-beta >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          packages=("$PWD/public-release/caul-beta-${{ matrix.arch }}.deb")
+          if [[ "$CAUL_RELEASE_CHANNEL" == stable ]]; then
+            packages=("$PWD/public-release/caul-${{ matrix.arch }}.deb" "${packages[@]}")
+          fi
+          sudo apt-get install -y "${packages[@]}"
+          stable_data="$RUNNER_TEMP/public-caul-stable-user-data"
+          beta_data="$RUNNER_TEMP/public-caul-beta-user-data"
+          mkdir -p "$stable_data" "$beta_data"
+          if [[ "$CAUL_RELEASE_CHANNEL" == stable ]]; then
+            CAUL_USER_DATA_DIR="$stable_data" xvfb-run -a caul --no-sandbox
+            command -v caul
+          fi
+          CAUL_USER_DATA_DIR="$beta_data" xvfb-run -a caul-beta --no-sandbox
+          command -v caul-beta
+          trap - EXIT
+          cleanup
+
   prepare-homebrew-publication:
     name: Prepare Homebrew publication (Stable)
-    needs: [prepare, publish-release]
+    needs: [prepare, publish-release, verify-public-release]
     runs-on: macos-15
     permissions:
       contents: read
@@ -586,14 +1096,40 @@ jobs:
 
           VERSION="${{ steps.version.outputs.VERSION }}"
           BASE_URL="https://github.com/apotenza92/caul/releases/download/v${VERSION}"
-
-          curl -fL "${BASE_URL}/Caul-macos-arm64.zip" -o stable.zip
-          STABLE_SHA256="$(shasum -a 256 stable.zip | cut -d' ' -f1)"
+          mkdir public-release
+          for name in \
+            Caul-macos-arm64.zip \
+            Caul-macos-arm64.zip.blockmap \
+            Caul-macos-arm64.zip.sha256 \
+            latest-mac.yml \
+            notarization-stable-macos-arm64.json \
+            Caul-Beta-macos-arm64.zip \
+            Caul-Beta-macos-arm64.zip.blockmap \
+            Caul-Beta-macos-arm64.zip.sha256 \
+            beta-mac.yml \
+            notarization-beta-macos-arm64.json; do
+            curl -fL "${BASE_URL}/${name}" -o "public-release/${name}"
+          done
+          STABLE_SHA256="$(shasum -a 256 public-release/Caul-macos-arm64.zip | cut -d' ' -f1)"
           echo "STABLE_SHA256=${STABLE_SHA256}" >> "$GITHUB_OUTPUT"
-
-          curl -fL "${BASE_URL}/Caul-Beta-macos-arm64.zip" -o beta.zip
-          BETA_SHA256="$(shasum -a 256 beta.zip | cut -d' ' -f1)"
+          BETA_SHA256="$(shasum -a 256 public-release/Caul-Beta-macos-arm64.zip | cut -d' ' -f1)"
           echo "BETA_SHA256=${BETA_SHA256}" >> "$GITHUB_OUTPUT"
+
+      - name: Independently verify public macOS packages
+        env:
+          APPLE_SIGNING_CERTIFICATE_SHA256: ${{ vars.APPLE_SIGNING_CERTIFICATE_SHA256 }}
+          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          node scripts/verify-macos-package.mjs \
+            --channel stable \
+            --release-dir public-release \
+            --require-checksum
+          node scripts/verify-macos-package.mjs \
+            --channel beta \
+            --release-dir public-release \
+            --require-checksum
 
       - name: Generate and validate Homebrew casks
         run: |
@@ -607,6 +1143,25 @@ jobs:
           TAP_PATH="$(brew --repository apotenza92/tap)"
           cd "$TAP_PATH"
           rm -f Casks/susura.rb 'Casks/susura@beta.rb'
+          export HOMEBREW_NO_AUTO_UPDATE=1
+          prior_stable_version="$(sed -n 's/^[[:space:]]*version "\([^"]*\)".*/\1/p' Casks/caul.rb)"
+          prior_beta_version="$(sed -n 's/^[[:space:]]*version "\([^"]*\)".*/\1/p' 'Casks/caul@beta.rb')"
+          test -n "$prior_stable_version"
+          test -n "$prior_beta_version"
+          test "$prior_stable_version" != "$VERSION"
+          test "$prior_beta_version" != "$VERSION"
+          cleanup() {
+            brew uninstall --cask apotenza92/tap/caul@beta >/dev/null 2>&1 || true
+            brew uninstall --cask apotenza92/tap/caul >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          brew install --cask apotenza92/tap/caul apotenza92/tap/caul@beta
+          test -d '/Applications/Caul.app'
+          test -d '/Applications/Caul Beta.app'
+          mkdir -p "$HOME/Library/Application Support/Caul" "$HOME/Library/Application Support/Caul Beta"
+          printf 'stable-%s\n' "$prior_stable_version" > "$HOME/Library/Application Support/Caul/upgrade-preservation-marker.txt"
+          printf 'beta-%s\n' "$prior_beta_version" > "$HOME/Library/Application Support/Caul Beta/upgrade-preservation-marker.txt"
+
           CHECKSUMS="$RUNNER_TEMP/caul-homebrew-SHA256SUMS"
           printf '%s  %s\n%s  %s\n' \
             "$STABLE_SHA256" 'Caul-macos-arm64.zip' \
@@ -614,25 +1169,21 @@ jobs:
           node "$GITHUB_WORKSPACE/scripts/generate-homebrew-casks.mjs" \
             --channel stable --version "$VERSION" --sha256sums "$CHECKSUMS" --output Casks
 
-          export HOMEBREW_NO_AUTO_UPDATE=1
           brew style --cask apotenza92/tap/caul apotenza92/tap/caul@beta
           brew audit --cask --online apotenza92/tap/caul apotenza92/tap/caul@beta
-          installed_cask=''
-          cleanup() {
-            if [[ -n "$installed_cask" ]]; then
-              brew uninstall --cask "$installed_cask" >/dev/null 2>&1 || true
-            fi
-          }
-          trap cleanup EXIT
-          for cask in caul 'caul@beta'; do
-            installed_cask="apotenza92/tap/${cask}"
-            brew install --cask "$installed_cask"
-            if [[ "$cask" == caul ]]; then
-              app_path='/Applications/Caul.app'
-              executable_path='/Applications/Caul.app/Contents/MacOS/Caul'
+          brew upgrade --cask apotenza92/tap/caul apotenza92/tap/caul@beta
+          test "$(cat "$HOME/Library/Application Support/Caul/upgrade-preservation-marker.txt")" = "stable-$prior_stable_version"
+          test "$(cat "$HOME/Library/Application Support/Caul Beta/upgrade-preservation-marker.txt")" = "beta-$prior_beta_version"
+          test -d '/Applications/Caul.app'
+          test -d '/Applications/Caul Beta.app'
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' '/Applications/Caul.app/Contents/Info.plist')" = "$VERSION"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' '/Applications/Caul Beta.app/Contents/Info.plist')" = "$VERSION"
+
+          for app_path in '/Applications/Caul.app' '/Applications/Caul Beta.app'; do
+            if [[ "$app_path" == '/Applications/Caul.app' ]]; then
+              executable_path="$app_path/Contents/MacOS/Caul"
             else
-              app_path='/Applications/Caul Beta.app'
-              executable_path='/Applications/Caul Beta.app/Contents/MacOS/Caul Beta'
+              executable_path="$app_path/Contents/MacOS/Caul Beta"
             fi
             xcrun stapler validate "$app_path"
             spctl --assess --type execute --verbose=4 "$app_path"
@@ -640,11 +1191,12 @@ jobs:
             env -i HOME="$smoke_dir" PATH=/usr/bin:/bin:/usr/sbin:/sbin TMPDIR="$smoke_dir" \
               CAUL_DISABLE_UPDATE_CHECKS=1 CAUL_SMOKE_EXIT_MS=1000 CAUL_USER_DATA_DIR="$smoke_dir/user-data" \
               "$executable_path"
-            brew uninstall --cask "$installed_cask"
-            installed_cask=''
-            test ! -e "$app_path"
-          done
-          trap - EXIT
+           done
+           cleanup
+           for app_path in '/Applications/Caul.app' '/Applications/Caul Beta.app'; do
+             test ! -e "$app_path"
+           done
+           trap - EXIT
 
           mkdir -p "$GITHUB_WORKSPACE/publication/Casks"
           cp Casks/caul.rb 'Casks/caul@beta.rb' "$GITHUB_WORKSPACE/publication/Casks/"
@@ -678,7 +1230,7 @@ jobs:
 
   prepare-homebrew-beta-publication:
     name: Prepare Homebrew publication (Beta)
-    needs: [prepare, publish-release]
+    needs: [prepare, publish-release, verify-public-release]
     runs-on: macos-15
     permissions:
       contents: read
