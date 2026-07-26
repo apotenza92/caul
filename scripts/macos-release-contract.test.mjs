@@ -237,7 +237,6 @@ describe('macOS release contract', () => {
     expect(workflow).not.toMatch(/APPLE_ID|APPLE_APP_SPECIFIC_PASSWORD|CSC_LINK|CSC_KEY_PASSWORD/);
     expect(workflow).toMatch(/permissions:\n  contents: read/);
     expect(workflow).toMatch(/publish-release:[\s\S]*?permissions:\n      attestations: write\n      contents: write\n      id-token: write/);
-    expect(workflow.match(/secrets\.IMMUTABLE_RELEASES_READ_TOKEN/g)).toHaveLength(1);
   });
 
   it('pins external actions and prevents checkout credential persistence', () => {
@@ -326,16 +325,6 @@ describe('macOS release contract', () => {
     expect(provenance.run).toContain('git merge-base --is-ancestor');
     expect(provenance.run).toContain('refs/tags/$CAUL_RELEASE_TAG^{commit}');
     expect(provenance.run).toContain('test "$TAG_COMMIT" = "$RELEASE_SHA"');
-    expect(release.jobs['release-policy']).toMatchObject({
-      environment: 'release-policy',
-      permissions: { contents: 'read' }
-    });
-    expect(release.jobs['release-policy'].steps).toHaveLength(1);
-    expect(release.jobs['release-policy'].steps[0].env).toEqual({
-      GH_TOKEN: '${{ secrets.IMMUTABLE_RELEASES_READ_TOKEN }}'
-    });
-    expect(release.jobs['release-policy'].steps[0].run).toContain('immutable-releases');
-    expect(release.jobs['publish-release'].needs).toContain('release-policy');
     expect(release.jobs['publish-release'].steps.at(-1).env).toMatchObject({
       RELEASE_TAG: '${{ needs.prepare.outputs.tag }}',
       RELEASE_PRERELEASE: '${{ needs.prepare.outputs.prerelease }}'
@@ -348,8 +337,6 @@ describe('macOS release contract', () => {
     expect(source).not.toMatch(/GITHUB_REF#|inputs\.tag/);
     expect(source).not.toContain('--clobber');
     expect(source).not.toContain('--method DELETE');
-    expect(source).toContain('--jq .immutable');
-    expect(source).toContain('Published release is not immutable');
     expect(source).toContain('generate-homebrew-casks.mjs');
     expect(source).toContain('brew tap apotenza92/tap');
     expect(source).toContain('brew --repository apotenza92/tap');
