@@ -2,6 +2,10 @@
 
 All notable Caul changes are recorded here.
 
+## [0.1.34]
+
+- Kept Windows N-1 installer operations bounded while allowing the authenticated legacy installers and their in-place uninstall helpers enough time to complete on hosted x64 and ARM64 runners.
+
 ## [0.1.33]
 
 - Made Windows N-1 packaged launches bounded and evidence-based so a legacy Electron process that remains alive after reporting success cannot hang the release workflow.

@@ -394,6 +394,7 @@ describe('macOS release contract', () => {
     expect(windowsUpgrade).toContain('Get-CimInstance Win32_Process');
     expect(windowsUpgrade).toContain('ExecutablePath.StartsWith($installPrefix');
     expect(windowsUpgrade).toContain('$process.WaitForExit($TimeoutSeconds * 1000)');
+    expect(windowsUpgrade).toContain('-TimeoutSeconds 300');
     expect(windowsUpgrade).not.toContain('-Wait -PassThru');
     expect(windowsUpgrade).toContain("ValidateSet('x64', 'arm64')");
     expect(windowsUpgrade).toContain("ValidateSet('stable', 'beta')");
@@ -404,7 +405,7 @@ describe('macOS release contract', () => {
     expect(windowsLaunchVerifier).toContain("validatePackagedLaunchProcessResult('windows'");
     expect(windowsLaunchVerifier).toContain("CAUL_SMOKE_OUTPUT_FILE: smokeOutputPath");
     expect(windowsLaunchVerifier).toContain('timeout: 30_000');
-    expect(release.jobs['test-windows-upgrade']['timeout-minutes']).toBe(30);
+    expect(release.jobs['test-windows-upgrade']['timeout-minutes']).toBe(45);
     const ciSource = readFileSync(path.join(repositoryRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
     expect(ciSource).toContain('Verify Windows release script syntax');
     expect(ciSource).toContain('./scripts/test-windows-upgrade.ps1');

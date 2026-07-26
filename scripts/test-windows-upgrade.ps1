@@ -32,6 +32,8 @@ function Invoke-BoundedProcess {
     [string]$FailureLabel
   )
 
+  $startedAt = Get-Date
+  Write-Host "Starting bounded process for ${FailureLabel}: $FilePath"
   $process = Start-Process -FilePath $FilePath -ArgumentList $Arguments -PassThru
   if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
     Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
@@ -40,6 +42,8 @@ function Invoke-BoundedProcess {
   if ($process.ExitCode -ne 0) {
     throw "${FailureLabel}: $($process.ExitCode)"
   }
+  $elapsed = [math]::Round(((Get-Date) - $startedAt).TotalSeconds, 1)
+  Write-Host "Completed bounded process for $FailureLabel in $elapsed seconds"
 }
 
 function Invoke-PackagedLaunch {
@@ -107,7 +111,7 @@ try {
     Invoke-BoundedProcess `
       -FilePath $priorInstaller `
       -Arguments "/S /D=$($variant.InstallRoot)" `
-      -TimeoutSeconds 120 `
+      -TimeoutSeconds 300 `
       -FailureLabel "$($variant.Product) prior installation failed"
 
     $executable = Join-Path $variant.InstallRoot "$($variant.Product).exe"
@@ -132,7 +136,7 @@ try {
     Invoke-BoundedProcess `
       -FilePath $candidateInstaller `
       -Arguments "/S /D=$($variant.InstallRoot)" `
-      -TimeoutSeconds 120 `
+      -TimeoutSeconds 300 `
       -FailureLabel "$($variant.Product) candidate installation failed"
 
     $executable = Join-Path $variant.InstallRoot "$($variant.Product).exe"
@@ -182,7 +186,7 @@ finally {
       Invoke-BoundedProcess `
         -FilePath $uninstaller.FullName `
         -Arguments '/S' `
-        -TimeoutSeconds 90 `
+        -TimeoutSeconds 180 `
         -FailureLabel "$($variant.Product) uninstall failed"
     }
   }
