@@ -514,7 +514,7 @@ jobs:
     name: Windows N-1 upgrade (${{ matrix.arch }})
     needs: [prepare, build-windows]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    timeout-minutes: 65
     permissions:
       contents: read
     strategy:
@@ -578,12 +578,15 @@ jobs:
 
       - name: Upgrade stable and beta while preserving user data
         shell: pwsh
-        timeout-minutes: 35
+        timeout-minutes: 55
+        env:
+          WINDOWS_ARM64_LEGACY_PUBLIC_BOOTSTRAP_TAG: ${{ vars.WINDOWS_ARM64_LEGACY_PUBLIC_BOOTSTRAP_TAG }}
         run: |
           ./scripts/test-windows-upgrade.ps1 `
             -Architecture '${{ matrix.arch }}' `
             -Channel '${{ needs.prepare.outputs.channel }}' `
-            -PriorTag $env:PRIOR_TAG
+            -PriorTag $env:PRIOR_TAG `
+            -CandidateTag '${{ needs.prepare.outputs.tag }}'
 
   test-linux-upgrade:
     name: Linux N-1 upgrade (${{ matrix.arch }})
