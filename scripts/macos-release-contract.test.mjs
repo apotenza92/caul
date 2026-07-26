@@ -332,6 +332,14 @@ describe('macOS release contract', () => {
     expect(release.jobs['publish-release'].steps.at(-1).run).toContain('gh release create');
     expect(release.jobs['publish-release'].steps.at(-1).run).toContain('--draft');
     expect(release.jobs['publish-release'].steps.at(-1).run).toContain('sha256sum --check SHA256SUMS');
+    expect(release.jobs['publish-release'].needs).toEqual(expect.arrayContaining([
+      'test-macos-updater',
+      'test-windows-upgrade',
+      'test-linux-upgrade'
+    ]));
+    expect(release.jobs).toHaveProperty('verify-public-release');
+    expect(release.jobs).toHaveProperty('verify-public-windows');
+    expect(release.jobs).toHaveProperty('verify-public-linux');
 
     const source = readFileSync(path.join(repositoryRoot, '.github', 'workflows', 'release.yml'), 'utf8');
     expect(source).not.toMatch(/GITHUB_REF#|inputs\.tag/);
@@ -347,11 +355,21 @@ describe('macOS release contract', () => {
     expect(source).toContain('/^v\\d+\\.\\d+\\.\\d+-beta\\.[1-9]\\d*$/');
     expect(source).toContain('cmp "release-assets/$asset_name" "existing-download/$asset_name"');
     expect(source).toContain('Install, launch and uninstall published NSIS packages');
+    expect(source).toContain('gh attestation verify "$asset_path"');
+    expect(source).toContain('env -u GH_TOKEN curl --fail --location');
+    expect(source).toContain('Windows N-1 upgrade');
+    expect(source).toContain('Linux N-1 upgrade');
+    expect(source).toContain('Stable and beta Windows applications did not coexist after upgrade');
+    expect(source).toContain('upgraded launch failed');
+    expect(source).toContain('brew upgrade --cask apotenza92/tap/caul apotenza92/tap/caul@beta');
+    expect(source).toContain('Independently verify public macOS packages');
     const nativeVerifier = readFileSync(path.join(repositoryRoot, 'scripts', 'verify-native-package.mjs'), 'utf8');
     expect(nativeVerifier).toContain('APPIMAGE_EXTRACT_AND_RUN');
     expect(nativeVerifier).toContain("spawnSync('dpkg-deb'");
     expect(nativeVerifier).toContain('rpm2cpio "$2" | cpio -idm --quiet');
     expect(nativeVerifier).toContain('inspectExtractedLinuxPackage(rpm, \'rpm\')');
+    expect(nativeVerifier).toContain("asar.extractFile(archives[0], 'package.json')");
+    expect(nativeVerifier).toContain('metadata.version !== packageVersion');
 
     const signedBuild = readFileSync(path.join(repositoryRoot, 'scripts', 'build-signed-macos.mjs'), 'utf8');
     expect(signedBuild).toContain("'--skip-launch'");
@@ -367,6 +385,8 @@ describe('macOS release contract', () => {
     expect(updaterHarness).toContain('tag_name: candidateTag');
     expect(updaterHarness).toContain("response.end('wrong updater channel')");
     expect(updaterHarness).toContain('resolvePriorSigningFingerprints');
+    expect(updaterHarness).toContain('upgrade-preservation-marker.json');
+    expect(updaterHarness).toContain('did not preserve existing user data');
     expect(source).toContain('APPLE_PRIOR_SIGNING_CERTIFICATE_SHA256: ${{ vars.APPLE_PRIOR_SIGNING_CERTIFICATE_SHA256 }}');
     expect(source).toContain('name: ${{ matrix.variant }}-updater-verification');
     expect(source).not.toContain('name: ${{ matrix.variant }}-release');

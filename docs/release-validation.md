@@ -13,9 +13,11 @@ Intel macOS is not supported. Every listed architecture is built by the GitHub r
 
 ## GitHub-Hosted Gates
 
-The `CI` workflow runs on pull requests and pushes to `main`. It runs the renderer and TypeScript checks, the complete deterministic Rust test suite, bundled dependency licence verification and native build preflights on macOS ARM64, Windows x64 and Linux x64. GitHub repository settings determine whether its jobs are required before merging.
+The `CI` workflow is manually dispatchable and callable by the tag-only release workflow. It runs the renderer and TypeScript checks, the complete deterministic Rust test suite, bundled dependency licence verification and native build preflights on macOS ARM64, Windows x64 and Linux x64. Run it deliberately against a release-preparation branch before merging; the release workflow reruns the same gate against the exact tag.
 
 The release workflow calls the same `CI` workflow before any release packaging begins. It then builds the complete supported package matrix on GitHub-hosted macOS, Windows and Linux runners. A tag must not publish a release when the shared checks or any platform build fails.
+
+Before publication, native Windows and Linux runners install the previous public stable and beta packages, launch them with separate user-data roots, upgrade both variants in place to the candidate, verify preserved state and launch the upgraded applications. Stable and beta must coexist after the upgrade. The macOS updater scenarios likewise assert that existing user data survives a valid update and both rejection paths.
 
 Releases are tag-push only. Every validation and packaging job checks out that exact tag, verifies that the tagged commit is on `main`, and publication uses the validated tag rather than a mutable branch ref. The migration does not require a release-tag ruleset for the current single-owner repository; add broader branch or tag rules only after separately reviewing the collaboration model and release-authoring threat boundary.
 
@@ -31,11 +33,15 @@ The signing job imports the certificate into a password-protected disposable key
 
 Post-package verification checks the exact stable or beta bundle identity, version, updater provider and channel, ZIP safety, blockmap and updater hashes, Developer ID authority, Team ID, certificate fingerprint, hardened-runtime timestamp, entitlements, every nested signed bundle and Mach-O object, exact ARM64 architecture, stapled ticket, Gatekeeper assessment and an isolated packaged launch with update traffic disabled.
 
+After publication, the workflow re-downloads the exact public asset set, verifies the release classification, SHA-256 manifest and GitHub attestations, and checks that every asset URL is anonymously reachable. Native Windows and Linux runners then install, inspect and launch the publicly downloaded packages. The Homebrew preparation job independently re-downloads both public macOS packages and repeats the complete signature, notarisation, architecture, bundle, checksum, helper and launch verifier before preparing casks.
+
 Release candidates also run the macOS updater from the previous public package for each applicable channel. The gate proves a valid replacement and rejection of a corrupt archive and an ad-hoc signed archive. The updater jobs use the tag-restricted `stable-updater-verification` and `beta-updater-verification` environments, which have no reviewer and contain no signing credentials. A channel with no prior public package may skip N-1 only when the exact candidate tag is named by `MACOS_UPDATER_BOOTSTRAP_TAG` in that channel's updater-verification environment. Remove that variable after the bootstrap release and never advance it to bypass later N-1 tests.
 
 Automatic download and restart-to-install updates are supported only by the signed macOS packages. Windows and Linux builds check the same GitHub stable/beta release channels and download the matching native package for explicit user installation. They must not enter Electron Updater's automatic-install path until their update metadata and native install transition have a maintained release gate.
 
 GitHub stores signing credentials only in the protected `release-signing` environment. Its required secrets are `APPLE_SIGNING_CERTIFICATE_P12_BASE64`, `APPLE_SIGNING_CERTIFICATE_PASSWORD` and `APPLE_NOTARYTOOL_KEY_P8_BASE64`. Non-secret environment variables pin `APPLE_NOTARYTOOL_KEY_ID` and `APPLE_NOTARYTOOL_ISSUER_ID`; repository variables pin `APPLE_SIGNING_CERTIFICATE_SHA256`, `APPLE_PRIOR_SIGNING_CERTIFICATE_SHA256`, `APPLE_SIGNING_IDENTITY` and `APPLE_TEAM_ID`. Stable and beta publication and updater verification use separate protected environments, and jobs receive only the permissions they require. Homebrew casks and the download page are checksum-sealed workflow artefacts for deliberate manual publication after the release gate; workflows do not commit or push those outputs.
+
+For a stable release, the Homebrew preparation gate installs both previous public casks, generates the candidate casks from the final public SHA-256 values, upgrades both installations in place, verifies preserved user data, confirms stable and beta coexist, and launches both signed applications. The resulting cask bytes remain a sealed artefact until they are deliberately applied to the existing tap and audited again.
 
 ## Hardware Packaged Gates
 

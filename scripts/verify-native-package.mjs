@@ -1,10 +1,13 @@
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { createReleaseLaunchEnvironment } from './release-launch-env.mjs';
 
+const require = createRequire(import.meta.url);
+const asar = require('@electron/asar');
 const options = new Map();
 for (let index = 2; index < process.argv.length; index += 2) {
   options.set(process.argv[index], process.argv[index + 1]);
@@ -13,6 +16,9 @@ const platform = options.get('--platform');
 const arch = options.get('--arch');
 const channel = options.get('--channel') ?? 'stable';
 const releaseDirectory = resolve(options.get('--release-dir') ?? 'release');
+const explicitUnpackedDirectory = options.get('--unpacked-dir');
+const publicOnly = options.get('--public-only') === 'true';
+const packageVersion = JSON.parse(readFileSync(resolve('package.json'), 'utf8')).version;
 
 function fail(message) {
   throw new Error(message);
@@ -48,6 +54,11 @@ function assertArchitecture(filePath) {
 }
 
 function findUnpackedDirectory() {
+  if (explicitUnpackedDirectory) {
+    const explicit = resolve(explicitUnpackedDirectory);
+    if (!existsSync(explicit)) fail(`Explicit packaged application directory is missing: ${explicit}`);
+    return explicit;
+  }
   const preferred = platform === 'windows'
     ? `win-${arch}-unpacked`
     : arch === 'x64' ? 'linux-unpacked' : `linux-${arch}-unpacked`;
@@ -56,6 +67,23 @@ function findUnpackedDirectory() {
   const matches = readdirSync(releaseDirectory, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && entry.name.endsWith('-unpacked'));
   fail(`Expected ${exact}; refusing fallback to ${matches.map((entry) => entry.name).join(', ') || 'no unpacked directory'}`);
+}
+
+function validatePackagedMetadata(root) {
+  const archives = findNamedFiles(root, 'app.asar');
+  if (archives.length !== 1) {
+    fail(`Packaged application must contain one app.asar, found ${archives.length}`);
+  }
+  let metadata;
+  try {
+    metadata = JSON.parse(asar.extractFile(archives[0], 'package.json').toString('utf8'));
+  } catch (error) {
+    fail(`Could not read packaged package.json from ${archives[0]}: ${error.message}`);
+  }
+  const expectedName = channel === 'beta' ? 'caul-beta' : 'caul';
+  if (metadata.name !== expectedName || metadata.version !== packageVersion) {
+    fail(`Packaged metadata ${metadata.name}@${metadata.version} does not match ${expectedName}@${packageVersion}`);
+  }
 }
 
 function runSmoke(executablePath) {
@@ -99,6 +127,15 @@ function inspectLinuxPackages() {
   }
 }
 
+function inspectWindowsPackages() {
+  const prefix = channel === 'beta' ? 'Caul-Beta' : 'Caul';
+  const installer = join(releaseDirectory, `${prefix}-windows-${arch}-setup.exe`);
+  const blockmap = `${installer}.blockmap`;
+  for (const packagePath of [installer, blockmap]) {
+    if (!existsSync(packagePath)) fail(`Published Windows package is missing: ${packagePath}`);
+  }
+}
+
 function findNamedFiles(root, name) {
   const matches = [];
   for (const entry of readdirSync(root, { withFileTypes: true })) {
@@ -127,6 +164,7 @@ function inspectExtractedLinuxPackage(packagePath, format) {
     if (appExecutables.length !== 1 || backends.length !== 1) {
       fail(`${format} package must contain one app and backend, found ${appExecutables.length} and ${backends.length}`);
     }
+    validatePackagedMetadata(extractionRoot);
     assertArchitecture(appExecutables[0]);
     assertArchitecture(backends[0]);
     chmodSync(appExecutables[0], 0o755);
@@ -140,22 +178,29 @@ assertHost();
 if (!['windows', 'linux'].includes(platform) || !['arm64', 'x64'].includes(arch) || !['stable', 'beta'].includes(channel)) {
   fail('Usage: node scripts/verify-native-package.mjs --platform <windows|linux> --arch <arm64|x64> --channel <stable|beta>');
 }
-const unpackedDirectory = findUnpackedDirectory();
-const productName = channel === 'beta' ? 'Caul Beta' : 'Caul';
-const appExecutable = platform === 'windows'
-  ? join(unpackedDirectory, `${productName}.exe`)
-  : join(unpackedDirectory, channel === 'beta' ? 'caul-beta' : 'caul');
-const backendExecutable = join(
-  unpackedDirectory,
-  'resources',
-  'bin',
-  platform === 'windows' ? 'caul-desktop-backend.exe' : 'caul-desktop-backend'
-);
-assertArchitecture(appExecutable);
-assertArchitecture(backendExecutable);
-if (!existsSync(join(unpackedDirectory, 'resources', 'scripts', 'run-pi-json.py'))) {
-  fail('Packaged app is missing resources/scripts/run-pi-json.py');
+if (!publicOnly) {
+  const unpackedDirectory = findUnpackedDirectory();
+  const productName = channel === 'beta' ? 'Caul Beta' : 'Caul';
+  const appExecutable = platform === 'windows'
+    ? join(unpackedDirectory, `${productName}.exe`)
+    : join(unpackedDirectory, channel === 'beta' ? 'caul-beta' : 'caul');
+  const backendExecutable = join(
+    unpackedDirectory,
+    'resources',
+    'bin',
+    platform === 'windows' ? 'caul-desktop-backend.exe' : 'caul-desktop-backend'
+  );
+  assertArchitecture(appExecutable);
+  assertArchitecture(backendExecutable);
+  if (!existsSync(join(unpackedDirectory, 'resources', 'scripts', 'run-pi-json.py'))) {
+    fail('Packaged app is missing resources/scripts/run-pi-json.py');
+  }
+  validatePackagedMetadata(unpackedDirectory);
+  runSmoke(appExecutable);
 }
-runSmoke(appExecutable);
-if (platform === 'linux') inspectLinuxPackages();
+if (platform === 'linux') {
+  inspectLinuxPackages();
+} else {
+  inspectWindowsPackages();
+}
 console.log(`${platform}/${arch} ${channel} package architecture, resources and launch verification passed.`);
