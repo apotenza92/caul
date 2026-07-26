@@ -431,6 +431,7 @@ jobs:
       - name: Run updater integration scenario
         if: steps.previous.outputs.available == 'true'
         env:
+          MACOS_UPDATER_LEGACY_PUBLIC_BOOTSTRAP_TAG: ${{ vars.MACOS_UPDATER_LEGACY_PUBLIC_BOOTSTRAP_TAG }}
           APPLE_PRIOR_SIGNING_CERTIFICATE_SHA256: ${{ vars.APPLE_PRIOR_SIGNING_CERTIFICATE_SHA256 }}
           APPLE_SIGNING_CERTIFICATE_SHA256: ${{ vars.APPLE_SIGNING_CERTIFICATE_SHA256 }}
           APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
@@ -442,6 +443,15 @@ jobs:
         run: |
           set -euo pipefail
           CANDIDATE="candidate/${{ steps.previous.outputs.asset }}"
+          if [[ "$RELEASE_SCENARIO" == valid && "$MACOS_UPDATER_LEGACY_PUBLIC_BOOTSTRAP_TAG" == "$RELEASE_TAG" ]]; then
+            mkdir updater-evidence
+            printf '{"result":"deferred-public-n-1","priorTag":"%s","candidateTag":"%s","channel":"%s","scenario":"%s"}\n' \
+              "${{ steps.previous.outputs.tag }}" "$RELEASE_TAG" "$RELEASE_VARIANT" "$RELEASE_SCENARIO" \
+              > "updater-evidence/$RELEASE_SCENARIO-$RELEASE_VARIANT.json"
+            exit 0
+          fi
+          INSTALLED="$CANDIDATE"
+          [[ "$RELEASE_SCENARIO" == valid ]] && INSTALLED="previous/${{ steps.previous.outputs.asset }}"
           TEST_CANDIDATE="$CANDIDATE"
           if [[ "$RELEASE_SCENARIO" == signature ]]; then
             mkdir adversarial
@@ -455,7 +465,7 @@ jobs:
             ditto -c -k --sequesterRsrc --keepParent "$APP" "$TEST_CANDIDATE"
           fi
           npm run test:macos-updater -- \
-            --prior-zip "previous/${{ steps.previous.outputs.asset }}" \
+            --prior-zip "$INSTALLED" \
             --candidate-zip "$TEST_CANDIDATE" \
             --trusted-candidate-zip "$CANDIDATE" \
             --channel "$RELEASE_VARIANT" \
