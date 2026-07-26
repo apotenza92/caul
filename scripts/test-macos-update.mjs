@@ -96,6 +96,21 @@ async function stopRelaunch(pid) {
   throw new Error(`Automatically relaunched process ${pid} did not exit`);
 }
 
+async function waitForProcessExit(child, timeoutMs) {
+  if (child.exitCode != null || child.signalCode != null) return true;
+  return new Promise((resolveWait) => {
+    const onExit = () => {
+      clearTimeout(timer);
+      resolveWait(true);
+    };
+    const timer = setTimeout(() => {
+      child.off('exit', onExit);
+      resolveWait(false);
+    }, timeoutMs);
+    child.once('exit', onExit);
+  });
+}
+
 async function waitForStatus(page, predicate, timeoutMs = 180_000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
@@ -231,7 +246,12 @@ try {
   writeFileSync(preservedStatePath, preservedState);
   const checked = await page.evaluate(() => window.caul.settings.updates.checkNow());
   if (checked.lastResult?.status !== 'available') throw new Error(`Candidate was not available: ${JSON.stringify(checked)}`);
-  await page.evaluate(() => window.caul.settings.updates.downloadAndInstall());
+  let downloadError;
+  try {
+    await page.evaluate(() => window.caul.settings.updates.downloadAndInstall());
+  } catch (error) {
+    downloadError = error;
+  }
   const downloaded = await waitForStatus(page, (status) => ['ready', 'error'].includes(status.lastResult?.status));
   if (!metadataRequests.includes(expectedMetadataPath)
     || metadataRequests.some((requestPath) => requestPath !== expectedMetadataPath)) {
@@ -242,6 +262,7 @@ try {
       throw new Error(`Corrupt package was not rejected: ${JSON.stringify(downloaded)}`);
     }
   } else {
+    if (downloadError) throw downloadError;
     if (downloaded.lastResult?.status !== 'ready') throw new Error(`Candidate did not download: ${JSON.stringify(downloaded)}`);
     const originalPid = appProcess.process().pid;
     const automaticRelaunch = scenario === 'valid'
@@ -249,8 +270,21 @@ try {
       : null;
     await page.evaluate(() => window.caul.settings.updates.installDownloaded()).catch(() => undefined);
     if (scenario === 'signature') {
-      const rejected = await waitForStatus(page, (status) => status.lastResult?.status === 'error');
-      if (!/sign|signature|code/i.test(rejected.lastResult?.message ?? '')) throw new Error(`Wrong signer was not rejected: ${JSON.stringify(rejected)}`);
+      const exited = await waitForProcessExit(appProcess.process(), 30_000);
+      if (!page.isClosed()) {
+        throw new Error('Wrong-signature update did not close its renderer during installation validation');
+      }
+      verifyTrustedApp(installedApp, bundleId, [currentFingerprint], signatureExpectations);
+      if (exited) {
+        appProcess = null;
+        const relaunchedPid = await waitForRelaunch(executable, originalPid, 60_000);
+        await stopRelaunch(relaunchedPid);
+      } else {
+        const unexpectedPids = executableProcessIds(executable).filter((pid) => pid !== originalPid);
+        if (unexpectedPids.length > 0) {
+          throw new Error(`Wrong-signature update launched unexpected replacement processes: ${unexpectedPids.join(', ')}`);
+        }
+      }
     } else {
       await new Promise((resolveExit, reject) => {
         const timer = setTimeout(() => reject(new Error('Updater did not exit to install')), 180_000);

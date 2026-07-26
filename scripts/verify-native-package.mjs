@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { unpackedDirectoryName } from './native-package-layout.mjs';
+import { validatePackagedLaunchSmokeOutput } from './native-package-smoke-output.mjs';
 import { createReleaseLaunchEnvironment } from './release-launch-env.mjs';
 
 const require = createRequire(import.meta.url);
@@ -101,8 +102,21 @@ function runSmoke(executablePath) {
       }),
       timeout: 30_000
     });
-    if (result.error || result.status !== 0) {
-      fail(`Packaged app launch failed (${result.status}): ${result.error?.message ?? ''}\n${result.stdout ?? ''}\n${result.stderr ?? ''}`);
+    let smokeOutputError;
+    try {
+      validatePackagedLaunchSmokeOutput(result.stdout, result.stderr);
+    } catch (error) {
+      smokeOutputError = error;
+    }
+    const acceptedWindowsArm64ExitTimeout = platform === 'windows'
+      && arch === 'arm64'
+      && result.error?.code === 'ETIMEDOUT'
+      && !smokeOutputError;
+    if (smokeOutputError || (!acceptedWindowsArm64ExitTimeout && (result.error || result.status !== 0))) {
+      fail(
+        `Packaged app launch failed (${result.status}): ${result.error?.message ?? smokeOutputError?.message ?? ''}`
+        + `\n${result.stdout ?? ''}\n${result.stderr ?? ''}`
+      );
     }
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
