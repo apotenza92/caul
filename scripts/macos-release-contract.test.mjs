@@ -413,9 +413,9 @@ describe('macOS release contract', () => {
     expect(windowsInstaller).toContain('!macro customInit');
     expect(windowsInstaller).toContain('ReadRegStr $R9 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"');
     expect(windowsInstaller).toContain('${if} $R9 == "0.1.21"');
-    expect(windowsInstaller).toContain('${ifNot} ${FileExists} "$INSTDIR\\${APP_EXECUTABLE_FILENAME}"');
     expect(windowsInstaller).toContain('DeleteRegKey SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}"');
     expect(windowsInstaller).toContain('DeleteRegKey SHELL_CONTEXT "${INSTALL_REGISTRY_KEY}"');
+    expect(windowsInstaller).not.toContain('${FileExists}');
     expect(windowsInstaller).not.toContain('RMDir');
     const windowsLaunchVerifier = readFileSync(
       path.join(repositoryRoot, 'scripts', 'verify-windows-packaged-launch.mjs'),

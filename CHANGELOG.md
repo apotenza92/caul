@@ -2,6 +2,10 @@
 
 All notable Caul changes are recorded here.
 
+## [0.1.37]
+
+- Extended the exact `0.1.21` Windows compatibility path to x64 after hosted evidence showed its legacy NSIS uninstaller also remained blocked when invoked by a newer installer.
+
 ## [0.1.36]
 
 - Kept hosted Windows N-1 installations on the same volume as the NSIS plug-in directory so the legacy atomic update path is tested without an artificial cross-volume deadlock.
