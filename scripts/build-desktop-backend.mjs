@@ -3,39 +3,42 @@ import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { pathToFileURL } from 'node:url';
 
-const release = process.argv.includes('--release');
-const cargo = resolveCargo();
-const args = ['build', '-p', 'caul-desktop-backend'];
-const cargoTarget = resolveCargoTarget();
+function main() {
+  const release = process.argv.includes('--release');
+  const cargo = resolveCargo();
+  const args = ['build', '-p', 'caul-desktop-backend'];
+  const cargoTarget = resolveCargoTarget();
 
-if (release) {
-  args.push('--release');
-}
-
-if (cargoTarget) {
-  args.push('--target', cargoTarget);
-}
-
-const result = spawnSync(cargo, args, {
-  stdio: 'inherit',
-  env: {
-    ...process.env,
-    RUSTC: resolveRustc()
-  }
-});
-
-process.exit(result.status ?? 1);
-
-function resolveCargoTarget() {
-  if (process.env.CAUL_DESKTOP_BACKEND_TARGET) {
-    return process.env.CAUL_DESKTOP_BACKEND_TARGET;
+  if (release) {
+    args.push('--release');
   }
 
-  const packagePlatform = process.env.CAUL_PACKAGE_PLATFORM;
-  const packageArch = process.env.CAUL_PACKAGE_ARCH ?? process.arch;
+  if (cargoTarget) {
+    args.push('--target', cargoTarget);
+  }
 
-  if (!packagePlatform || matchesHostPlatform(packagePlatform, packageArch)) {
+  const result = spawnSync(cargo, args, {
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      RUSTC: resolveRustc()
+    }
+  });
+
+  process.exit(result.status ?? 1);
+}
+
+export function resolveCargoTarget(environment = process.env) {
+  if (environment.CAUL_DESKTOP_BACKEND_TARGET) {
+    return environment.CAUL_DESKTOP_BACKEND_TARGET;
+  }
+
+  const packagePlatform = environment.CAUL_PACKAGE_PLATFORM;
+  const packageArch = environment.CAUL_PACKAGE_ARCH ?? process.arch;
+
+  if (!packagePlatform) {
     return null;
   }
 
@@ -56,11 +59,6 @@ function resolveCargoTarget() {
   }
 
   return null;
-}
-
-function matchesHostPlatform(packagePlatform, packageArch) {
-  const normalisedPackagePlatform = packagePlatform === 'win' ? 'win32' : packagePlatform === 'mac' ? 'darwin' : packagePlatform;
-  return normalisedPackagePlatform === process.platform && packageArch === process.arch;
 }
 
 function resolveCargo() {
@@ -105,4 +103,8 @@ function resolveRustc() {
   }
 
   return 'rustc';
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
 }
