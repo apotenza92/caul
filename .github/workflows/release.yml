@@ -241,28 +241,50 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          function Resolve-InstalledFile {
+            param(
+              [string]$Root,
+              [string]$Pattern,
+              [string]$Label
+            )
+            $deadline = (Get-Date).AddSeconds(90)
+            do {
+              $matches = @(Get-ChildItem -Path $Root -Recurse -File -Filter $Pattern -ErrorAction SilentlyContinue)
+              if ($matches.Count -eq 1) { return $matches[0] }
+              if ($matches.Count -gt 1) {
+                throw "Multiple $Label files found under ${Root}: $($matches.FullName -join ', ')"
+              }
+              Start-Sleep -Milliseconds 500
+            } while ((Get-Date) -lt $deadline)
+            $contents = @(Get-ChildItem -Path $Root -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+            throw "$Label missing under ${Root} after installer completion. Contents: $($contents -join ', ')"
+          }
           $installers = Get-ChildItem release -File -Filter "*windows-${{ matrix.arch }}-setup.exe"
           if ($installers.Count -ne ${{ needs.prepare.outputs.channel == 'stable' && 2 || 1 }}) {
             throw "Unexpected NSIS installer count: $($installers.Count)"
           }
           foreach ($installer in $installers) {
             $installRoot = Join-Path $env:RUNNER_TEMP ([IO.Path]::GetFileNameWithoutExtension($installer.Name))
-            $arguments = @('/S', "/D=$installRoot")
+            # NSIS requires /D= to be the final unquoted argument.
+            $arguments = "/S /D=$installRoot"
             $process = Start-Process -FilePath $installer.FullName -ArgumentList $arguments -Wait -PassThru
             if ($process.ExitCode -ne 0) { throw "$($installer.Name) installation failed: $($process.ExitCode)" }
             $product = if ($installer.Name -like 'Caul-Beta-*') { 'Caul Beta' } else { 'Caul' }
-            $executable = Join-Path $installRoot "$product.exe"
-            if (-not (Test-Path $executable)) { throw "Installed executable missing: $executable" }
+            $executable = (Resolve-InstalledFile -Root $installRoot -Pattern "$product.exe" -Label 'Installed executable').FullName
             $env:CAUL_DISABLE_MODEL_AUTO_DOWNLOAD = '1'
             $env:CAUL_DISABLE_UPDATE_CHECKS = '1'
             $env:CAUL_PACKAGED_LAUNCH_SMOKE_MS = '250'
             $env:CAUL_USER_DATA_DIR = Join-Path $installRoot 'smoke-user-data'
             $process = Start-Process -FilePath $executable -Wait -PassThru
             if ($process.ExitCode -ne 0) { throw "$product launch failed: $($process.ExitCode)" }
-            $uninstaller = Get-ChildItem $installRoot -File -Filter 'Uninstall*.exe' | Select-Object -First 1
-            if (-not $uninstaller) { throw "Uninstaller missing from $installRoot" }
+            $uninstaller = Resolve-InstalledFile -Root $installRoot -Pattern 'Uninstall*.exe' -Label 'Uninstaller'
             $process = Start-Process -FilePath $uninstaller.FullName -ArgumentList '/S' -Wait -PassThru
             if ($process.ExitCode -ne 0) { throw "$product uninstall failed: $($process.ExitCode)" }
+            $deadline = (Get-Date).AddSeconds(90)
+            while ((Test-Path $executable) -and (Get-Date) -lt $deadline) {
+              Start-Sleep -Milliseconds 500
+            }
+            if (Test-Path $executable) { throw "$product executable remains after uninstall: $executable" }
           }
 
   build-linux:

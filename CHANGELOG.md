@@ -2,7 +2,7 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.27]
+## [0.1.28]
 
 - Added separate stable and beta identities for Apple Silicon macOS, Windows ARM64/x64, and Linux ARM64/x64 packages.
 - Hardened hosted macOS releases with Developer ID signing, nested Rust and Swift helper verification, notarisation, stapling, Gatekeeper assessment, checksums, provenance, and native N-1 update tests.
@@ -14,3 +14,4 @@ All notable Caul changes are recorded here.
 - Added an exact-tag legacy updater bootstrap so adversarial checks use the current testable updater while the valid 0.1.21-to-current transition is verified against the public release.
 - Made native package launch verification require explicit packaged-app success output while tolerating the Windows ARM64 runner’s post-success Electron exit timeout.
 - Made adversarial macOS updater gates observe checksum rejection and verify that the trusted app survives or relaunches after signature rejection.
+- Made hosted NSIS verification wait for Windows ARM64 installations and removals to settle, resolve installed files within the isolated install root, and report its contents on failure.
