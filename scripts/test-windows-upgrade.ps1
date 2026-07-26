@@ -126,8 +126,11 @@ $legacyArm64BootstrapEnabled = (
 
 try {
   foreach ($variant in $variants) {
-    $variant.InstallRoot = Join-Path $env:RUNNER_TEMP "caul-$($variant.Channel)-install"
-    $variant.UserData = Join-Path $env:RUNNER_TEMP "caul-$($variant.Channel)-user-data"
+    # Electron Builder's NSIS updater atomically moves the previous installation
+    # through its plug-in directory under %TEMP%. Keep the isolated installation
+    # on that same volume so the gate exercises the normal updater path.
+    $variant.InstallRoot = Join-Path $env:TEMP "caul-$($variant.Channel)-install"
+    $variant.UserData = Join-Path $env:TEMP "caul-$($variant.Channel)-user-data"
     $priorInstaller = Join-Path $repositoryRoot "prior/$($variant.Prefix)-windows-$Architecture-setup.exe"
     Invoke-BoundedProcess `
       -FilePath $priorInstaller `

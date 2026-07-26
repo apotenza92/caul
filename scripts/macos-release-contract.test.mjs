@@ -401,9 +401,22 @@ describe('macOS release contract', () => {
       '$env:WINDOWS_ARM64_LEGACY_PUBLIC_BOOTSTRAP_TAG -eq $CandidateTag'
     );
     expect(windowsUpgrade).toContain('LegacyPartialInstall');
+    expect(windowsUpgrade).toContain('Join-Path $env:TEMP');
+    expect(windowsUpgrade).not.toContain('Join-Path $env:RUNNER_TEMP');
     expect(windowsUpgrade).not.toContain('-Wait -PassThru');
     expect(windowsUpgrade).toContain("ValidateSet('x64', 'arm64')");
     expect(windowsUpgrade).toContain("ValidateSet('stable', 'beta')");
+    const windowsInstaller = readFileSync(
+      path.join(repositoryRoot, 'build', 'installer.nsh'),
+      'utf8'
+    );
+    expect(windowsInstaller).toContain('!macro customInit');
+    expect(windowsInstaller).toContain('ReadRegStr $R9 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"');
+    expect(windowsInstaller).toContain('${if} $R9 == "0.1.21"');
+    expect(windowsInstaller).toContain('${ifNot} ${FileExists} "$INSTDIR\\${APP_EXECUTABLE_FILENAME}"');
+    expect(windowsInstaller).toContain('DeleteRegKey SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}"');
+    expect(windowsInstaller).toContain('DeleteRegKey SHELL_CONTEXT "${INSTALL_REGISTRY_KEY}"');
+    expect(windowsInstaller).not.toContain('RMDir');
     const windowsLaunchVerifier = readFileSync(
       path.join(repositoryRoot, 'scripts', 'verify-windows-packaged-launch.mjs'),
       'utf8'
