@@ -257,8 +257,8 @@ jobs:
             $env:CAUL_DISABLE_UPDATE_CHECKS = '1'
             $env:CAUL_PACKAGED_LAUNCH_SMOKE_MS = '250'
             $env:CAUL_USER_DATA_DIR = Join-Path $installRoot 'smoke-user-data'
-            & $executable
-            if ($LASTEXITCODE -ne 0) { throw "$product launch failed: $LASTEXITCODE" }
+            $process = Start-Process -FilePath $executable -Wait -PassThru
+            if ($process.ExitCode -ne 0) { throw "$product launch failed: $($process.ExitCode)" }
             $uninstaller = Get-ChildItem $installRoot -File -Filter 'Uninstall*.exe' | Select-Object -First 1
             if (-not $uninstaller) { throw "Uninstaller missing from $installRoot" }
             $process = Start-Process -FilePath $uninstaller.FullName -ArgumentList '/S' -Wait -PassThru
@@ -575,8 +575,8 @@ jobs:
               $env:CAUL_DISABLE_UPDATE_CHECKS = '1'
               $env:CAUL_PACKAGED_LAUNCH_SMOKE_MS = '250'
               $env:CAUL_USER_DATA_DIR = $variant.UserData
-              & $executable
-              if ($LASTEXITCODE -ne 0) { throw "$($variant.Product) prior launch failed: $LASTEXITCODE" }
+              $process = Start-Process -FilePath $executable -Wait -PassThru
+              if ($process.ExitCode -ne 0) { throw "$($variant.Product) prior launch failed: $($process.ExitCode)" }
               Set-Content -Path (Join-Path $variant.UserData 'upgrade-preservation-marker.txt') -Value "$($variant.Channel)-$env:PRIOR_TAG"
             }
 
@@ -586,8 +586,8 @@ jobs:
               if ($process.ExitCode -ne 0) { throw "$($variant.Product) candidate installation failed: $($process.ExitCode)" }
               $executable = Join-Path $variant.InstallRoot "$($variant.Product).exe"
               $env:CAUL_USER_DATA_DIR = $variant.UserData
-              & $executable
-              if ($LASTEXITCODE -ne 0) { throw "$($variant.Product) upgraded launch failed: $LASTEXITCODE" }
+              $process = Start-Process -FilePath $executable -Wait -PassThru
+              if ($process.ExitCode -ne 0) { throw "$($variant.Product) upgraded launch failed: $($process.ExitCode)" }
               node scripts/verify-native-package.mjs `
                 --platform windows `
                 --arch '${{ matrix.arch }}' `
