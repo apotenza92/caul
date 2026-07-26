@@ -390,9 +390,21 @@ describe('macOS release contract', () => {
     );
     expect(windowsUpgrade).toContain('Stable and beta Windows applications did not coexist after upgrade');
     expect(windowsUpgrade).toContain('upgraded launch failed');
-    expect(windowsUpgrade).toContain('Start-Process -FilePath $executable -Wait -PassThru');
+    expect(windowsUpgrade).toContain('verify-windows-packaged-launch.mjs');
+    expect(windowsUpgrade).toContain('Get-CimInstance Win32_Process');
+    expect(windowsUpgrade).toContain('ExecutablePath.StartsWith($installPrefix');
+    expect(windowsUpgrade).toContain('$process.WaitForExit($TimeoutSeconds * 1000)');
+    expect(windowsUpgrade).not.toContain('-Wait -PassThru');
     expect(windowsUpgrade).toContain("ValidateSet('x64', 'arm64')");
     expect(windowsUpgrade).toContain("ValidateSet('stable', 'beta')");
+    const windowsLaunchVerifier = readFileSync(
+      path.join(repositoryRoot, 'scripts', 'verify-windows-packaged-launch.mjs'),
+      'utf8'
+    );
+    expect(windowsLaunchVerifier).toContain("validatePackagedLaunchProcessResult('windows'");
+    expect(windowsLaunchVerifier).toContain("CAUL_SMOKE_OUTPUT_FILE: smokeOutputPath");
+    expect(windowsLaunchVerifier).toContain('timeout: 30_000');
+    expect(release.jobs['test-windows-upgrade']['timeout-minutes']).toBe(30);
     const ciSource = readFileSync(path.join(repositoryRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
     expect(ciSource).toContain('Verify Windows release script syntax');
     expect(ciSource).toContain('./scripts/test-windows-upgrade.ps1');
