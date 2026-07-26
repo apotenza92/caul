@@ -21,3 +21,26 @@ export function validatePackagedLaunchSmokeOutput(...outputs) {
 
   return summaries;
 }
+
+export function validatePackagedLaunchProcessResult(platform, result) {
+  let smokeOutputError;
+  try {
+    validatePackagedLaunchSmokeOutput(result.stdout, result.stderr);
+  } catch (error) {
+    smokeOutputError = error;
+  }
+
+  const acceptedWindowsExitTimeout = platform === 'windows'
+    && result.error?.code === 'ETIMEDOUT'
+    && !smokeOutputError;
+  if (smokeOutputError || (!acceptedWindowsExitTimeout && (result.error || result.status !== 0))) {
+    const failureDetails = [
+      smokeOutputError?.message,
+      result.error?.message
+    ].filter(Boolean).join('; ');
+    throw new Error(
+      `Packaged app launch failed (${result.status}): ${failureDetails}`
+      + `\n${result.stdout ?? ''}\n${result.stderr ?? ''}`
+    );
+  }
+}

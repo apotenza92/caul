@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { validatePackagedLaunchSmokeOutput } from './native-package-smoke-output.mjs';
+import {
+  validatePackagedLaunchProcessResult,
+  validatePackagedLaunchSmokeOutput
+} from './native-package-smoke-output.mjs';
 
 describe('native package launch smoke output', () => {
   it('accepts one or more successful packaged launch summaries', () => {
@@ -23,5 +26,44 @@ describe('native package launch smoke output', () => {
     expect(() => validatePackagedLaunchSmokeOutput(
       'caul-packaged-launch-smoke {"ok":true,"isPackaged":false}'
     )).toThrow('did not report a successful packaged application');
+  });
+});
+
+describe('native package launch process result', () => {
+  const successfulSmoke = 'caul-packaged-launch-smoke {"ok":true,"isPackaged":true}';
+
+  it('accepts a clean exit with successful packaged launch evidence', () => {
+    expect(() => validatePackagedLaunchProcessResult('linux', {
+      status: 0,
+      stdout: successfulSmoke,
+      stderr: ''
+    })).not.toThrow();
+  });
+
+  it('accepts a Windows timeout only after successful packaged launch evidence', () => {
+    expect(() => validatePackagedLaunchProcessResult('windows', {
+      status: null,
+      error: { code: 'ETIMEDOUT', message: 'timed out' },
+      stdout: successfulSmoke,
+      stderr: ''
+    })).not.toThrow();
+  });
+
+  it('rejects a Windows timeout without successful packaged launch evidence', () => {
+    expect(() => validatePackagedLaunchProcessResult('windows', {
+      status: null,
+      error: { code: 'ETIMEDOUT', message: 'timed out' },
+      stdout: '',
+      stderr: ''
+    })).toThrow('Packaged launch smoke emitted no result');
+  });
+
+  it('rejects non-Windows timeouts even with successful packaged launch evidence', () => {
+    expect(() => validatePackagedLaunchProcessResult('linux', {
+      status: null,
+      error: { code: 'ETIMEDOUT', message: 'timed out' },
+      stdout: successfulSmoke,
+      stderr: ''
+    })).toThrow('timed out');
   });
 });
