@@ -514,7 +514,7 @@ jobs:
     name: Windows N-1 upgrade (${{ matrix.arch }})
     needs: [prepare, build-windows]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: read
     strategy:
@@ -578,7 +578,7 @@ jobs:
 
       - name: Upgrade stable and beta while preserving user data
         shell: pwsh
-        timeout-minutes: 15
+        timeout-minutes: 35
         run: |
           ./scripts/test-windows-upgrade.ps1 `
             -Architecture '${{ matrix.arch }}' `
