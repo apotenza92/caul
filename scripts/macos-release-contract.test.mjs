@@ -361,9 +361,7 @@ describe('macOS release contract', () => {
     expect(source).toContain('env -u GH_TOKEN curl --fail --location');
     expect(source).toContain('Windows N-1 upgrade');
     expect(source).toContain('Linux N-1 upgrade');
-    expect(source).toContain('Stable and beta Windows applications did not coexist after upgrade');
-    expect(source).toContain('upgraded launch failed');
-    expect(source).toContain('Start-Process -FilePath $executable -Wait -PassThru');
+    expect(source).toContain('./scripts/test-windows-upgrade.ps1');
     expect(source).toContain('function Resolve-InstalledFile');
     expect(source).toContain('Get-ChildItem -Path $Root -Recurse');
     expect(source).toContain('./scripts/write-windows-defender-evidence.ps1');
@@ -386,8 +384,18 @@ describe('macOS release contract', () => {
     expect(defenderEvidence).toContain('Microsoft-Windows-Windows Defender/Operational');
     expect(defenderEvidence).toContain('$_.Id -in 1116, 1117');
     expect(defenderEvidence).not.toMatch(/Add-MpPreference|Set-MpPreference/);
+    const windowsUpgrade = readFileSync(
+      path.join(repositoryRoot, 'scripts', 'test-windows-upgrade.ps1'),
+      'utf8'
+    );
+    expect(windowsUpgrade).toContain('Stable and beta Windows applications did not coexist after upgrade');
+    expect(windowsUpgrade).toContain('upgraded launch failed');
+    expect(windowsUpgrade).toContain('Start-Process -FilePath $executable -Wait -PassThru');
+    expect(windowsUpgrade).toContain("ValidateSet('x64', 'arm64')");
+    expect(windowsUpgrade).toContain("ValidateSet('stable', 'beta')");
     const ciSource = readFileSync(path.join(repositoryRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
-    expect(ciSource).toContain('Verify Windows diagnostic script syntax');
+    expect(ciSource).toContain('Verify Windows release script syntax');
+    expect(ciSource).toContain('./scripts/test-windows-upgrade.ps1');
     expect(ciSource).toContain('System.Management.Automation.Language.Parser');
 
     const signedBuild = readFileSync(path.join(repositoryRoot, 'scripts', 'build-signed-macos.mjs'), 'utf8');

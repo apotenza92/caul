@@ -2,6 +2,10 @@
 
 All notable Caul changes are recorded here.
 
+## [0.1.32]
+
+- Moved the Windows N-1 upgrade lifecycle into a dedicated PowerShell script and added hosted parser validation so syntax defects fail during the preflight gate instead of after native release packaging.
+
 ## [0.1.31]
 
 - Forced the established BCJ executable filter for Windows ARM64 NSIS payloads so the bundled extractor restores every executable and DLL instead of silently omitting entries encoded with 7-Zip's newer ARM64 filter.

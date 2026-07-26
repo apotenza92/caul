@@ -104,19 +104,25 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
 
-      - name: Verify Windows diagnostic script syntax
+      - name: Verify Windows release script syntax
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $tokens = $null
-          $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path './scripts/write-windows-defender-evidence.ps1'),
-            [ref]$tokens,
-            [ref]$errors
-          ) | Out-Null
-          if ($errors.Count -gt 0) {
-            throw ($errors | ForEach-Object Message | Out-String)
+          $scripts = @(
+            './scripts/test-windows-upgrade.ps1',
+            './scripts/write-windows-defender-evidence.ps1'
+          )
+          foreach ($script in $scripts) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $script),
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              throw "$script`n$($errors | ForEach-Object Message | Out-String)"
+            }
           }
 
       - name: Install dependencies
