@@ -362,6 +362,9 @@ describe('macOS release contract', () => {
     expect(source).toContain('Stable and beta Windows applications did not coexist after upgrade');
     expect(source).toContain('upgraded launch failed');
     expect(source).toContain('Start-Process -FilePath $executable -Wait -PassThru');
+    expect(source).toContain('function Resolve-InstalledFile');
+    expect(source).toContain('Get-ChildItem -Path $Root -Recurse');
+    expect(source).toContain('executable remains after uninstall');
     expect(source).not.toContain('$LASTEXITCODE');
     expect(source).toContain('brew upgrade --cask apotenza92/tap/caul apotenza92/tap/caul@beta');
     expect(source).toContain('Independently verify public macOS packages');
