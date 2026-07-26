@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
+import { unpackedDirectoryName } from './native-package-layout.mjs';
 import { createReleaseLaunchEnvironment } from './release-launch-env.mjs';
 
 const require = createRequire(import.meta.url);
@@ -59,9 +60,7 @@ function findUnpackedDirectory() {
     if (!existsSync(explicit)) fail(`Explicit packaged application directory is missing: ${explicit}`);
     return explicit;
   }
-  const preferred = platform === 'windows'
-    ? `win-${arch}-unpacked`
-    : arch === 'x64' ? 'linux-unpacked' : `linux-${arch}-unpacked`;
+  const preferred = unpackedDirectoryName(platform, arch);
   const exact = join(releaseDirectory, preferred);
   if (existsSync(exact)) return exact;
   const matches = readdirSync(releaseDirectory, { withFileTypes: true })
