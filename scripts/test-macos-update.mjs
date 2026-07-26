@@ -121,6 +121,12 @@ const betaCandidate = /^v\d+\.\d+\.\d+-beta\.[1-9]\d*$/.test(candidateTag);
 if ((!stableCandidate && !betaCandidate) || candidateTag.slice(1) !== expectedVersion) {
   throw new Error(`Candidate tag ${candidateTag} does not match supported version ${expectedVersion}`);
 }
+const offeredVersion = scenario === 'valid'
+  ? expectedVersion
+  : expectedVersion.replace(/^(\d+)\.(\d+)\.(\d+)$/, (_, major, minor, patch) => `${major}.${minor}.${Number(patch) + 1}`);
+if (!/^\d+\.\d+\.\d+$/.test(offeredVersion)) {
+  throw new Error(`Adversarial updater scenarios require a stable candidate version; received ${expectedVersion}`);
+}
 const product = channel === 'beta' ? 'Caul Beta' : 'Caul';
 const bundleId = channel === 'beta' ? 'dev.caul.app.beta' : 'dev.caul.app';
 const currentFingerprint = normaliseFingerprint(process.env.APPLE_SIGNING_CERTIFICATE_SHA256);
@@ -158,12 +164,12 @@ try {
   if (plist(trustedCandidateApp, 'CFBundleShortVersionString') !== expectedVersion) throw new Error('Trusted candidate version is wrong');
   if (plist(candidateApp, 'CFBundleIdentifier') !== bundleId || plist(candidateApp, 'CFBundleShortVersionString') !== expectedVersion) throw new Error('Scenario candidate package identity or version is wrong');
   const priorVersion = plist(installedApp, 'CFBundleShortVersionString');
-  if (priorVersion === expectedVersion) throw new Error('N-1 package has the candidate version');
+  if (scenario === 'valid' && priorVersion === expectedVersion) throw new Error('N-1 package has the candidate version');
   const candidateBytes = readFileSync(candidateZip);
   const servedBytes = scenario === 'corrupt' ? corrupt(candidateBytes) : candidateBytes;
   const artifactName = basename(candidateZip);
   const metadata = YAML.dump({
-    version: expectedVersion,
+    version: offeredVersion,
     files: [{ url: artifactName, sha512: createHash('sha512').update(candidateBytes).digest('base64'), size: candidateBytes.length }],
     minimumSystemVersion: CAUL_MAC_MINIMUM_KERNEL_VERSION,
     path: artifactName,
@@ -178,9 +184,9 @@ try {
       response.setHeader('content-type', 'application/json');
       response.end(JSON.stringify([{
         draft: false,
-        prerelease: betaCandidate,
-        tag_name: candidateTag,
-        name: candidateTag,
+        prerelease: false,
+        tag_name: `v${offeredVersion}`,
+        name: `v${offeredVersion}`,
         html_url: 'http://127.0.0.1/',
         assets: [{ name: artifactName, size: candidateBytes.length, browser_download_url: `http://127.0.0.1:${server.address().port}/${artifactName}` }]
       }]));

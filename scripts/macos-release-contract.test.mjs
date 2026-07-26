@@ -383,12 +383,15 @@ describe('macOS release contract', () => {
     expect(updaterHarness).toContain("option('--trusted-candidate-zip')");
     expect(updaterHarness).toContain("option('--candidate-tag')");
     expect(updaterHarness).toContain("channel === 'beta' ? '/beta-mac.yml' : '/latest-mac.yml'");
-    expect(updaterHarness).toContain('prerelease: betaCandidate');
-    expect(updaterHarness).toContain('tag_name: candidateTag');
+    expect(updaterHarness).toContain('prerelease: false');
+    expect(updaterHarness).toContain('tag_name: `v${offeredVersion}`');
     expect(updaterHarness).toContain("response.end('wrong updater channel')");
     expect(updaterHarness).toContain('resolvePriorSigningFingerprints');
     expect(updaterHarness).toContain('upgrade-preservation-marker.json');
     expect(updaterHarness).toContain('did not preserve existing user data');
+    expect(updaterHarness).toContain("scenario === 'valid' && priorVersion === expectedVersion");
+    expect(source).toContain('MACOS_UPDATER_LEGACY_PUBLIC_BOOTSTRAP_TAG');
+    expect(source).toContain('deferred-public-n-1');
     expect(source).toContain('APPLE_PRIOR_SIGNING_CERTIFICATE_SHA256: ${{ vars.APPLE_PRIOR_SIGNING_CERTIFICATE_SHA256 }}');
     expect(source).toContain('name: ${{ matrix.variant }}-updater-verification');
     expect(source).not.toContain('name: ${{ matrix.variant }}-release');
