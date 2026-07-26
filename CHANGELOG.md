@@ -2,6 +2,12 @@
 
 All notable Caul changes are recorded here.
 
+## [0.1.30]
+
+- Accepted a Windows packaged process timeout only after explicit successful packaged-launch evidence, consistently across x64 and ARM64 runners.
+- Added focused Microsoft Defender detection evidence when a hosted Windows installer removes an expected executable, without disabling scanning or relaxing installation checks.
+- Restored standard Windows ARM64 package compression after the stored-payload release candidate proved that archive extraction was not the cause of the missing executable.
+
 ## [0.1.29]
 
 - Stored the Windows ARM64 NSIS application payload without the unsupported 7-Zip ARM64 executable filter so installed packages retain and launch the main executable.

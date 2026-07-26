@@ -364,6 +364,7 @@ describe('macOS release contract', () => {
     expect(source).toContain('Start-Process -FilePath $executable -Wait -PassThru');
     expect(source).toContain('function Resolve-InstalledFile');
     expect(source).toContain('Get-ChildItem -Path $Root -Recurse');
+    expect(source).toContain('./scripts/write-windows-defender-evidence.ps1');
     expect(source).toContain('executable remains after uninstall');
     expect(source).not.toContain('$LASTEXITCODE');
     expect(source).toContain('brew upgrade --cask apotenza92/tap/caul apotenza92/tap/caul@beta');
@@ -375,6 +376,17 @@ describe('macOS release contract', () => {
     expect(nativeVerifier).toContain('inspectExtractedLinuxPackage(rpm, \'rpm\')');
     expect(nativeVerifier).toContain("asar.extractFile(archives[0], 'package.json')");
     expect(nativeVerifier).toContain('metadata.version !== packageVersion');
+    const defenderEvidence = readFileSync(
+      path.join(repositoryRoot, 'scripts', 'write-windows-defender-evidence.ps1'),
+      'utf8'
+    );
+    expect(defenderEvidence).toContain('Get-MpThreatDetection');
+    expect(defenderEvidence).toContain('Microsoft-Windows-Windows Defender/Operational');
+    expect(defenderEvidence).toContain('$_.Id -in 1116, 1117');
+    expect(defenderEvidence).not.toMatch(/Add-MpPreference|Set-MpPreference/);
+    const ciSource = readFileSync(path.join(repositoryRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
+    expect(ciSource).toContain('Verify Windows diagnostic script syntax');
+    expect(ciSource).toContain('System.Management.Automation.Language.Parser');
 
     const signedBuild = readFileSync(path.join(repositoryRoot, 'scripts', 'build-signed-macos.mjs'), 'utf8');
     expect(signedBuild).toContain("'--skip-launch'");

@@ -265,12 +265,19 @@ jobs:
           }
           foreach ($installer in $installers) {
             $installRoot = Join-Path $env:RUNNER_TEMP ([IO.Path]::GetFileNameWithoutExtension($installer.Name))
+            $installStartedAt = Get-Date
             # NSIS requires /D= to be the final unquoted argument.
             $arguments = "/S /D=$installRoot"
             $process = Start-Process -FilePath $installer.FullName -ArgumentList $arguments -Wait -PassThru
             if ($process.ExitCode -ne 0) { throw "$($installer.Name) installation failed: $($process.ExitCode)" }
             $product = if ($installer.Name -like 'Caul-Beta-*') { 'Caul Beta' } else { 'Caul' }
-            $executable = (Resolve-InstalledFile -Root $installRoot -Pattern "$product.exe" -Label 'Installed executable').FullName
+            try {
+              $executable = (Resolve-InstalledFile -Root $installRoot -Pattern "$product.exe" -Label 'Installed executable').FullName
+            }
+            catch {
+              & ./scripts/write-windows-defender-evidence.ps1 -Since $installStartedAt -InstallRoot $installRoot
+              throw
+            }
             $env:CAUL_DISABLE_MODEL_AUTO_DOWNLOAD = '1'
             $env:CAUL_DISABLE_UPDATE_CHECKS = '1'
             $env:CAUL_PACKAGED_LAUNCH_SMOKE_MS = '250'
@@ -977,8 +984,16 @@ jobs:
             foreach ($variant in $variants) {
               $variant.InstallRoot = Join-Path $env:RUNNER_TEMP "public-$($variant.Channel)-install"
               $installer = Join-Path $PWD "public-release/$($variant.Prefix)-windows-${{ matrix.arch }}-setup.exe"
+              $installStartedAt = Get-Date
               $process = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$($variant.InstallRoot)") -Wait -PassThru
               if ($process.ExitCode -ne 0) { throw "$($variant.Product) public installation failed: $($process.ExitCode)" }
+              $expectedExecutable = Join-Path $variant.InstallRoot "$($variant.Product).exe"
+              if (-not (Test-Path $expectedExecutable)) {
+                & ./scripts/write-windows-defender-evidence.ps1 `
+                  -Since $installStartedAt `
+                  -InstallRoot $variant.InstallRoot
+                throw "$($variant.Product) public installation is missing $expectedExecutable."
+              }
               node scripts/verify-native-package.mjs `
                 --platform windows `
                 --arch '${{ matrix.arch }}' `
