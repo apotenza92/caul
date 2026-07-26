@@ -2,6 +2,11 @@
 
 All notable Caul changes are recorded here.
 
+## [0.1.31]
+
+- Forced the established BCJ executable filter for Windows ARM64 NSIS payloads so the bundled extractor restores every executable and DLL instead of silently omitting entries encoded with 7-Zip's newer ARM64 filter.
+- Removed the obsolete system-7za shim because the maintained Electron Builder toolset now supplies a native, checksum-pinned Windows ARM64 binary.
+
 ## [0.1.30]
 
 - Accepted a Windows packaged process timeout only after explicit successful packaged-launch evidence, consistently across x64 and ARM64 runners.

@@ -19,13 +19,26 @@ const packagePlatform = process.env.CAUL_PACKAGE_PLATFORM ?? process.platform;
 const packageArch = process.env.CAUL_PACKAGE_ARCH;
 const winArchitectures = packageArch ? [packageArch] : ['arm64'];
 const linuxArchitectures = packageArch ? [packageArch] : ['arm64'];
+const isWindowsArm64Package = ['win', 'win32'].includes(packagePlatform)
+  && winArchitectures.length === 1
+  && winArchitectures[0] === 'arm64';
 const linuxArtifactArch = packageArch ?? '${arch}';
 const backendTargetTriple = resolveBackendTargetTriple(packagePlatform, packageArch);
+
+// The NSIS 7-Zip plug-in cannot restore entries encoded with the filter that
+// modern 7-Zip automatically selects for ARM64 executables. BCJ remains fully
+// reversible for arbitrary bytes and is supported by the bundled extractor.
+if (isWindowsArm64Package) {
+  process.env.ELECTRON_BUILDER_7Z_FILTER = 'BCJ';
+}
 
 console.log(`\nCaul build configuration for v${version}`);
 console.log(`  Type: ${buildChannel}`);
 console.log(`  App ID: ${appId}`);
 console.log(`  Product Name: ${appDisplayName}\n`);
+if (isWindowsArm64Package) {
+  console.log(`  NSIS 7-Zip Filter: ${process.env.ELECTRON_BUILDER_7Z_FILTER}\n`);
+}
 if (isDevBuild) {
   console.log(`  Dev Code Signing Identity: ${devCodeSignIdentity || 'ad-hoc'}\n`);
 }
