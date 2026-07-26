@@ -576,79 +576,11 @@ jobs:
 
       - name: Upgrade stable and beta while preserving user data
         shell: pwsh
-        env:
-          CAUL_RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          $variants = @(
-            @{
-              Channel = 'beta'
-              Prefix = 'Caul-Beta'
-              Product = 'Caul Beta'
-            }
-          )
-          if ($env:CAUL_RELEASE_CHANNEL -eq 'stable') {
-            $variants = @(
-              @{
-                Channel = 'stable'
-                Prefix = 'Caul'
-                Product = 'Caul'
-              }
-            ) + $variants
-          }
-          try {
-            foreach ($variant in $variants) {
-              $variant.InstallRoot = Join-Path $env:RUNNER_TEMP "caul-$($variant.Channel)-install"
-              $variant.UserData = Join-Path $env:RUNNER_TEMP "caul-$($variant.Channel)-user-data"
-              $priorInstaller = Join-Path $PWD "prior/$($variant.Prefix)-windows-${{ matrix.arch }}-setup.exe"
-              $process = Start-Process -FilePath $priorInstaller -ArgumentList @('/S', "/D=$($variant.InstallRoot)") -Wait -PassThru
-              if ($process.ExitCode -ne 0) { throw "$($variant.Product) prior installation failed: $($process.ExitCode)" }
-              $executable = Join-Path $variant.InstallRoot "$($variant.Product).exe"
-              if (-not (Test-Path $executable)) { throw "Previous executable missing: $executable" }
-              New-Item -ItemType Directory -Force $variant.UserData | Out-Null
-              $env:CAUL_DISABLE_MODEL_AUTO_DOWNLOAD = '1'
-              $env:CAUL_DISABLE_UPDATE_CHECKS = '1'
-              $env:CAUL_PACKAGED_LAUNCH_SMOKE_MS = '250'
-              $env:CAUL_USER_DATA_DIR = $variant.UserData
-              $process = Start-Process -FilePath $executable -Wait -PassThru
-              if ($process.ExitCode -ne 0) { throw "$($variant.Product) prior launch failed: $($process.ExitCode)" }
-              Set-Content -Path (Join-Path $variant.UserData 'upgrade-preservation-marker.txt') -Value "$($variant.Channel)-$env:PRIOR_TAG"
-            }
-
-            foreach ($variant in $variants) {
-              $candidateInstaller = Join-Path $PWD "candidate/$($variant.Prefix)-windows-${{ matrix.arch }}-setup.exe"
-              $process = Start-Process -FilePath $candidateInstaller -ArgumentList @('/S', "/D=$($variant.InstallRoot)") -Wait -PassThru
-              if ($process.ExitCode -ne 0) { throw "$($variant.Product) candidate installation failed: $($process.ExitCode)" }
-              $executable = Join-Path $variant.InstallRoot "$($variant.Product).exe"
-              $env:CAUL_USER_DATA_DIR = $variant.UserData
-              $process = Start-Process -FilePath $executable -Wait -PassThru
-              if ($process.ExitCode -ne 0) { throw "$($variant.Product) upgraded launch failed: $($process.ExitCode)" }
-              node scripts/verify-native-package.mjs `
-                --platform windows `
-                --arch '${{ matrix.arch }}' `
-                --channel $variant.Channel `
-                --release-dir candidate `
-                --unpacked-dir $variant.InstallRoot
-              $marker = Join-Path $variant.UserData 'upgrade-preservation-marker.txt'
-              if ((Get-Content $marker -Raw).Trim() -ne "$($variant.Channel)-$env:PRIOR_TAG") {
-                throw "$($variant.Product) did not preserve existing user data."
-              }
-            }
-            if ($env:CAUL_RELEASE_CHANNEL -eq 'stable'
-              -and (-not (Test-Path (Join-Path $variants[0].InstallRoot 'Caul.exe'))
-                -or -not (Test-Path (Join-Path $variants[1].InstallRoot 'Caul Beta.exe')))) {
-              throw 'Stable and beta Windows applications did not coexist after upgrade.'
-            }
-          }
-          finally {
-            foreach ($variant in $variants) {
-              if (-not $variant.ContainsKey('InstallRoot')) { continue }
-              $uninstaller = Get-ChildItem $variant.InstallRoot -File -Filter 'Uninstall*.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
-              if ($uninstaller) {
-                Start-Process -FilePath $uninstaller.FullName -ArgumentList '/S' -Wait | Out-Null
-              }
-            }
-          }
+          ./scripts/test-windows-upgrade.ps1 `
+            -Architecture '${{ matrix.arch }}' `
+            -Channel '${{ needs.prepare.outputs.channel }}' `
+            -PriorTag $env:PRIOR_TAG
 
   test-linux-upgrade:
     name: Linux N-1 upgrade (${{ matrix.arch }})
