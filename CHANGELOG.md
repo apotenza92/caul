@@ -2,6 +2,10 @@
 
 All notable Caul changes are recorded here.
 
+## [0.1.29]
+
+- Stored the Windows ARM64 NSIS application payload without the unsupported 7-Zip ARM64 executable filter so installed packages retain and launch the main executable.
+
 ## [0.1.28]
 
 - Added separate stable and beta identities for Apple Silicon macOS, Windows ARM64/x64, and Linux ARM64/x64 packages.

@@ -19,6 +19,9 @@ const packagePlatform = process.env.CAUL_PACKAGE_PLATFORM ?? process.platform;
 const packageArch = process.env.CAUL_PACKAGE_ARCH;
 const winArchitectures = packageArch ? [packageArch] : ['arm64'];
 const linuxArchitectures = packageArch ? [packageArch] : ['arm64'];
+const isWindowsArm64Package = ['win', 'win32'].includes(packagePlatform)
+  && winArchitectures.length === 1
+  && winArchitectures[0] === 'arm64';
 const linuxArtifactArch = packageArch ?? '${arch}';
 const backendTargetTriple = resolveBackendTargetTriple(packagePlatform, packageArch);
 
@@ -159,7 +162,10 @@ module.exports = {
     ? macExtraResources
     : commonExtraResources,
   asar: true,
-  compression: 'normal',
+  // The NSIS extraction plug-in bundled by electron-builder cannot restore
+  // archives that use 7-Zip's newer ARM64 executable filter. Store the
+  // Windows ARM64 payload so the main executable remains extractable.
+  compression: isWindowsArm64Package ? 'store' : 'normal',
   publish: isDevBuild ? [] : [
     {
       provider: 'github',
