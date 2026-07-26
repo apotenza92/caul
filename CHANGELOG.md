@@ -2,6 +2,10 @@
 
 All notable Caul changes are recorded here.
 
+## [0.1.33]
+
+- Made Windows N-1 packaged launches bounded and evidence-based so a legacy Electron process that remains alive after reporting success cannot hang the release workflow.
+
 ## [0.1.32]
 
 - Moved the Windows N-1 upgrade lifecycle into a dedicated PowerShell script and added hosted parser validation so syntax defects fail during the preflight gate instead of after native release packaging.

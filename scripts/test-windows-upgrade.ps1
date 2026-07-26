@@ -15,6 +15,72 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
+$launchVerifier = Join-Path $repositoryRoot 'scripts/verify-windows-packaged-launch.mjs'
+
+function Invoke-BoundedProcess {
+  param(
+    [Parameter(Mandatory)]
+    [string]$FilePath,
+
+    [Parameter(Mandatory)]
+    [string]$Arguments,
+
+    [Parameter(Mandatory)]
+    [int]$TimeoutSeconds,
+
+    [Parameter(Mandatory)]
+    [string]$FailureLabel
+  )
+
+  $process = Start-Process -FilePath $FilePath -ArgumentList $Arguments -PassThru
+  if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    throw "$FailureLabel timed out after $TimeoutSeconds seconds"
+  }
+  if ($process.ExitCode -ne 0) {
+    throw "${FailureLabel}: $($process.ExitCode)"
+  }
+}
+
+function Invoke-PackagedLaunch {
+  param(
+    [Parameter(Mandatory)]
+    [string]$Executable,
+
+    [Parameter(Mandatory)]
+    [string]$UserData,
+
+    [Parameter(Mandatory)]
+    [string]$InstallRoot,
+
+    [Parameter(Mandatory)]
+    [string]$FailureLabel
+  )
+
+  $launchExitCode = 1
+  try {
+    node $launchVerifier `
+      --executable $Executable `
+      --user-data $UserData
+    $launchExitCode = $LASTEXITCODE
+  }
+  finally {
+    $installPrefix = [IO.Path]::GetFullPath($InstallRoot).TrimEnd('\') + '\'
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+      Where-Object {
+        $_.ExecutablePath `
+          -and $_.ExecutablePath.StartsWith($installPrefix, [StringComparison]::OrdinalIgnoreCase)
+      } |
+      ForEach-Object {
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+      }
+  }
+
+  if ($launchExitCode -ne 0) {
+    throw "${FailureLabel}: $launchExitCode"
+  }
+}
+
 $variants = @(
   @{
     Channel = 'beta'
@@ -38,10 +104,11 @@ try {
     $variant.InstallRoot = Join-Path $env:RUNNER_TEMP "caul-$($variant.Channel)-install"
     $variant.UserData = Join-Path $env:RUNNER_TEMP "caul-$($variant.Channel)-user-data"
     $priorInstaller = Join-Path $repositoryRoot "prior/$($variant.Prefix)-windows-$Architecture-setup.exe"
-    $process = Start-Process -FilePath $priorInstaller -ArgumentList @('/S', "/D=$($variant.InstallRoot)") -Wait -PassThru
-    if ($process.ExitCode -ne 0) {
-      throw "$($variant.Product) prior installation failed: $($process.ExitCode)"
-    }
+    Invoke-BoundedProcess `
+      -FilePath $priorInstaller `
+      -Arguments "/S /D=$($variant.InstallRoot)" `
+      -TimeoutSeconds 120 `
+      -FailureLabel "$($variant.Product) prior installation failed"
 
     $executable = Join-Path $variant.InstallRoot "$($variant.Product).exe"
     if (-not (Test-Path $executable)) {
@@ -49,14 +116,11 @@ try {
     }
 
     New-Item -ItemType Directory -Force $variant.UserData | Out-Null
-    $env:CAUL_DISABLE_MODEL_AUTO_DOWNLOAD = '1'
-    $env:CAUL_DISABLE_UPDATE_CHECKS = '1'
-    $env:CAUL_PACKAGED_LAUNCH_SMOKE_MS = '250'
-    $env:CAUL_USER_DATA_DIR = $variant.UserData
-    $process = Start-Process -FilePath $executable -Wait -PassThru
-    if ($process.ExitCode -ne 0) {
-      throw "$($variant.Product) prior launch failed: $($process.ExitCode)"
-    }
+    Invoke-PackagedLaunch `
+      -Executable $executable `
+      -UserData $variant.UserData `
+      -InstallRoot $variant.InstallRoot `
+      -FailureLabel "$($variant.Product) prior launch failed"
 
     Set-Content `
       -Path (Join-Path $variant.UserData 'upgrade-preservation-marker.txt') `
@@ -65,17 +129,18 @@ try {
 
   foreach ($variant in $variants) {
     $candidateInstaller = Join-Path $repositoryRoot "candidate/$($variant.Prefix)-windows-$Architecture-setup.exe"
-    $process = Start-Process -FilePath $candidateInstaller -ArgumentList @('/S', "/D=$($variant.InstallRoot)") -Wait -PassThru
-    if ($process.ExitCode -ne 0) {
-      throw "$($variant.Product) candidate installation failed: $($process.ExitCode)"
-    }
+    Invoke-BoundedProcess `
+      -FilePath $candidateInstaller `
+      -Arguments "/S /D=$($variant.InstallRoot)" `
+      -TimeoutSeconds 120 `
+      -FailureLabel "$($variant.Product) candidate installation failed"
 
     $executable = Join-Path $variant.InstallRoot "$($variant.Product).exe"
-    $env:CAUL_USER_DATA_DIR = $variant.UserData
-    $process = Start-Process -FilePath $executable -Wait -PassThru
-    if ($process.ExitCode -ne 0) {
-      throw "$($variant.Product) upgraded launch failed: $($process.ExitCode)"
-    }
+    Invoke-PackagedLaunch `
+      -Executable $executable `
+      -UserData $variant.UserData `
+      -InstallRoot $variant.InstallRoot `
+      -FailureLabel "$($variant.Product) upgraded launch failed"
 
     node (Join-Path $repositoryRoot 'scripts/verify-native-package.mjs') `
       --platform windows `
@@ -114,7 +179,11 @@ finally {
       -ErrorAction SilentlyContinue |
       Select-Object -First 1
     if ($uninstaller) {
-      Start-Process -FilePath $uninstaller.FullName -ArgumentList '/S' -Wait | Out-Null
+      Invoke-BoundedProcess `
+        -FilePath $uninstaller.FullName `
+        -Arguments '/S' `
+        -TimeoutSeconds 90 `
+        -FailureLabel "$($variant.Product) uninstall failed"
     }
   }
 }
