@@ -2,7 +2,7 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.38]
+## [0.1.39]
 
 - Simplified onboarding into a fixed 560 × 560 top-aligned flow using the repository’s shadcn/Base UI controls, with clear Local and Cloud choices and no scrolling across supported AI setup combinations.
 - Added browser-based ChatGPT subscription sign-in through the exact Pi 0.82.1 runtime, including passkey support, strict OpenAI authentication URL validation and concise failure handling.
@@ -10,6 +10,11 @@ All notable Caul changes are recorded here.
 - Isolated Pi from inherited credentials and optional tools, context files, extensions, skills and prompt templates, and injects only the selected provider credential into each child process.
 - Added provider/model compatibility coverage, secure credential-store tests, deterministic renderer AI gates, real signed-in request validation and packaged checks that reject embedded credentials or superseded dependencies.
 - Restored the maintained ScreenCaptureKit and local Parakeet known-text hardware smoke, including isolated model reuse and deterministic cleanup.
+- Made draft release publication use GitHub CLI’s draft-aware asset lookup so an approved release can upload and verify its immutable asset set before becoming public.
+
+## [0.1.38] (unpublished release candidate)
+
+- Identical application changes to 0.1.39, but publication stopped safely at an empty draft after GitHub’s public release-by-tag API could not resolve a draft release.
 
 ## [0.1.37]
 

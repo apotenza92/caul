@@ -764,7 +764,7 @@ jobs:
             [[ "$RELEASE_PRERELEASE" == true ]] && CREATE_ARGS+=(--prerelease)
             gh release create "${CREATE_ARGS[@]}"
           fi
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq '.assets[].name' | LC_ALL=C sort > existing-assets.txt
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | LC_ALL=C sort > existing-assets.txt
           comm -23 existing-assets.txt expected-assets.txt > unexpected-assets.txt
           if [[ -s unexpected-assets.txt ]]; then
             echo 'Draft contains unexpected immutable assets:' >&2

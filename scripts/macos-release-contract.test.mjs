@@ -354,6 +354,12 @@ describe('macOS release contract', () => {
     expect(source).toContain("test ! -e '/Applications/Caul Beta.app'");
     expect(source).toContain('/^v\\d+\\.\\d+\\.\\d+-beta\\.[1-9]\\d*$/');
     expect(source).toContain('cmp "release-assets/$asset_name" "existing-download/$asset_name"');
+    expect(source).toContain(
+      `gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'`
+    );
+    expect(source).not.toContain(
+      `gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq '.assets[].name'`
+    );
     expect(source).toContain('Install, launch and uninstall published NSIS packages');
     expect(source).not.toContain('prepare-windows-7za');
     expect(source).not.toContain('USE_SYSTEM_7ZA');
