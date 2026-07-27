@@ -93,6 +93,17 @@ describe('electron-builder Windows config', () => {
       to: 'bin/caul-desktop-backend.exe'
     });
   });
+
+  it('uses the packaged application dependency tree for Pi', () => {
+    const config = loadConfig({
+      CAUL_PACKAGE_ARCH: 'arm64',
+      CAUL_PACKAGE_PLATFORM: 'win'
+    });
+
+    expect(config.extraResources).not.toContainEqual(expect.objectContaining({
+      to: expect.stringContaining('pi-coding-agent')
+    }));
+  });
 });
 
 describe('electron-builder Linux config', () => {

@@ -212,7 +212,7 @@ describe('Tooltip', () => {
     expect(screen.getByText('Second content')).toBeInTheDocument();
   });
 
-  it('renders above app, modal and popover layers', () => {
+  it('uses the maintained overlay layer without an inline z-index', () => {
     render(
       <TooltipProvider delay={0}>
         <Tooltip open>
@@ -224,8 +224,10 @@ describe('Tooltip', () => {
 
     const tooltipContent = document.querySelector('[data-slot="tooltip-content"]');
 
-    expect(tooltipContent).toHaveClass('z-[2147483647]');
-    expect(tooltipContent).toHaveStyle({ zIndex: '2147483647' });
+    expect(tooltipContent).toHaveClass('z-50');
+    expect(tooltipContent).not.toHaveClass('z-[2147483647]');
+    expect(tooltipContent).not.toHaveStyle({ zIndex: '2147483647' });
+    expect(tooltipContent?.closest('[data-slot="tooltip-positioner"]')).toHaveClass('z-50');
   });
 
   it('keeps tooltip content from intercepting adjacent trigger hovers', () => {

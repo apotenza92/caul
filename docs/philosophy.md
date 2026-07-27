@@ -1,6 +1,6 @@
 # Product Philosophy
 
-Caul should feel like a quiet tool that helps in the moment, not a complex meeting CRM. The product is for people who want a small private assistant for using AI during live calls, with fast local transcription models prioritised where practical and their existing ChatGPT subscription used for the AI model for now.
+Caul should feel like a quiet tool that helps in the moment, not a complex meeting CRM. The product is for people who want a small private assistant for using AI during live calls, with fast local transcription models prioritised where practical. Cloud setup should prefer an existing subscription, with ChatGPT sign-in available first, while also allowing explicitly configured first-party OpenAI, Anthropic, Google and xAI API keys.
 
 ## Product Principles
 

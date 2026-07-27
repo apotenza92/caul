@@ -172,9 +172,15 @@ describe("Select", () => {
     const popup = screen.getByRole("listbox")
     expect(container).not.toContainElement(popup)
     expect(document.body).toContainElement(popup)
-    expect(popup.closest('[data-slot="select-content"]')).toHaveAttribute(
+    const popupContent = popup.closest('[data-slot="select-content"]')
+    expect(popupContent).toHaveAttribute(
       "data-align-trigger",
       "false"
+    )
+    expect(popupContent).toHaveClass("z-50")
+    expect(popupContent).not.toHaveClass("z-[2147483647]")
+    expect(popup.closest('[data-slot="select-positioner"]')).toHaveClass(
+      "z-50"
     )
   })
 })

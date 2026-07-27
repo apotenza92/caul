@@ -88,12 +88,26 @@ export type ParakeetStatus = {
   status: 'missing' | 'downloading' | 'installed';
 };
 
+export type CloudApiKeyProviderId = 'openai' | 'anthropic' | 'google' | 'xai';
+
 export type PiStatus = {
   agentDir: string;
+  apiKeys: {
+    available: boolean;
+    message: string | null;
+    providers: Array<{
+      configured: boolean;
+      defaultModel: string;
+      id: CloudApiKeyProviderId;
+      label: string;
+    }>;
+  };
   bundled: boolean;
+  chatGptConnected: boolean;
   connected: boolean;
   ok: boolean;
   selectedModel: string | null;
+  selectedProvider: string | null;
   status: 'disconnected' | 'ready';
 };
 
@@ -437,8 +451,10 @@ export type SettingsBridge = {
     openChatGptLogin: () => Promise<{ ok: boolean; message?: string }>;
     openLogin: () => Promise<{ ok: boolean; message?: string }>;
     openModel: () => Promise<{ ok: boolean; message?: string }>;
+    removeApiKey: (providerId: CloudApiKeyProviderId) => Promise<PiStatus>;
     refreshCatalogue: () => Promise<ModelCatalogueRefreshResult>;
     refreshCatalogueStatus: () => Promise<ModelCatalogueRefreshStatus>;
+    saveApiKey: (providerId: CloudApiKeyProviderId, apiKey: string) => Promise<PiStatus>;
     saveModel: (model: string) => Promise<PiStatus>;
     setRefreshCatalogueFrequency: (frequency: UpdateFrequency) => Promise<ModelCatalogueRefreshStatus>;
     setProvider: (provider: AiProvider) => Promise<OnboardingStatus>;
@@ -447,7 +463,6 @@ export type SettingsBridge = {
   };
   onboarding?: {
     complete: () => Promise<OnboardingStatus>;
-    fitContent?: (size: { height: number; width?: number }) => Promise<{ ok: boolean }>;
     open: () => Promise<OnboardingStatus>;
     status: (options?: { refreshCatalogue?: boolean }) => Promise<OnboardingStatus>;
   };

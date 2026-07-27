@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, desktopCapturer, dialog, globalShortcut, ipcMain, nativeTheme, screen, session, shell, systemPreferences } = require('electron');
+const { app, BrowserWindow, Menu, desktopCapturer, dialog, globalShortcut, ipcMain, nativeTheme, safeStorage, screen, session, shell, systemPreferences } = require('electron');
 const { spawn, spawnSync } = require('node:child_process');
 const fsSync = require('node:fs');
 const https = require('node:https');
@@ -24,6 +24,14 @@ const { getUsableSelectedLocalAiModelId } = require('./localAiSelection.cjs');
 const { createLocalLlmService } = require('./localLlm.cjs');
 const { buildLocalLlmPromptWithAttachments, forgetLocalLlmAttachments, preloadLocalLlmAttachments } = require('./llmAttachments.cjs');
 const { createProfileService } = require('./profile.cjs');
+const { rendererLlmSmokeSucceeded } = require('./rendererLlmSmoke.cjs');
+const { createPiEnvironment } = require('./piEnvironment.cjs');
+const {
+  createProviderCredentialStore,
+  isSupportedProvider: isSupportedApiKeyProvider,
+  providerDefinitions: apiKeyProviderDefinitions
+} = require('./providerCredentials.cjs');
+const { loginWithPiModelRuntime } = require('./piChatGptAuth.cjs');
 const {
   buildSystemProfile,
   getCurrentMemoryFit,
@@ -100,10 +108,7 @@ function exitSmokeProcess(code = app.exitCode || process.exitCode || 0) {
 const defaultHandleSizePreset = 'medium';
 const onboardingContentSize = {
   width: 560,
-  initialHeight: 560,
-  minWidth: 520,
-  minHeight: 440,
-  maxWidth: 720
+  height: 560
 };
 const minimumWindowSize = {
   width: 600,
@@ -128,6 +133,7 @@ const windowStateFileName = 'window-state.json';
 const privateOverlayStateFileName = 'private-overlay-state.json';
 const promptTemplatesFileName = 'prompt-templates.json';
 const setupStateFileName = 'setup-state.json';
+const providerCredentialsFileName = 'provider-credentials.json';
 const portableLlmModels = new Set(cloudLlmConfig.models.map((model) => model.value));
 const portableLlmReasoningLevels = new Set(cloudLlmConfig.reasoningLevels.map((reasoning) => reasoning.value));
 const transcriptionRecommendationTtlMs = 7 * 24 * 60 * 60 * 1000;
@@ -161,7 +167,8 @@ let updaterService = null;
 let parakeetDownload = null;
 let localModelDownload = null;
 let piChatGptLoginPromise = null;
-let piAuthStorageImportPromise = null;
+let piModelRuntimeImportPromise = null;
+let providerCredentialStore = null;
 let isQuitting = false;
 let isInstallingDownloadedUpdate = false;
 let lastAiRecommendationDebugSignature = null;
@@ -804,6 +811,22 @@ function getPiAgentDir() {
 
 function getPiAuthPath() {
   return path.join(getPiAgentDir(), 'auth.json');
+}
+
+function getProviderCredentialsPath() {
+  return path.join(app.getPath('userData'), providerCredentialsFileName);
+}
+
+function getProviderCredentialStore() {
+  if (!providerCredentialStore) {
+    providerCredentialStore = createProviderCredentialStore({
+      filePath: getProviderCredentialsPath(),
+      platform: process.platform,
+      safeStorage
+    });
+  }
+
+  return providerCredentialStore;
 }
 
 function createStarterPromptTemplates() {
@@ -2506,6 +2529,10 @@ function writeTranscriptDebugLog(stage, payload = {}) {
 }
 
 function isTranscriptDebugLogEnabled() {
+  if (packagedPrivacySmoke) {
+    return false;
+  }
+
   return process.env.CAUL_TRANSCRIPT_DEBUG_LOG === '1' || getAppChannel() === 'dev';
 }
 
@@ -4015,22 +4042,24 @@ function removeLocalTranscriptionModel(modelId) {
   return getParakeetStatus();
 }
 
-function getPiEnvironment() {
-  return {
-    ...process.env,
-    PI_CODING_AGENT_DIR: getPiAgentDir(),
-    PI_CODING_AGENT_SESSION_DIR: path.join(getPiAgentDir(), 'sessions'),
-    ELECTRON_RUN_AS_NODE: '1',
-    PI_SKIP_VERSION_CHECK: '1',
-    PI_TELEMETRY: '0'
-  };
+function getPiEnvironment(model = '') {
+  const selectedModel = normaliseCloudLlmModel(model, '')
+    || normaliseCloudLlmModel(readSetupState().selectedPiModel, '')
+    || getInferredPiModelFromAuth();
+  const providerId = getCloudProviderIdFromModel(selectedModel);
+
+  return createPiEnvironment({
+    agentDir: getPiAgentDir(),
+    baseEnvironment: process.env,
+    providerEnvironment: getProviderCredentialStore().getEnvironment(providerId)
+  });
 }
 
 function getPiCliPath() {
   if (app.isPackaged) {
     const bundledPath = path.join(
       process.resourcesPath,
-      'pi',
+      'app.asar',
       'node_modules',
       '@earendil-works',
       'pi-coding-agent',
@@ -4076,24 +4105,48 @@ function getPiSpawnCommand(args = []) {
 function getPiStatus() {
   const state = readSetupState();
   const cliPath = getPiCliPath();
-  warmPiAuthStorage(cliPath);
+  warmPiModelRuntime(cliPath);
+  const storedAuthProviderIds = getStoredPiAuthProviderIds();
+  const chatGptConnected = packagedOnboardingCompletionSmoke
+    || storedAuthProviderIds.includes(defaultPiChatGptProvider);
   const selectedModel = normaliseCloudLlmModel(state.selectedPiModel, '');
   const inferredModel = selectedModel || getInferredPiModelFromAuth();
-  const connected = Boolean(inferredModel);
+  const selectedProvider = getCloudProviderIdFromModel(inferredModel);
+  const apiKeyStatus = getProviderCredentialStore().status();
+  const selectedApiKey = apiKeyStatus.providers.find((provider) => provider.id === selectedProvider);
+  const connected = selectedProvider === defaultPiChatGptProvider
+    ? chatGptConnected
+    : Boolean(apiKeyStatus.available && selectedApiKey?.configured);
 
   return {
     ok: true,
     agentDir: getPiAgentDir(),
+    apiKeys: apiKeyStatus,
     bundled: Boolean(cliPath),
+    chatGptConnected,
     connected,
+    selectedProvider: selectedProvider || null,
     selectedModel: inferredModel || null,
     status: connected ? 'ready' : 'disconnected'
   };
 }
 
 function getInferredPiModelFromAuth() {
-  return getStoredPiAuthProviderIds().includes(defaultPiChatGptProvider)
-    ? defaultPiChatGptModel
+  if (getStoredPiAuthProviderIds().includes(defaultPiChatGptProvider)) {
+    return defaultPiChatGptModel;
+  }
+
+  const apiKeyStatus = getProviderCredentialStore().status();
+  const configuredProvider = apiKeyStatus.available
+    ? apiKeyStatus.providers.find((provider) => provider.configured)
+    : null;
+
+  return configuredProvider?.defaultModel ?? '';
+}
+
+function getCloudProviderIdFromModel(model) {
+  return typeof model === 'string' && model.includes('/')
+    ? model.split('/', 1)[0]
     : '';
 }
 
@@ -4141,7 +4194,7 @@ function openPiChatGptLogin() {
 
 async function runPiChatGptBrowserLogin(cliPath) {
   try {
-    const { AuthStorage } = await (piAuthStorageImportPromise ?? importPiAuthStorage(cliPath));
+    const { ModelRuntime } = await (piModelRuntimeImportPromise ?? importPiModelRuntime(cliPath));
 
     withPiInProcessEnvironment(() => {
       fsSync.mkdirSync(path.join(getPiAgentDir(), 'sessions'), { recursive: true });
@@ -4149,19 +4202,11 @@ async function runPiChatGptBrowserLogin(cliPath) {
 
     await wait(50);
 
-    const authStorage = AuthStorage.create(getPiAuthPath());
-    await withPiInProcessEnvironmentAsync(() => authStorage.login(defaultPiChatGptProvider, {
-      onAuth: (info) => {
-        if (info?.url) {
-          void openUrlInDefaultBrowser(info.url).catch((error) => {
-            console.error('Failed to open ChatGPT sign-in URL in the default browser:', error);
-          });
-        }
-      },
-      onProgress: () => {},
-      onPrompt: async () => {
-        throw new Error('ChatGPT sign in did not complete in the browser.');
-      }
+    await withPiInProcessEnvironmentAsync(() => loginWithPiModelRuntime({
+      ModelRuntime,
+      authPath: getPiAuthPath(),
+      openExternal: openUrlInDefaultBrowser,
+      providerId: defaultPiChatGptProvider
     }));
 
     writeSetupState({ selectedPiModel: defaultPiChatGptModel });
@@ -4195,24 +4240,24 @@ function openUrlInDefaultBrowser(url) {
   });
 }
 
-async function importPiAuthStorage(cliPath) {
-  const modulePath = path.join(path.dirname(cliPath), 'core', 'auth-storage.js');
+async function importPiModelRuntime(cliPath) {
+  const modulePath = path.join(path.dirname(cliPath), 'index.js');
 
   if (!fsSync.existsSync(modulePath)) {
-    throw new Error('Bundled Pi auth storage is unavailable.');
+    throw new Error('Bundled Pi model runtime is unavailable.');
   }
 
   return import(pathToFileURL(modulePath).href);
 }
 
-function warmPiAuthStorage(cliPath) {
-  if (!cliPath || piAuthStorageImportPromise) {
+function warmPiModelRuntime(cliPath) {
+  if (!cliPath || piModelRuntimeImportPromise) {
     return;
   }
 
-  piAuthStorageImportPromise = importPiAuthStorage(cliPath).catch((error) => {
-    piAuthStorageImportPromise = null;
-    console.error('Failed to warm Pi auth storage:', error);
+  piModelRuntimeImportPromise = importPiModelRuntime(cliPath).catch((error) => {
+    piModelRuntimeImportPromise = null;
+    console.error('Failed to warm Pi model runtime:', error);
   });
 }
 
@@ -4220,6 +4265,7 @@ function getPiInProcessEnvironment() {
   return {
     PI_CODING_AGENT_DIR: getPiAgentDir(),
     PI_CODING_AGENT_SESSION_DIR: path.join(getPiAgentDir(), 'sessions'),
+    PI_OFFLINE: '1',
     PI_SKIP_VERSION_CHECK: '1',
     PI_TELEMETRY: '0'
   };
@@ -4231,6 +4277,7 @@ function withPiInProcessEnvironment(callback) {
 
   process.env.PI_CODING_AGENT_DIR = next.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_SESSION_DIR = next.PI_CODING_AGENT_SESSION_DIR;
+  process.env.PI_OFFLINE = next.PI_OFFLINE;
   process.env.PI_SKIP_VERSION_CHECK = next.PI_SKIP_VERSION_CHECK;
   process.env.PI_TELEMETRY = next.PI_TELEMETRY;
 
@@ -4247,6 +4294,7 @@ async function withPiInProcessEnvironmentAsync(callback) {
 
   process.env.PI_CODING_AGENT_DIR = next.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_SESSION_DIR = next.PI_CODING_AGENT_SESSION_DIR;
+  process.env.PI_OFFLINE = next.PI_OFFLINE;
   process.env.PI_SKIP_VERSION_CHECK = next.PI_SKIP_VERSION_CHECK;
   process.env.PI_TELEMETRY = next.PI_TELEMETRY;
 
@@ -4296,6 +4344,7 @@ function getCurrentPiEnvironment() {
     ELECTRON_RUN_AS_NODE: process.env.ELECTRON_RUN_AS_NODE,
     PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR,
     PI_CODING_AGENT_SESSION_DIR: process.env.PI_CODING_AGENT_SESSION_DIR,
+    PI_OFFLINE: process.env.PI_OFFLINE,
     PI_SKIP_VERSION_CHECK: process.env.PI_SKIP_VERSION_CHECK,
     PI_TELEMETRY: process.env.PI_TELEMETRY
   };
@@ -4330,12 +4379,52 @@ function savePiModel(model) {
   return getPiStatus();
 }
 
-function disconnectPi() {
+function disposePiBridges() {
   persistentPiRpcBridge?.dispose();
   persistentPiRpcBridge = null;
   backupPersistentPiRpcBridge?.dispose();
   backupPersistentPiRpcBridge = null;
+}
+
+function savePiApiKey(providerId, apiKey) {
+  if (!isSupportedApiKeyProvider(providerId)) {
+    throw new Error('This provider does not support API-key setup in Caul.');
+  }
+
+  getProviderCredentialStore().save(providerId, apiKey);
+  disposePiBridges();
+  writeSetupState({
+    selectedPiModel: apiKeyProviderDefinitions[providerId].defaultModel
+  });
+  llmWarmStatus = 'disabled';
+  emitLlmStatus();
+
+  return getPiStatus();
+}
+
+function removePiApiKey(providerId) {
+  if (!isSupportedApiKeyProvider(providerId)) {
+    throw new Error('This provider does not support API-key setup in Caul.');
+  }
+
+  getProviderCredentialStore().remove(providerId);
+  const selectedProvider = getCloudProviderIdFromModel(readSetupState().selectedPiModel);
+
+  if (selectedProvider === providerId) {
+    writeSetupState({ selectedPiModel: getInferredPiModelFromAuth() || null });
+  }
+
+  disposePiBridges();
+  llmWarmStatus = 'disabled';
+  emitLlmStatus();
+
+  return getPiStatus();
+}
+
+function disconnectPi() {
+  disposePiBridges();
   fsSync.rmSync(getPiAgentDir(), { force: true, recursive: true });
+  getProviderCredentialStore().clear();
   writeSetupState({ selectedPiModel: null });
   llmWarmStatus = 'disabled';
   emitLlmStatus();
@@ -5030,7 +5119,7 @@ class PersistentPiRpcBridge {
     this.exited = false;
     const pi = getPiSpawnCommand(args);
     this.child = spawn(pi.command, pi.args, {
-      env: getPiEnvironment(),
+      env: getPiEnvironment(this.model),
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe'
@@ -5274,8 +5363,8 @@ function runPiTextRequest(transcript, options = {}, onDelta = () => {}) {
   const runStartedAt = Date.now();
   const configuredModel = normaliseCloudLlmModel(readSetupState().selectedPiModel, '') || getInferredPiModelFromAuth();
   const model = [
-    options.model,
     configuredModel,
+    options.model,
     process.env.CAUL_LLM_MODEL,
     process.env.CAUL_BENCH_LLM_MODEL
   ].map((value) => normaliseCloudLlmModel(value, '')).find(Boolean) || defaultPiChatGptModel;
@@ -5562,7 +5651,7 @@ function runOneShotPiTextRequest(transcript, { attachments = [], model, thinking
       transcript
     ]);
     const child = spawn(pi.command, pi.args, {
-      env: getPiEnvironment(),
+      env: getPiEnvironment(model),
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe'
@@ -6229,15 +6318,13 @@ function createOnboardingWindow() {
   const primaryDisplay = screen.getPrimaryDisplay();
   const workArea = primaryDisplay.workArea;
   const width = onboardingContentSize.width;
-  const height = onboardingContentSize.initialHeight;
+  const height = onboardingContentSize.height;
 
   onboardingWindow = new BrowserWindow({
     x: workArea.x + Math.round((workArea.width - width) / 2),
     y: workArea.y + Math.round((workArea.height - height) / 2),
     width,
     height,
-    minWidth: onboardingContentSize.minWidth,
-    minHeight: onboardingContentSize.minHeight,
     useContentSize: true,
     show: false,
     frame: true,
@@ -6428,6 +6515,63 @@ async function clickPackagedOnboardingPermissionButtons(window) {
   return clicks;
 }
 
+async function completePackagedOnboardingByGui(window) {
+  const navigationClicks = [];
+  const setupClicks = [];
+
+  for (let index = 0; index < 4; index += 1) {
+    let finishClick = await clickVisibleButtonInWindow(
+      window,
+      'start using caul',
+      { timeoutMs: index === 3 ? 5_000 : 500 }
+    );
+
+    if (finishClick.ok) {
+      return { finishClick, navigationClicks, setupClicks };
+    }
+
+    if (finishClick.disabled) {
+      const cloudClick = await clickVisibleButtonInWindow(window, 'cloud', {
+        timeoutMs: 2_000
+      });
+      setupClicks.push(cloudClick);
+
+      if (cloudClick.ok) {
+        await wait(500);
+        finishClick = await clickVisibleButtonInWindow(
+          window,
+          'start using caul',
+          { timeoutMs: 5_000 }
+        );
+
+        if (finishClick.ok) {
+          return { finishClick, navigationClicks, setupClicks };
+        }
+      }
+    }
+
+    const nextClick = await clickVisibleButtonInWindow(window, 'next', {
+      timeoutMs: 2_000
+    });
+    navigationClicks.push(nextClick);
+
+    if (!nextClick.ok) {
+      return { finishClick, navigationClicks, setupClicks };
+    }
+
+    await wait(350);
+  }
+
+  return {
+    finishClick: {
+      ok: false,
+      error: 'Onboarding did not reach its final action.'
+    },
+    navigationClicks,
+    setupClicks
+  };
+}
+
 function runPackagedLaunchSmokeIfRequested(window, surface) {
   if (packagedLaunchSmokeMs <= 0 || packagedLaunchSmokeStarted || packagedLaunchSmokeCompleted || window.isDestroyed()) {
     return;
@@ -6444,15 +6588,22 @@ function runPackagedLaunchSmokeIfRequested(window, surface) {
       const result = await getPackagedLaunchSmokeRendererResult(window);
       let onboardingClick = null;
       let onboardingPermissionClicks = [];
+      let onboardingNavigationClicks = [];
+      let onboardingSetupClicks = [];
       if (packagedOnboardingCompletionSmoke && result.hasOnboarding) {
         onboardingPermissionClicks = await clickPackagedOnboardingPermissionButtons(window);
-        onboardingClick = await clickVisibleButtonInWindow(window, 'start using caul', { timeoutMs: 15_000 });
+        const onboardingCompletion = await completePackagedOnboardingByGui(window);
+        onboardingClick = onboardingCompletion.finishClick;
+        onboardingNavigationClicks = onboardingCompletion.navigationClicks;
+        onboardingSetupClicks = onboardingCompletion.setupClicks;
         result.completion = {
           ...(result.completion ?? {}),
           clicked: onboardingClick.ok === true,
           click: onboardingClick,
           clickMethod: onboardingClick.ok === true ? 'electron-input-event' : 'failed',
-          permissionClicks: onboardingPermissionClicks
+          navigationClicks: onboardingNavigationClicks,
+          permissionClicks: onboardingPermissionClicks,
+          setupClicks: onboardingSetupClicks
         };
       }
       const completion = packagedOnboardingCompletionSmoke
@@ -6476,7 +6627,9 @@ function runPackagedLaunchSmokeIfRequested(window, surface) {
           completion.click = onboardingClick;
           completion.clicked = onboardingClick.ok === true;
           completion.clickMethod = onboardingClick.ok === true ? 'electron-input-event' : 'failed';
+          completion.navigationClicks = onboardingNavigationClicks;
           completion.permissionClicks = onboardingPermissionClicks;
+          completion.setupClicks = onboardingSetupClicks;
         }
         summary.completion = completion;
         summary.ok = summary.ok && completion.ok;
@@ -6669,12 +6822,17 @@ function startPackagedLaunchSmokeFallback() {
 
     let onboardingClick = null;
     let onboardingPermissionClicks = [];
+    let onboardingNavigationClicks = [];
+    let onboardingSetupClicks = [];
 
     if (packagedOnboardingCompletionSmoke && hasOnboarding) {
       const onboardingSmokeWindow = windows.find((candidate, index) => rendererResults[index]?.hasOnboarding);
       if (onboardingSmokeWindow) {
         onboardingPermissionClicks = await clickPackagedOnboardingPermissionButtons(onboardingSmokeWindow);
-        onboardingClick = await clickVisibleButtonInWindow(onboardingSmokeWindow, 'start using caul', { timeoutMs: 15_000 });
+        const onboardingCompletion = await completePackagedOnboardingByGui(onboardingSmokeWindow);
+        onboardingClick = onboardingCompletion.finishClick;
+        onboardingNavigationClicks = onboardingCompletion.navigationClicks;
+        onboardingSetupClicks = onboardingCompletion.setupClicks;
       } else {
         onboardingClick = { ok: false, error: 'No onboarding window was available for GUI input.' };
       }
@@ -6718,7 +6876,9 @@ function startPackagedLaunchSmokeFallback() {
         completion.click = onboardingClick;
         completion.clicked = onboardingClick.ok === true;
         completion.clickMethod = onboardingClick.ok === true ? 'electron-input-event' : 'failed';
+        completion.navigationClicks = onboardingNavigationClicks;
         completion.permissionClicks = onboardingPermissionClicks;
+        completion.setupClicks = onboardingSetupClicks;
       }
       summary.completion = completion;
       summary.ok = summary.ok && completion.ok;
@@ -6747,43 +6907,6 @@ function startPackagedLaunchSmokeFallback() {
       app.exit(app.exitCode || process.exitCode || 0);
     }, packagedLaunchSmokeMs);
   }, packagedLaunchSmokeRequiresOnboarding ? Math.max(8000, packagedLaunchSmokeMs * 8) : Math.max(1000, packagedLaunchSmokeMs * 4));
-}
-
-function fitOnboardingWindowToContent(sender, size = {}) {
-  const window = onboardingWindow && !onboardingWindow.isDestroyed()
-    ? onboardingWindow
-    : null;
-
-  if (!window || sender !== window.webContents || typeof size.height !== 'number') {
-    return { ok: false };
-  }
-
-  const display = screen.getDisplayMatching(window.getBounds());
-  const workArea = display.workArea;
-  const minWidth = onboardingContentSize.minWidth;
-  const minHeight = onboardingContentSize.minHeight;
-  const maxWidth = Math.max(minWidth, Math.min(onboardingContentSize.maxWidth, workArea.width - 80));
-  const maxHeight = Math.max(minHeight, workArea.height - 80);
-  const width = Math.min(maxWidth, Math.max(minWidth, Math.ceil(size.width ?? onboardingContentSize.width)));
-  const height = Math.min(maxHeight, Math.max(minHeight, Math.ceil(size.height)));
-  const previousBounds = window.getBounds();
-
-  window.setContentSize(width, height);
-  const bounds = window.getBounds();
-  const nextX = Math.min(
-    Math.max(previousBounds.x, workArea.x),
-    workArea.x + Math.max(0, workArea.width - bounds.width)
-  );
-  const nextY = Math.min(
-    Math.max(previousBounds.y, workArea.y),
-    workArea.y + Math.max(0, workArea.height - bounds.height)
-  );
-
-  if (bounds.x !== nextX || bounds.y !== nextY) {
-    window.setPosition(nextX, nextY);
-  }
-
-  return { ok: true };
 }
 
 async function runOnboardingSmokeIfRequested(window) {
@@ -7006,25 +7129,55 @@ async function runOnboardingSmokeIfRequested(window) {
   }
 
   const steps = [
-    ['permissions', 'permissions.png'],
-    ['parakeet', 'parakeet.png'],
-    ['ai', 'ai.png']
+    ['permissions', 'permissions.png', []],
+    ['parakeet', 'parakeet.png', []],
+    ['ai', 'ai-local.png', []],
+    ['ai', 'ai-cloud.png', ['Cloud']],
+    ['ai', 'ai-cloud-api-key.png', ['Cloud', 'API key']]
   ];
 
   setTimeout(async () => {
     try {
-      for (const [step, fileName] of steps) {
+      const results = [];
+
+      for (const [step, fileName, actionLabels] of steps) {
         if (window.isDestroyed()) {
           return;
         }
 
         await window.webContents.executeJavaScript(`window.dispatchEvent(new CustomEvent('caul:onboarding-smoke-step', { detail: ${JSON.stringify(step)} }))`);
+        for (const actionLabel of actionLabels) {
+          await window.webContents.executeJavaScript(`
+            Array.from(document.querySelectorAll('button'))
+              .find((button) => (button.textContent || '').replace(/\\s+/g, ' ').trim() === ${JSON.stringify(actionLabel)})
+              ?.click()
+          `);
+        }
         await new Promise((resolve) => setTimeout(resolve, 350));
+        const layout = await window.webContents.executeJavaScript(`
+          (() => {
+            const root = document.documentElement;
+            const main = document.querySelector('[aria-label="Caul setup"]');
+            return {
+              clientHeight: root.clientHeight,
+              clientWidth: root.clientWidth,
+              scrollHeight: Math.max(root.scrollHeight, main?.scrollHeight || 0),
+              scrollWidth: Math.max(root.scrollWidth, main?.scrollWidth || 0)
+            };
+          })()
+        `);
+        const fits = layout.scrollHeight <= layout.clientHeight && layout.scrollWidth <= layout.clientWidth;
+        results.push({ fileName, fits, ...layout });
+
+        if (!fits) {
+          throw new Error(`Onboarding layout overflowed in ${fileName}: ${JSON.stringify(layout)}`);
+        }
+
         const image = await window.webContents.capturePage();
         fsSync.writeFileSync(path.join(onboardingSmokeDir, fileName), image.toPNG());
       }
 
-      console.log(`caul-onboarding-smoke ${JSON.stringify({ ok: true, dir: onboardingSmokeDir })}`);
+      console.log(`caul-onboarding-smoke ${JSON.stringify({ ok: true, dir: onboardingSmokeDir, results })}`);
       exitSmokeProcess();
     } catch (error) {
       console.error(`caul-onboarding-smoke ${JSON.stringify({ ok: false, error: error.message })}`);
@@ -8670,13 +8823,13 @@ function createWindow() {
     mainWindow.webContents.once('did-finish-load', async () => {
       try {
         const llmSmokeMode = process.env.CAUL_LLM_SMOKE_MODE ?? 'stop';
-        const speculativeStopDelayMs = Number(process.env.CAUL_LLM_SPECULATIVE_STOP_DELAY_MS ?? 500);
         const llmSmokeTranscript = process.env.CAUL_LLM_SMOKE_TRANSCRIPT ?? 'What is the refund policy?';
+        const llmSmokeExpectedResponse = process.env.CAUL_LLM_SMOKE_EXPECTED_RESPONSE ?? '';
         const result = await mainWindow.webContents.executeJavaScript(`
           (async () => {
             const llmSmokeMode = ${JSON.stringify(llmSmokeMode)};
-            const speculativeStopDelayMs = ${JSON.stringify(speculativeStopDelayMs)};
             const llmSmokeTranscript = ${JSON.stringify(llmSmokeTranscript)};
+            const llmSmokeExpectedResponse = ${JSON.stringify(llmSmokeExpectedResponse)};
             const snapshots = [];
             const response = () => document.querySelector('[aria-label="AI response"]');
             const transcript = () => document.querySelector('[aria-label="Transcription output"]');
@@ -8712,6 +8865,32 @@ function createWindow() {
               await new Promise((resolve) => setTimeout(resolve, 50));
             }
 
+            if (llmSmokeMode === 'speculative') {
+              const startedAt = performance.now();
+              const speculativeResult = await window.caul.transcription.requestLlm({
+                model: ${JSON.stringify(normaliseCloudLlmModel(process.env.CAUL_LLM_MODEL, defaultPiChatGptModel))},
+                reasoning: ${JSON.stringify(normaliseCloudLlmReasoning(process.env.CAUL_LLM_THINKING, cloudLlmConfig.defaultReasoning))},
+                trace: {
+                  requestedAt: Date.now(),
+                  speculative: true
+                },
+                transcript: llmSmokeTranscript
+              });
+              const finalValue = speculativeResult?.ok ? speculativeResult.text : '';
+
+              return {
+                llmSmokeMode,
+                stopToFirstResponseTextMs: Math.round(performance.now() - startedAt),
+                snapshots: [],
+                streamed: false,
+                finalValue,
+                responseChanged: Boolean(finalValue?.trim()),
+                expectedResponseMatched: !llmSmokeExpectedResponse
+                  || finalValue.trim() === llmSmokeExpectedResponse.trim(),
+                speculativeResult
+              };
+            }
+
             startButton()?.click();
             await new Promise((resolve) => setTimeout(resolve, 50));
             await window.caul.smokeEmitTranscriptionEvent({
@@ -8721,34 +8900,17 @@ function createWindow() {
             });
             await new Promise((resolve) => setTimeout(resolve, 50));
             snapshots.push({ phase: 'transcript', value: visibleText(transcript()) });
+            const initialResponseValue = visibleText(response());
             let stopClickedAt = performance.now();
-            let speculativePromise = null;
-            let speculativeResult = null;
-
-            if (llmSmokeMode === 'speculative') {
-              speculativePromise = window.caul.transcription.requestLlm({
-                model: ${JSON.stringify(normaliseCloudLlmModel(process.env.CAUL_LLM_MODEL, defaultPiChatGptModel))},
-                reasoning: ${JSON.stringify(normaliseCloudLlmReasoning(process.env.CAUL_LLM_THINKING, cloudLlmConfig.defaultReasoning))},
-                trace: {
-                  requestedAt: Date.now(),
-                  speculative: true
-                },
-                transcript: visibleText(transcript())
-              }).then((response) => {
-                speculativeResult = response;
-                return response;
-              });
-              await new Promise((resolve) => setTimeout(resolve, speculativeStopDelayMs));
-              stopClickedAt = performance.now();
-            } else {
-              stopButton()?.click();
-            }
+            stopButton()?.click();
 
             snapshots.push({ phase: 'after-stop', value: visibleText(response()) });
             let firstResponseTextAt = null;
 
             if (visibleText(response()).trim() && visibleText(response()).trim() !== 'No response yet.') {
-              firstResponseTextAt = stopClickedAt;
+              if (visibleText(response()) !== initialResponseValue) {
+                firstResponseTextAt = stopClickedAt;
+              }
             }
 
             for (let index = 0; index < 800; index += 1) {
@@ -8765,16 +8927,16 @@ function createWindow() {
                 value
               });
 
-              if (value.trim() && value.trim() !== 'No response yet.') {
+              if (value.trim() && value.trim() !== 'No response yet.' && value !== initialResponseValue) {
                 firstResponseTextAt = performance.now();
                 break;
               }
             }
 
-            await speculativePromise?.catch(() => undefined);
             await new Promise((resolve) => setTimeout(resolve, 500));
             snapshots.push({ phase: 'final', value: visibleText(response()) });
-            const finalValue = visibleText(response()) || (speculativeResult?.ok ? speculativeResult.text : '');
+            const finalValue = visibleText(response());
+            const responseChanged = finalValue !== initialResponseValue;
 
             return {
               llmSmokeMode,
@@ -8784,23 +8946,29 @@ function createWindow() {
               snapshots,
               streamed: snapshots.some((snapshot) => snapshot.phase === 'poll' && snapshot.value),
               finalValue,
-              speculativeResult
+              responseChanged,
+              expectedResponseMatched: !llmSmokeExpectedResponse
+                || finalValue.trim() === llmSmokeExpectedResponse.trim(),
+              speculativeResult: null
             };
           })()
         `);
 
-        console.log(`caul-renderer-llm-smoke ${JSON.stringify(result)}`);
+        emitSmokeLine(`caul-renderer-llm-smoke ${JSON.stringify(result)}`);
 
-        if (!result.finalValue || result.finalValue.trim() === 'No response yet.') {
+        if (!rendererLlmSmokeSucceeded(result, llmSmokeExpectedResponse)) {
           process.exitCode = 1;
-          app.exitCode = 1;
         }
       } catch (error) {
-        console.error(`caul-renderer-llm-smoke failed ${error.message}`);
+        emitSmokeLine(`caul-renderer-llm-smoke failed ${error.message}`);
         process.exitCode = 1;
-        app.exitCode = 1;
       } finally {
-        app.quit();
+        setImmediate(() => {
+          const exitCode = process.exitCode ?? 0;
+
+          setTimeout(() => process.exit(exitCode), 1_000);
+          app.exit(exitCode);
+        });
       }
     });
   }
@@ -9135,8 +9303,6 @@ ipcMain.handle('caul:onboarding-status', (_event, options) => getOnboardingStatu
 
 ipcMain.handle('caul:onboarding-complete', () => completeOnboarding());
 
-ipcMain.handle('caul:onboarding-fit-content', (event, size) => fitOnboardingWindowToContent(event.sender, size));
-
 ipcMain.handle('caul:onboarding-open', () => reopenOnboarding());
 
 ipcMain.handle('caul:parakeet-status', () => getParakeetStatus());
@@ -9152,6 +9318,14 @@ ipcMain.handle('caul:parakeet-cancel-download', () => cancelParakeetDownload());
 ipcMain.handle('caul:pi-status', () => getPiStatus());
 
 ipcMain.handle('caul:pi-chatgpt-login', () => openPiSetup('chatgpt-login'));
+
+ipcMain.handle('caul:pi-api-key-save', (_event, request) => (
+  savePiApiKey(request?.providerId, request?.apiKey)
+));
+
+ipcMain.handle('caul:pi-api-key-remove', (_event, request) => (
+  removePiApiKey(request?.providerId)
+));
 
 ipcMain.handle('caul:pi-login', () => openPiSetup('login'));
 

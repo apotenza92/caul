@@ -2,6 +2,15 @@
 
 All notable Caul changes are recorded here.
 
+## [0.1.38]
+
+- Simplified onboarding into a fixed 560 × 560 top-aligned flow using the repository’s shadcn/Base UI controls, with clear Local and Cloud choices and no scrolling across supported AI setup combinations.
+- Added browser-based ChatGPT subscription sign-in through the exact Pi 0.82.1 runtime, including passkey support, strict OpenAI authentication URL validation and concise failure handling.
+- Added optional encrypted API-key setup for OpenAI, Anthropic, Google and xAI while keeping sign-in first and exposing only configured provider models.
+- Isolated Pi from inherited credentials and optional tools, context files, extensions, skills and prompt templates, and injects only the selected provider credential into each child process.
+- Added provider/model compatibility coverage, secure credential-store tests, deterministic renderer AI gates, real signed-in request validation and packaged checks that reject embedded credentials or superseded dependencies.
+- Restored the maintained ScreenCaptureKit and local Parakeet known-text hardware smoke, including isolated model reuse and deterministic cleanup.
+
 ## [0.1.37]
 
 - Extended the exact `0.1.21` Windows compatibility path to x64 after hosted evidence showed its legacy NSIS uninstaller also remained blocked when invoked by a newer installer.

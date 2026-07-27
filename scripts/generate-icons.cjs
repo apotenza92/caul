@@ -168,6 +168,57 @@ async function renderIcon(svgBuffer, size, outputPath, palette, backgroundScale 
     .toFile(outputPath);
 }
 
+async function pngPixelsEqual(firstPath, secondPath) {
+  if (!fs.existsSync(firstPath) || !fs.existsSync(secondPath)) {
+    return false;
+  }
+
+  const [first, second] = await Promise.all([
+    sharp(firstPath).ensureAlpha().raw().toBuffer({ resolveWithObject: true }),
+    sharp(secondPath).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+  ]);
+
+  return first.info.width === second.info.width
+    && first.info.height === second.info.height
+    && first.info.channels === second.info.channels
+    && first.data.equals(second.data);
+}
+
+async function icnsFilesMatch(firstIcnsPath, secondIcnsPath, temporaryDir) {
+  if (!fs.existsSync(firstIcnsPath) || !fs.existsSync(secondIcnsPath)) {
+    return false;
+  }
+
+  const firstIconsetDir = path.join(temporaryDir, 'existing.iconset');
+  const secondIconsetDir = path.join(temporaryDir, 'candidate.iconset');
+
+  try {
+    execFileSync(
+      'iconutil',
+      ['-c', 'iconset', firstIcnsPath, '-o', firstIconsetDir],
+      { stdio: 'ignore' }
+    );
+    execFileSync(
+      'iconutil',
+      ['-c', 'iconset', secondIcnsPath, '-o', secondIconsetDir],
+      { stdio: 'ignore' }
+    );
+
+    for (const { name } of iconsetSizes) {
+      if (!await pngPixelsEqual(
+        path.join(firstIconsetDir, name),
+        path.join(secondIconsetDir, name)
+      )) {
+        return false;
+      }
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function generatePackagedIcons(svgBuffer, variant, temporaryDir) {
   const iconsetDir = path.join(temporaryDir, 'icon.iconset');
   const icoDir = path.join(temporaryDir, 'ico');
@@ -187,9 +238,14 @@ async function generatePackagedIcons(svgBuffer, variant, temporaryDir) {
 
   if (process.platform === 'darwin') {
     const icnsPath = path.join(variant.dir, 'icon.icns');
+    const candidateIcnsPath = path.join(temporaryDir, 'icon.icns');
 
     try {
-      execFileSync('iconutil', ['-c', 'icns', iconsetDir, '-o', icnsPath], { stdio: 'inherit' });
+      execFileSync('iconutil', ['-c', 'icns', iconsetDir, '-o', candidateIcnsPath], { stdio: 'inherit' });
+
+      if (!await icnsFilesMatch(icnsPath, candidateIcnsPath, temporaryDir)) {
+        fs.copyFileSync(candidateIcnsPath, icnsPath);
+      }
     } catch (error) {
       if (!fs.existsSync(icnsPath)) {
         throw error;

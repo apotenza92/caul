@@ -245,7 +245,8 @@ describe('App', () => {
     expect(screen.getByRole('heading', { name: 'Permissions', level: 2 })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Local transcription' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'AI responses' })).not.toBeInTheDocument();
-    expect(screen.getByText('Step 1 of 3')).toBeInTheDocument();
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    expect(screen.queryByText('Step 1 of 3')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Step 1: Permissions' })).toHaveAttribute('aria-current', 'step');
     expect(screen.getByRole('button', { name: 'Step 2: Local transcription' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Step 3: AI responses' })).toBeInTheDocument();
@@ -479,7 +480,8 @@ describe('App', () => {
     await screen.findByText('Local transcription');
 
     expect(screen.queryByRole('heading', { name: 'Permissions' })).not.toBeInTheDocument();
-    expect(screen.getByText('Step 1 of 2')).toBeInTheDocument();
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    expect(screen.queryByText('Step 1 of 2')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Step 1: Local transcription' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Step 2: AI responses' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Step 3: AI responses' })).not.toBeInTheDocument();
@@ -787,6 +789,63 @@ describe('App', () => {
     expect(bridge.chatGptLoginOpens).toBe(1);
   });
 
+  it('saves a first-party API key from onboarding without showing it again', async () => {
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const user = userEvent.setup();
+    const bridge = installTestBridge();
+
+    render(<App />);
+
+    await openOnboardingStep(user, 'AI responses');
+    await user.click(await screen.findByRole('tab', { name: 'Cloud' }));
+    await user.click(screen.getByRole('button', { name: 'API key' }));
+    await user.click(await screen.findByRole('button', { name: 'Add OpenAI API key' }));
+    await user.type(screen.getByLabelText('API key'), 'sk-test-onboarding');
+    await user.click(screen.getByRole('button', { name: 'Save API key' }));
+
+    await waitFor(() => expect(bridge.savedApiKeys).toEqual([
+      { apiKey: 'sk-test-onboarding', providerId: 'openai' }
+    ]));
+    expect(screen.queryByDisplayValue('sk-test-onboarding')).not.toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Replace OpenAI API key' })).toBeInTheDocument();
+  });
+
+  it('does not present an OpenAI API key as a ChatGPT subscription sign in', async () => {
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const user = userEvent.setup();
+    installTestBridge({
+      piStatus: testPiStatus({
+        apiKeys: {
+          available: true,
+          message: null,
+          providers: [
+            { configured: true, defaultModel: 'openai/gpt-5.4-mini', id: 'openai', label: 'OpenAI' },
+            { configured: false, defaultModel: 'anthropic/claude-sonnet-4-6', id: 'anthropic', label: 'Anthropic' },
+            { configured: false, defaultModel: 'google/gemini-3.5-flash', id: 'google', label: 'Google' },
+            { configured: false, defaultModel: 'xai/grok-4.3', id: 'xai', label: 'xAI' }
+          ]
+        },
+        chatGptConnected: false,
+        connected: true,
+        selectedModel: 'openai/gpt-5.4-mini',
+        selectedProvider: 'openai',
+        status: 'ready'
+      })
+    });
+
+    render(<App />);
+
+    await openOnboardingStep(user, 'AI responses');
+    await user.click(await screen.findByRole('tab', { name: 'Cloud' }));
+
+    expect(screen.getByRole('button', { name: 'Sign in with ChatGPT' })).toBeEnabled();
+    expect(screen.queryByLabelText('API provider')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'API key' }));
+    expect(screen.queryByRole('button', { name: 'Sign in with ChatGPT' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('API provider')).toHaveTextContent('OpenAI · GPT');
+    expect(screen.getByRole('button', { name: 'Replace OpenAI API key' })).toBeInTheDocument();
+  });
+
   it('defaults onboarding AI setup to a simple local recommendation', async () => {
     window.history.pushState({}, '', '/?caul-surface=onboarding');
     const user = userEvent.setup();
@@ -887,6 +946,8 @@ describe('App', () => {
     expect(screen.queryByText('Nothing is sent to the internet.')).not.toBeInTheDocument();
     await openOnboardingStep(userEvent.setup(), 'AI responses');
     expect(await screen.findByRole('heading', { name: 'AI responses' })).toBeInTheDocument();
+    expect(screen.getByRole('main', { name: 'Caul setup' })).toHaveClass('overflow-y-auto');
+    expect(screen.getByRole('main', { name: 'Caul setup' })).not.toHaveClass('overflow-hidden');
   });
 
   it('defaults onboarding AI setup to cloud when cloud is recommended', async () => {
@@ -907,14 +968,25 @@ describe('App', () => {
 
     await openOnboardingStep(user, 'AI responses');
     expect(await screen.findByRole('tab', { name: 'Cloud', selected: true })).toBeInTheDocument();
-    expect(screen.getByText('Sends to a cloud model like ChatGPT. Faster and smarter than Local.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sign in', pressed: true })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'API key', pressed: false })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign in with ChatGPT' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: 'ChatGPT sign in details' })).not.toBeInTheDocument();
-    expect(screen.getByText('Not signed in')).toBeInTheDocument();
     const cloudSetup = screen.getByRole('group', { name: 'Cloud AI setup' });
     expect(within(cloudSetup).getByRole('button', { name: 'Sign in with ChatGPT' })).toBeInTheDocument();
     expect(within(cloudSetup).queryByRole('button', { name: 'ChatGPT sign in details' })).not.toBeInTheDocument();
-    expect(within(cloudSetup).getByText('Not signed in')).toBeInTheDocument();
+    expect(within(cloudSetup).queryByLabelText('API provider')).not.toBeInTheDocument();
+    expect(within(cloudSetup).queryByText('Your credentials stay on this computer')).not.toBeInTheDocument();
+    expect(within(cloudSetup).queryByText('Connect a subscription first, or use an API key from a supported first-party provider.')).not.toBeInTheDocument();
+    const subscriptionProvider = within(cloudSetup).getByLabelText('Sign-in provider');
+    expect(subscriptionProvider).toHaveTextContent('OpenAI · ChatGPT');
+    await user.click(subscriptionProvider);
+    expect(await screen.findByRole('option', { name: 'Anthropic · Claude' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'GitHub · Copilot' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Google · Gemini' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'xAI · Grok' })).toBeInTheDocument();
+    await user.click(screen.getByRole('option', { name: 'Anthropic · Claude' }));
+    expect(within(cloudSetup).getByRole('button', { name: 'Sign in with Claude' })).toBeDisabled();
 
     await user.click(screen.getByRole('tab', { name: 'Local' }));
     expect(await screen.findByRole('tab', { name: 'Local', selected: true })).toBeInTheDocument();
@@ -943,7 +1015,7 @@ describe('App', () => {
 
     await openOnboardingStep(userEvent.setup(), 'AI responses');
     expect(await screen.findByRole('tab', { name: 'Cloud', selected: true })).toBeInTheDocument();
-    expect(screen.getByText('Sends to a cloud model like ChatGPT. Faster and smarter than Local.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sign in', pressed: true })).toBeInTheDocument();
     await waitFor(() => expect(bridge.selectedAiProviders).toEqual(['cloud']));
   });
 
@@ -1060,6 +1132,57 @@ describe('App', () => {
     expect(within(aiResponsesGroup).getByLabelText('Reasoning')).toBeInTheDocument();
   });
 
+  it('manages first-party API keys from Settings and limits the model list to connected providers', async () => {
+    const user = userEvent.setup();
+    installTestBridge({
+      piStatus: testPiStatus({
+        apiKeys: {
+          available: true,
+          message: null,
+          providers: [
+            { configured: false, defaultModel: 'openai/gpt-5.4-mini', id: 'openai', label: 'OpenAI' },
+            { configured: true, defaultModel: 'anthropic/claude-sonnet-4-6', id: 'anthropic', label: 'Anthropic' },
+            { configured: false, defaultModel: 'google/gemini-3.5-flash', id: 'google', label: 'Google' },
+            { configured: false, defaultModel: 'xai/grok-4.3', id: 'xai', label: 'xAI' }
+          ]
+        },
+        chatGptConnected: false,
+        connected: true,
+        selectedModel: 'anthropic/claude-sonnet-4-6',
+        selectedProvider: 'anthropic',
+        status: 'ready'
+      }),
+      portablePreferences: {
+        selectedAiProvider: 'cloud'
+      }
+    });
+
+    render(<App />);
+
+    await openSettings(user);
+    await openSettingsSection(user, 'AI responses');
+    await user.click(screen.getByRole('tab', { name: 'Cloud' }));
+
+    const aiResponsesGroup = screen.getByRole('group', { name: 'AI responses' });
+    expect(within(aiResponsesGroup).getByRole('group', { name: 'Cloud AI setup' })).toBeInTheDocument();
+    expect(within(aiResponsesGroup).getByLabelText('API provider')).toHaveTextContent('Anthropic · Claude');
+    expect(within(aiResponsesGroup).getByRole('group', { name: 'Use an API key' })).toHaveTextContent('In use');
+    expect(within(aiResponsesGroup).getByRole('button', { name: 'Remove' })).toBeInTheDocument();
+    expect(within(aiResponsesGroup).getByLabelText('Model')).toHaveTextContent('Claude Sonnet 4.6');
+
+    await user.click(within(aiResponsesGroup).getByLabelText('Model'));
+    expect(await screen.findByRole('option', { name: 'Claude Sonnet 4.6 (Anthropic API)' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: '5.4 mini (Default)' })).not.toBeInTheDocument();
+    await user.keyboard('{Escape}');
+
+    await user.click(within(aiResponsesGroup).getByRole('button', { name: 'Remove' }));
+    expect(screen.getByRole('dialog', { name: 'Remove Anthropic API key?' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Remove key' }));
+    await waitFor(() => {
+      expect(screen.getByRole('group', { name: 'Use an API key' })).toHaveTextContent('No API key saved.');
+    });
+  });
+
   it('uses backend AI readiness when switching providers in Settings', async () => {
     const user = userEvent.setup();
     const bridge = installTestBridge({
@@ -1099,9 +1222,8 @@ describe('App', () => {
     await user.click(await screen.findByRole('tab', { name: 'Cloud' }));
 
     expect(bridge.selectedAiProviders).toEqual(['cloud']);
-    expect(screen.getByText('Sends to a cloud model like ChatGPT. Faster and smarter than Local.')).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'Sign in with ChatGPT' })).toBeEnabled();
-    expect(screen.getByText('Not signed in')).toBeInTheDocument();
+    expect(screen.queryByText('Not signed in')).not.toBeInTheDocument();
     const startButton = screen.getByRole('button', { name: 'Start using Caul' });
     expect(startButton).toBeDisabled();
 
@@ -1128,7 +1250,7 @@ describe('App', () => {
     await user.click(await screen.findByRole('tab', { name: 'Cloud' }));
 
     expect(bridge.selectedAiProviders).toEqual(['cloud']);
-    expect(within(await screen.findByRole('group', { name: 'Cloud AI setup' })).getByText('Ready')).toBeInTheDocument();
+    expect(within(await screen.findByRole('group', { name: 'Cloud AI setup' })).getByRole('button', { name: 'ChatGPT is ready' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Start using Caul' })).toBeEnabled();
   });
 
@@ -1237,12 +1359,53 @@ describe('App', () => {
 
     expect(screen.getByRole('button', { name: 'Opening' })).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'ChatGPT sign in details' })).not.toBeInTheDocument();
-    expect(screen.getByText('Opening ChatGPT sign in...')).toBeInTheDocument();
+    expect(screen.queryByText('Opening ChatGPT sign in...')).not.toBeInTheDocument();
 
     resolveLogin({ ok: true });
 
     expect(await screen.findByRole('button', { name: 'Sign in with ChatGPT' })).toBeEnabled();
-    expect(screen.getByText('Not signed in')).toBeInTheDocument();
+    expect(screen.queryByText('Not signed in')).not.toBeInTheDocument();
+  });
+
+  it('shows a concise onboarding error when ChatGPT sign in fails', async () => {
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const user = userEvent.setup();
+
+    installTestBridge({
+      openChatGptLogin: async () => ({
+        ok: false,
+        message: 'Provider returned a long internal failure with implementation details.'
+      })
+    });
+
+    render(<App />);
+
+    await openOnboardingStep(user, 'AI responses');
+    await user.click(await screen.findByRole('tab', { name: 'Cloud' }));
+    await user.click(await screen.findByRole('button', { name: 'Sign in with ChatGPT' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t sign in with ChatGPT. Try again.');
+    expect(screen.queryByText(/implementation details/u)).not.toBeInTheDocument();
+  });
+
+  it('distinguishes a cancelled ChatGPT sign in', async () => {
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const user = userEvent.setup();
+
+    installTestBridge({
+      openChatGptLogin: async () => ({
+        ok: false,
+        message: 'ChatGPT sign in was cancelled.'
+      })
+    });
+
+    render(<App />);
+
+    await openOnboardingStep(user, 'AI responses');
+    await user.click(await screen.findByRole('tab', { name: 'Cloud' }));
+    await user.click(await screen.findByRole('button', { name: 'Sign in with ChatGPT' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('ChatGPT sign in was cancelled.');
   });
 
   it('keeps onboarding start disabled and explains missing setup', async () => {
@@ -1474,10 +1637,11 @@ describe('App', () => {
 
     await openOnboardingStep(user, 'AI responses');
     await user.click(await screen.findByRole('tab', { name: 'Cloud' }));
-    await screen.findByText('Sends to a cloud model like ChatGPT. Faster and smarter than Local.');
+    await screen.findByRole('group', { name: 'Cloud AI setup' });
 
     expect(screen.queryByText('Sign in required')).not.toBeInTheDocument();
     expect(screen.queryByText('Opening browser')).not.toBeInTheDocument();
+    expect(screen.queryByText('Not signed in')).not.toBeInTheDocument();
   });
 
   it('uses platform-specific modal close controls', async () => {
@@ -5417,6 +5581,7 @@ function installTestBridge(overrides: {
   let quits = 0;
   let relaunches = 0;
   const savedPiModels: string[] = [];
+  const savedApiKeys: Array<{ apiKey: string; providerId: string }> = [];
   const selectedAiProviders: AiProvider[] = [];
   const selectedLocalTranscriptionModels: string[] = [];
   const selectedLocalAiDownloads: string[] = [];
@@ -5789,6 +5954,22 @@ function installTestBridge(overrides: {
         },
         openLogin: async () => ({ ok: true }),
         openModel: async () => ({ ok: true }),
+        removeApiKey: async (providerId) => {
+          piStatus = testPiStatus({
+            ...piStatus,
+            apiKeys: {
+              ...piStatus.apiKeys,
+              providers: piStatus.apiKeys.providers.map((provider) => (
+                provider.id === providerId ? { ...provider, configured: false } : provider
+              ))
+            },
+            connected: piStatus.selectedProvider === providerId ? false : piStatus.connected,
+            selectedModel: piStatus.selectedProvider === providerId ? null : piStatus.selectedModel,
+            selectedProvider: piStatus.selectedProvider === providerId ? null : piStatus.selectedProvider,
+            status: piStatus.selectedProvider === providerId ? 'disconnected' : piStatus.status
+          });
+          return piStatus;
+        },
         refreshCatalogue: async () => {
           modelCatalogueRefreshes += 1;
           modelCatalogueRefreshStatus = {
@@ -5816,9 +5997,33 @@ function installTestBridge(overrides: {
           };
         },
         refreshCatalogueStatus: async () => modelCatalogueRefreshStatus,
+        saveApiKey: async (providerId, apiKey) => {
+          savedApiKeys.push({ apiKey, providerId });
+          const providerStatus = piStatus.apiKeys.providers.find((provider) => provider.id === providerId);
+          piStatus = testPiStatus({
+            ...piStatus,
+            apiKeys: {
+              ...piStatus.apiKeys,
+              providers: piStatus.apiKeys.providers.map((provider) => (
+                provider.id === providerId ? { ...provider, configured: true } : provider
+              ))
+            },
+            connected: true,
+            selectedModel: providerStatus?.defaultModel ?? null,
+            selectedProvider: providerId,
+            status: 'ready'
+          });
+          return piStatus;
+        },
         saveModel: async (model) => {
           savedPiModels.push(model);
-          piStatus = testPiStatus({ connected: true, selectedModel: model, status: 'ready' });
+          piStatus = testPiStatus({
+            ...piStatus,
+            connected: true,
+            selectedModel: model,
+            selectedProvider: model.split('/', 1)[0] ?? null,
+            status: 'ready'
+          });
           return piStatus;
         },
         setRefreshCatalogueFrequency: async (frequency) => {
@@ -6106,6 +6311,7 @@ function installTestBridge(overrides: {
     },
     prepares,
     requestedPermissions,
+    savedApiKeys,
     savedPiModels,
     selectedAiProviders,
     selectedLocalAiDownloads,
@@ -6413,12 +6619,30 @@ function testParakeetStatus(overrides: Partial<ParakeetStatus> = {}): ParakeetSt
 }
 
 function testPiStatus(overrides: Partial<PiStatus> = {}): PiStatus {
+  const apiKeys = overrides.apiKeys ?? {
+    available: true,
+    message: null,
+    providers: [
+      { configured: false, defaultModel: 'openai/gpt-5.4-mini', id: 'openai' as const, label: 'OpenAI' },
+      { configured: false, defaultModel: 'anthropic/claude-sonnet-4-6', id: 'anthropic' as const, label: 'Anthropic' },
+      { configured: false, defaultModel: 'google/gemini-3.5-flash', id: 'google' as const, label: 'Google' },
+      { configured: false, defaultModel: 'xai/grok-4.3', id: 'xai' as const, label: 'xAI' }
+    ]
+  };
+  const selectedModel = overrides.selectedModel ?? null;
+
   return {
     agentDir: overrides.agentDir ?? '/tmp/caul/pi-agent',
+    apiKeys,
     bundled: overrides.bundled ?? true,
+    chatGptConnected: overrides.chatGptConnected ?? Boolean(
+      overrides.connected
+      && (overrides.selectedProvider ?? selectedModel?.split('/', 1)[0] ?? 'openai-codex') === 'openai-codex'
+    ),
     connected: overrides.connected ?? false,
     ok: overrides.ok ?? true,
-    selectedModel: overrides.selectedModel ?? null,
+    selectedModel,
+    selectedProvider: overrides.selectedProvider ?? (selectedModel?.split('/', 1)[0] || null),
     status: overrides.status ?? 'disconnected'
   };
 }

@@ -78,6 +78,8 @@ contextBridge.exposeInMainWorld('caul', {
         };
       },
       openChatGptLogin: () => ipcRenderer.invoke('caul:pi-chatgpt-login'),
+      removeApiKey: (providerId) => ipcRenderer.invoke('caul:pi-api-key-remove', { providerId }),
+      saveApiKey: (providerId, apiKey) => ipcRenderer.invoke('caul:pi-api-key-save', { providerId, apiKey }),
       openLogin: () => ipcRenderer.invoke('caul:pi-login'),
       openModel: () => ipcRenderer.invoke('caul:pi-model'),
       refreshCatalogue: () => ipcRenderer.invoke('caul:model-catalogue-refresh'),
@@ -90,7 +92,6 @@ contextBridge.exposeInMainWorld('caul', {
     },
     onboarding: {
       complete: () => ipcRenderer.invoke('caul:onboarding-complete'),
-      fitContent: (size) => ipcRenderer.invoke('caul:onboarding-fit-content', size),
       open: () => ipcRenderer.invoke('caul:onboarding-open'),
       status: (options) => ipcRenderer.invoke('caul:onboarding-status', options)
     },

@@ -13,8 +13,7 @@ const buildChannel = isPrivateDevBuild ? 'DEV-PRIVATE' : isDevBuild ? 'DEV' : is
 const appDisplayName = isPrivateDevBuild ? 'Caul Dev-Private' : isDevBuild ? 'Caul Dev' : isBeta ? 'Caul Beta' : 'Caul';
 const appId = isPrivateDevBuild ? 'dev.caul.app.dev-private' : isDevBuild ? 'dev.caul.app.dev' : isBeta ? 'dev.caul.app.beta' : 'dev.caul.app';
 const artifactPrefix = isPrivateDevBuild ? 'Caul-Dev-Private' : isDevBuild ? 'Caul-Dev' : isBeta ? 'Caul-Beta' : 'Caul';
-const devCodeSignIdentity = process.env.CAUL_DEV_CODESIGN_IDENTITY
-  ?? '8502BFEED12A89F3CEAE5F76D56D1B86D78A5F96';
+const devCodeSignIdentity = process.env.CAUL_DEV_CODESIGN_IDENTITY ?? 'Apple Development';
 const packagePlatform = process.env.CAUL_PACKAGE_PLATFORM ?? process.platform;
 const packageArch = process.env.CAUL_PACKAGE_ARCH;
 const winArchitectures = packageArch ? [packageArch] : ['arm64'];
@@ -98,10 +97,6 @@ const commonExtraResources = [
   {
     from: 'scripts/run-pi-json.py',
     to: 'scripts/run-pi-json.py'
-  },
-  {
-    from: 'node_modules/@earendil-works/pi-coding-agent',
-    to: 'pi/node_modules/@earendil-works/pi-coding-agent'
   }
 ];
 const macExtraResources = [

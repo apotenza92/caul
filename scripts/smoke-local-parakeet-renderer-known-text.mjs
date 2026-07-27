@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, symlinkSync } from 'node:fs';
 import http from 'node:http';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 
 const phrase = process.env.CAUL_KNOWN_TEXT_PHRASE
@@ -11,11 +11,21 @@ const devServerPort = await getAvailablePort();
 const debuggingPort = await getAvailablePort();
 const devServerUrl = `http://127.0.0.1:${devServerPort}`;
 const userDataDir = mkdtempSync(path.join(tmpdir(), 'caul-renderer-smoke-'));
+const modelRoot = process.env.CAUL_KNOWN_TEXT_MODEL_ROOT
+  ?? path.join(homedir(), 'Library', 'Application Support', 'caul', 'models');
 const minWordOverlap = Number(process.env.CAUL_KNOWN_TEXT_MIN_WORD_OVERLAP ?? 0.32);
 const muteSystemOutput = process.env.CAUL_SMOKE_MUTE_SYSTEM_OUTPUT !== 'false';
 const speechVolume = process.env.CAUL_BROWSER_SPEECH_VOLUME ?? (muteSystemOutput ? '0.85' : '0.02');
 let originalAudioSettings = null;
 let output = '';
+
+if (!existsSync(path.join(modelRoot, 'parakeet-tdt-0.6b-v3-int8', 'vocab.txt'))) {
+  throw new Error(
+    `Known-text smoke requires an installed Parakeet model at ${modelRoot}.`
+  );
+}
+
+symlinkSync(modelRoot, path.join(userDataDir, 'models'), 'dir');
 
 const vite = spawn('node', ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', String(devServerPort)], {
   stdio: ['ignore', 'pipe', 'pipe']
@@ -77,11 +87,16 @@ try {
 
   const smokeLine = output
     .split('\n')
-    .find((line) => line.includes('caul-renderer-transcription-smoke'));
-  const summary = smokeLine ? JSON.parse(smokeLine.replace(/^.*caul-renderer-transcription-smoke /, '')) : null;
+    .filter((line) => line.startsWith('caul-renderer-transcription-smoke '))
+    .at(-1);
+  const summary = smokeLine
+    ? JSON.parse(smokeLine.slice('caul-renderer-transcription-smoke '.length))
+    : null;
   const transcript = (summary?.completed ?? []).join('\n') || summary?.renderedOutput || '';
   const wordOverlap = scoreTranscript(phrase, transcript);
-  const coreAudioStarted = summary?.stages?.includes('Core Audio capture started') ?? false;
+  const screenCaptureKitStarted = summary?.stages?.includes(
+    'ScreenCaptureKit audio capture started'
+  ) ?? false;
   const parakeetStarted = summary?.stages?.some((stage) => (
     stage === 'local Parakeet loaded' ||
     stage === 'local Parakeet capture started'
@@ -99,13 +114,13 @@ try {
 
   if (
     !summary?.detected ||
-    !coreAudioStarted ||
+    !screenCaptureKitStarted ||
     !parakeetStarted ||
     hasErrors ||
     wordOverlap < minWordOverlap ||
     electronCode !== 0
   ) {
-    process.exit(1);
+    process.exitCode = 1;
   }
 } finally {
   if (originalAudioSettings) {

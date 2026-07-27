@@ -24,6 +24,7 @@ Electron and React own visible application behaviour. Rust owns capture process 
 - Keep confirmed transcript chunks as the persistence, export, history and AI-submission contract. Provisional transcript tails are display-only and may never replace confirmed text.
 - Store user-visible portable history and settings under `Documents/Caul`. Keep secrets, models, runtime caches and private window state in Electron `userData`.
 - Do not silently reuse global provider state. Provider setup must be explicit, and cloud requests must respect the chosen provider and privacy boundary.
+- Subscription sign-in remains the preferred cloud setup path. First-party OpenAI, Anthropic, Google and xAI API keys may be configured explicitly when operating-system credential encryption is available. Electron encrypts these keys at rest, never returns them to the renderer, and injects only the selected provider's key into the Pi child process.
 - Keep LLM dispatch out of capture code. Electron owns explicit transcript-to-provider requests.
 - Treat resource use as a measured budget and avoid renderer polling where event-driven state is available.
 

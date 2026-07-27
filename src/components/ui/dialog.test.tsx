@@ -36,6 +36,8 @@ describe("Dialog", () => {
 
     const dialog = screen.getByRole("dialog", { name: "Preferences" })
     expect(dialog).toHaveAccessibleDescription("Choose how Caul behaves.")
+    expect(screen.getByText("Preferences")).toHaveClass("font-heading")
+    expect(screen.getByText("Preferences")).not.toHaveClass("cn-font-heading")
     expect(container).not.toContainElement(dialog)
     expect(document.body.querySelector('[data-slot="dialog-overlay"]')).toBeInTheDocument()
     expect(screen.getAllByRole("button", { name: "Cancel" })).toHaveLength(1)

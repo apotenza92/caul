@@ -69,4 +69,25 @@ describe("Tabs", () => {
     await user.keyboard("{Home}")
     expect(screen.getByRole("tab", { name: "Local", selected: true })).toHaveFocus()
   })
+
+  it("supports Caul's semantic primary active variant without important or dark overrides", () => {
+    render(
+      <Tabs defaultValue="local">
+        <TabsList aria-label="Primary tabs">
+          <TabsTrigger activeVariant="primary" value="local">Local</TabsTrigger>
+          <TabsTrigger activeVariant="primary" value="cloud">Cloud</TabsTrigger>
+        </TabsList>
+        <TabsContent value="local">Local panel</TabsContent>
+        <TabsContent value="cloud">Cloud panel</TabsContent>
+      </Tabs>
+    )
+
+    const localTab = screen.getByRole("tab", { name: "Local", selected: true })
+    expect(localTab).toHaveClass("data-active:bg-primary")
+    expect(localTab).toHaveClass("data-active:text-primary-foreground")
+    expect(localTab).toHaveClass("text-muted-foreground")
+    expect(localTab.className).not.toContain("dark:text-muted-foreground")
+    expect(localTab.className).not.toContain("data-active:!")
+    expect(localTab.className).not.toContain("dark:data-active:!")
+  })
 })

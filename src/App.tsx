@@ -1,6 +1,19 @@
-import { cloneElement, isValidElement, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode, type RefObject, type WheelEvent } from 'react';
-import { createPortal } from 'react-dom';
+import { cloneElement, isValidElement, useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type MouseEvent, type PointerEvent, type ReactNode, type RefObject, type WheelEvent } from 'react';
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle
+} from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle
+} from '@/components/ui/card';
 import { Checkbox, CheckboxDisplay } from '@/components/ui/checkbox';
 import {
   Dialog,
@@ -15,8 +28,12 @@ import {
   Field,
   FieldContent,
   FieldDescription,
+  FieldError,
   FieldGroup,
-  FieldLabel
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+  FieldTitle
 } from '@/components/ui/field';
 import {
   Select,
@@ -26,7 +43,9 @@ import {
   SelectTrigger,
   SelectValue
 } from '@/components/ui/select';
+import { Spinner } from '@/components/ui/spinner';
 import { Input } from '@/components/ui/input';
+import { Separator } from '@/components/ui/separator';
 import {
   Popover,
   PopoverContent,
@@ -45,11 +64,16 @@ import {
   TabsTrigger
 } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { ArrowUpIcon, BellIcon, CheckCircle2Icon, ChevronDownIcon, ChevronRightIcon, CircleAlertIcon, CopyIcon, DownloadIcon, FastForwardIcon, FileIcon, FileInputIcon, FileTextIcon, FolderOpenIcon, HistoryIcon, ImageIcon, InfoIcon, ListChecksIcon, LoaderCircleIcon, LogOutIcon, MicIcon, MicOffIcon, PaperclipIcon, PencilIcon, PlayIcon, PowerIcon, RotateCcwIcon, SearchIcon, SendIcon, SettingsIcon, SquareIcon, StarIcon, Trash2Icon, Volume2Icon, VolumeXIcon, XCircleIcon, XIcon } from 'lucide-react';
+import {
+  ToggleGroup,
+  ToggleGroupItem
+} from '@/components/ui/toggle-group';
+import { ArrowUpIcon, BellIcon, CheckCircle2Icon, ChevronDownIcon, ChevronRightIcon, CircleAlertIcon, CopyIcon, DownloadIcon, FastForwardIcon, FileIcon, FileInputIcon, FileTextIcon, FolderOpenIcon, HistoryIcon, ImageIcon, InfoIcon, ListChecksIcon, LogOutIcon, MicIcon, MicOffIcon, PaperclipIcon, PencilIcon, PlayIcon, PowerIcon, RotateCcwIcon, SearchIcon, SendIcon, SettingsIcon, ShieldCheckIcon, SquareIcon, StarIcon, Trash2Icon, Volume2Icon, VolumeXIcon, XCircleIcon, XIcon } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import caulAppIconUrl from '../assets/icons/icon-rounded.png?url';
 import caulBetaAppIconUrl from '../assets/icons/beta/icon-rounded.png?url';
 import caulIconUrl from '../assets/caul-icon.svg?url';
+import { cn } from '@/lib/utils';
 import {
   getLlmBridge,
   getPermissionsBridge,
@@ -58,6 +82,7 @@ import {
   getTranscriptionBridge,
   type AiRecommendation,
   type AiProvider,
+  type CloudApiKeyProviderId,
   type HistoryStatus,
   type LocalLlmStatus,
   type LocalTranscriptionModelId,
@@ -264,11 +289,92 @@ const autoCollapseTranscriptionPreferenceKey = 'caul.auto-collapse.transcription
 const generalInstructionsPreferenceKey = 'caul.general-instructions';
 const defaultGeneralInstructions = '';
 const generalInstructionsPlaceholder = 'e.g. Always answer in British English.';
-const recommendedMarkerClassName = 'inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-current/30 bg-current/10 text-current opacity-95 shadow-sm hover:bg-current/15';
-const selectedRecommendedMarkerClassName = 'inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-current/45 bg-current/15 text-current opacity-100 shadow-sm hover:bg-current/20';
 const recommendedLocalAiPillMessage = 'Based on this computer’s power, Caul recommends Local because you should still get acceptable private AI results on this machine.';
 const recommendedCloudAiPillMessage = 'Based on this computer’s power, Caul recommends Cloud because local AI probably will not give acceptable results on this machine.';
 const recommendedPillLabel = 'Recommended';
+type CloudSignInResult = { ok: boolean; message?: string };
+type CloudSignInHandler = () => Promise<CloudSignInResult>;
+type CloudSubscriptionProviderId = 'openai-codex' | 'anthropic' | 'github-copilot' | 'google' | 'xai';
+const cloudSubscriptionProviders: Array<{
+  available: boolean;
+  description: string;
+  id: CloudSubscriptionProviderId;
+  name: string;
+  product: string;
+}> = [
+  {
+    available: true,
+    description: 'Use the ChatGPT subscription already linked to your OpenAI account.',
+    id: 'openai-codex',
+    name: 'OpenAI',
+    product: 'ChatGPT'
+  },
+  {
+    available: false,
+    description: 'Connect a Claude subscription through Anthropic.',
+    id: 'anthropic',
+    name: 'Anthropic',
+    product: 'Claude'
+  },
+  {
+    available: false,
+    description: 'Connect models included with GitHub Copilot.',
+    id: 'github-copilot',
+    name: 'GitHub',
+    product: 'Copilot'
+  },
+  {
+    available: false,
+    description: 'Connect a Gemini subscription through Google.',
+    id: 'google',
+    name: 'Google',
+    product: 'Gemini'
+  },
+  {
+    available: false,
+    description: 'Connect a Grok subscription through xAI.',
+    id: 'xai',
+    name: 'xAI',
+    product: 'Grok'
+  }
+];
+const cloudApiKeyProviders: Array<{
+  id: CloudApiKeyProviderId;
+  name: string;
+  product: string;
+}> = [
+  { id: 'openai', name: 'OpenAI', product: 'GPT' },
+  { id: 'anthropic', name: 'Anthropic', product: 'Claude' },
+  { id: 'google', name: 'Google', product: 'Gemini' },
+  { id: 'xai', name: 'xAI', product: 'Grok' }
+];
+
+function getChatGptSignInError(result: CloudSignInResult) {
+  if (result.ok) {
+    return '';
+  }
+
+  return result.message?.toLowerCase().includes('cancel')
+    ? 'ChatGPT sign in was cancelled.'
+    : 'Couldn’t sign in with ChatGPT. Try again.';
+}
+
+async function requestChatGptSignIn(refreshStatus: () => Promise<void>): Promise<CloudSignInResult> {
+  const signIn = getSettingsBridge()?.ai?.openChatGptLogin;
+
+  if (!signIn) {
+    return { ok: false, message: 'ChatGPT sign in is unavailable.' };
+  }
+
+  try {
+    const result = await signIn();
+    await refreshStatus();
+
+    return result;
+  } catch {
+    return { ok: false, message: 'ChatGPT sign in failed.' };
+  }
+}
 const handleDragThresholdPx = 6;
 const handlePressVisualDurationMs = 520;
 const handleSnapVisualDurationMs = 280;
@@ -445,6 +551,22 @@ const llmReasoningLevels: Array<{ label: string; value: LlmReasoning }> = cloudL
 
 const llmModelValues = new Set<LlmModel>(llmModels.map((model) => model.value));
 const llmReasoningValues = new Set<LlmReasoning>(llmReasoningLevels.map((reasoning) => reasoning.value));
+
+function getAvailableCloudLlmModels(piStatus: PiStatus | null) {
+  const configuredProviders = new Set<string>();
+
+  if (piStatus?.chatGptConnected) {
+    configuredProviders.add('openai-codex');
+  }
+
+  for (const provider of piStatus?.apiKeys.providers ?? []) {
+    if (provider.configured) {
+      configuredProviders.add(provider.id);
+    }
+  }
+
+  return llmModels.filter((model) => configuredProviders.has(model.value.split('/', 1)[0]));
+}
 
 type AudioSource = {
   checked: boolean;
@@ -873,6 +995,10 @@ export function App() {
     setOnboardingStatus(nextStatus);
     setLocalLlmStatus(getCaulLocalLlmStatus(nextStatus));
 
+    if (nextStatus.pi.selectedModel && llmModelValues.has(nextStatus.pi.selectedModel)) {
+      setLlmModel(nextStatus.pi.selectedModel);
+    }
+
     if (!hasInitialisedTranscriptionModelRef.current) {
       hasInitialisedTranscriptionModelRef.current = true;
       setSelectedTranscriptionModelId(getInitialTranscriptionModelId(nextStatus));
@@ -953,12 +1079,11 @@ export function App() {
     }
   }
 
-  async function signInWithChatGpt() {
+  async function signInWithChatGpt(): Promise<CloudSignInResult> {
     setIsChatGptSigningIn(true);
 
     try {
-      await getSettingsBridge()?.ai?.openChatGptLogin?.();
-      await refreshOnboardingStatus();
+      return await requestChatGptSignIn(refreshOnboardingStatus);
     } finally {
       setIsChatGptSigningIn(false);
     }
@@ -1175,6 +1300,7 @@ export function App() {
   function saveLlmModel(model: LlmModel) {
     setLlmModel(model);
     void getSettingsBridge()?.preferences?.save({ llmModel: model });
+    void getSettingsBridge()?.ai?.saveModel(model);
   }
 
   function saveLlmReasoning(reasoning: LlmReasoning) {
@@ -1371,7 +1497,7 @@ export function App() {
               onSelectTranscriptionModel={setSelectedTranscriptionModelId}
               onSetListenToMicrophone={setListenToMicrophone}
               onSetListenToSystemAudio={setListenToSystemAudio}
-              onSignInWithChatGpt={() => void signInWithChatGpt()}
+              onSignInWithChatGpt={signInWithChatGpt}
               onboardingStatus={onboardingStatus}
               outputRef={outputRef}
               promptTemplates={promptTemplates}
@@ -1461,18 +1587,6 @@ type OnboardingPage = {
   stepLabel: string;
   title: string;
 };
-const onboardingMeasurementWidth = 560;
-
-function copyDocumentStylesToShadowRoot(shadowRoot: ShadowRoot) {
-  shadowRoot.querySelectorAll('[data-onboarding-measure-style]').forEach((node) => node.remove());
-
-  document.querySelectorAll('style, link[rel="stylesheet"]').forEach((node) => {
-    const clone = node.cloneNode(true) as HTMLElement;
-    clone.setAttribute('data-onboarding-measure-style', '');
-    shadowRoot.appendChild(clone);
-  });
-}
-
 function OnboardingSurface() {
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [localLlmStatus, setLocalLlmStatus] = useState<LocalLlmStatus | null>(null);
@@ -1485,11 +1599,9 @@ function OnboardingSurface() {
   const permissionsRef = useRef<HTMLElement | null>(null);
   const parakeetRef = useRef<HTMLElement | null>(null);
   const aiRef = useRef<HTMLElement | null>(null);
-  const activeShellRef = useRef<HTMLDivElement | null>(null);
   const hasInitialisedAiProviderRef = useRef(false);
   const hasInitialisedTranscriptionModelRef = useRef(false);
   const hasUserSelectedAiProviderRef = useRef(false);
-  const [measurementRoot, setMeasurementRoot] = useState<ShadowRoot | null>(null);
   const runtimeContext = useRuntimeContext();
   const appName = runtimeContext?.appName ?? 'Caul';
   const appIconUrl = runtimeContext?.appChannel === 'beta' || runtimeContext?.appChannel === 'dev'
@@ -1644,16 +1756,14 @@ function OnboardingSurface() {
     }
   }
 
-  async function signInWithChatGpt() {
+  async function signInWithChatGpt(): Promise<CloudSignInResult> {
     setIsChatGptSigningIn(true);
 
     try {
-      await getSettingsBridge()?.ai?.openChatGptLogin?.();
+      return await requestChatGptSignIn(() => refresh({ refreshCatalogue: false }));
     } finally {
       setIsChatGptSigningIn(false);
     }
-
-    await refresh();
   }
 
   async function selectAiProvider(provider: AiProvider) {
@@ -1782,101 +1892,16 @@ function OnboardingSurface() {
     }
   }
 
-  useEffect(() => {
-    const fitContent = getSettingsBridge()?.onboarding?.fitContent;
-
-    if (!fitContent || typeof document === 'undefined') {
-      return;
-    }
-
-    const host = document.createElement('div');
-    host.setAttribute('aria-hidden', 'true');
-    host.style.position = 'fixed';
-    host.style.inset = '0 auto auto -10000px';
-    host.style.width = `${onboardingMeasurementWidth}px`;
-    host.style.visibility = 'hidden';
-    host.style.pointerEvents = 'none';
-    host.style.zIndex = '-1';
-    const shadowRoot = host.attachShadow({ mode: 'open' });
-    copyDocumentStylesToShadowRoot(shadowRoot);
-    document.body.appendChild(host);
-    setMeasurementRoot(shadowRoot);
-
-    return () => {
-      setMeasurementRoot(null);
-      host.remove();
-    };
-  }, []);
-
-  useLayoutEffect(() => {
-    const fitContent = getSettingsBridge()?.onboarding?.fitContent;
-
-    if (!fitContent || !measurementRoot) {
-      return;
-    }
-
-    let animationFrame = 0;
-
-    const reportSize = () => {
-      window.cancelAnimationFrame(animationFrame);
-      animationFrame = window.requestAnimationFrame(() => {
-        const shells = Array.from(measurementRoot.querySelectorAll<HTMLElement>('[data-onboarding-measure-shell]'));
-
-        const measured = shells
-          .map((shell) => ({
-            height: Math.ceil(Math.max(shell.scrollHeight, shell.getBoundingClientRect().height)),
-            width: Math.ceil(Math.max(shell.scrollWidth, shell.getBoundingClientRect().width))
-          }))
-          .filter((size) => size.height > 0 && size.width > 0);
-
-        if (measured.length === 0) {
-          return;
-        }
-
-        void fitContent({
-          height: Math.max(...measured.map((size) => size.height)),
-          width: Math.max(...measured.map((size) => size.width))
-        });
-      });
-    };
-
-    const resizeObserver = typeof ResizeObserver === 'undefined'
-      ? null
-      : new ResizeObserver(reportSize);
-    const observedShells = Array.from(measurementRoot.querySelectorAll<HTMLElement>('[data-onboarding-measure-shell]'));
-
-    observedShells.forEach((element) => resizeObserver?.observe(element));
-    reportSize();
-
-    return () => {
-      window.cancelAnimationFrame(animationFrame);
-      resizeObserver?.disconnect();
-    };
-  }, [
-    activePage.id,
-    isChatGptSigningIn,
-    isCompleting,
-    localAiSetupPhase,
-    localLlmStatus,
-    measurementRoot,
-    pages.length,
-    selectedAiProvider,
-    selectedTranscriptionModelId,
-    status
-  ]);
-
-  function renderOnboardingPanel(page: OnboardingPage, options: { measurement?: boolean } = {}) {
-    const sectionRef = options.measurement
-      ? undefined
-      : page.id === 'permissions'
-        ? permissionsRef
-        : page.id === 'parakeet'
-          ? parakeetRef
-          : aiRef;
+  function renderOnboardingPanel(page: OnboardingPage) {
+    const sectionRef = page.id === 'permissions'
+      ? permissionsRef
+      : page.id === 'parakeet'
+        ? parakeetRef
+        : aiRef;
 
     if (page.id === 'permissions') {
       return (
-        <OnboardingPanel sectionRef={sectionRef} stepLabel={page.stepLabel} title="Permissions">
+        <OnboardingPanel sectionRef={sectionRef} title="Permissions">
           <div className="grid">
             {onboardingPermissionRows.map((permission) => (
               <PermissionSetupRow
@@ -1894,7 +1919,7 @@ function OnboardingSurface() {
 
     if (page.id === 'parakeet') {
       return (
-        <OnboardingPanel sectionRef={sectionRef} stepLabel={page.stepLabel} title="Local transcription">
+        <OnboardingPanel sectionRef={sectionRef} title="Local transcription">
           <p className="text-sm text-muted-foreground">Local and private. Audio is transcribed on this computer.</p>
           <TranscriptionModelRow
             onCancel={() => void cancelParakeetDownload()}
@@ -1908,7 +1933,7 @@ function OnboardingSurface() {
     }
 
     return (
-      <OnboardingPanel sectionRef={sectionRef} stepLabel={page.stepLabel} title="AI responses">
+      <OnboardingPanel sectionRef={sectionRef} title="AI responses">
         <AiProviderSetup
           isChatGptSigningIn={isChatGptSigningIn}
           isCloudAiReady={Boolean(status?.pi.connected)}
@@ -1916,9 +1941,11 @@ function OnboardingSurface() {
           localAiSetupPhase={localAiSetupPhase}
           onCancelLocalDownload={() => void cancelLocalAiDownload()}
           onDownloadLocalAi={(modelId) => void downloadLocalAi(modelId)}
+          onCloudStatusChange={() => refresh({ refreshCatalogue: false })}
           onSelectProvider={(provider) => void selectAiProvider(provider)}
-          onSignInWithChatGpt={() => void signInWithChatGpt()}
+          onSignInWithChatGpt={signInWithChatGpt}
           selectedProvider={selectedAiProvider}
+          showCloudProviderCards
           status={status}
         />
       </OnboardingPanel>
@@ -1927,34 +1954,20 @@ function OnboardingSurface() {
 
   return (
     <TooltipProvider>
-      <main aria-label="Caul setup" className="h-screen overflow-hidden bg-background text-foreground">
-        <div ref={activeShellRef} className="mx-auto grid h-full w-full max-w-[38rem] grid-rows-[auto_auto_minmax(0,1fr)_auto] gap-4 px-6 py-6">
+      <main aria-label="Caul setup" className="h-screen overflow-y-auto bg-background text-foreground">
+        <div className="mx-auto grid min-h-full w-full max-w-[38rem] content-start grid-rows-[auto_auto_auto_auto] gap-4 px-6 py-6">
           <header className="flex flex-col items-center gap-2 text-center">
             <img alt={appName} className="size-20 rounded-[1.1rem]" src={appIconUrl} />
             <h1 className="text-xl font-semibold">Welcome to {appName}</h1>
           </header>
 
-          <nav aria-label="Onboarding steps" className="grid gap-2">
-            <div className="flex items-center justify-center gap-2">
-              {pages.map((page, index) => (
-                <button
-                  key={page.id}
-                  aria-current={page.id === activePage.id ? 'step' : undefined}
-                  aria-label={`${page.stepLabel}: ${page.title}`}
-                  className={`h-2.5 rounded-full transition-all ${page.id === activePage.id ? 'w-8 bg-primary' : 'w-2.5 bg-muted-foreground/30 hover:bg-muted-foreground/45'}`}
-                  onClick={() => setActivePageId(page.id)}
-                  type="button"
-                >
-                  <span className="sr-only">{index + 1}</span>
-                </button>
-              ))}
-            </div>
-            <p className="text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              {activePage.stepLabel} of {pages.length}
-            </p>
-          </nav>
+          <OnboardingSteps
+            activePageId={activePage.id}
+            onSelect={setActivePageId}
+            pages={pages}
+          />
 
-          <div className="min-h-0">
+          <div>
             {renderOnboardingPanel(activePage)}
           </div>
 
@@ -1968,56 +1981,48 @@ function OnboardingSurface() {
             onNext={goToNextPage}
           />
         </div>
-        {measurementRoot ? createPortal(
-          <TooltipProvider>
-            <div className="grid gap-4">
-              {pages.map((page, index) => (
-                <div key={page.id} className="mx-auto grid w-full max-w-[38rem] grid-rows-[auto_auto_auto_auto] gap-4 px-6 py-6" data-onboarding-measure-shell="">
-                  <header className="flex flex-col items-center gap-2 text-center">
-                    <img alt="" aria-hidden="true" className="size-20 rounded-[1.1rem]" src={appIconUrl} />
-                    <h1 className="text-xl font-semibold">Welcome to {appName}</h1>
-                  </header>
-
-                  <nav aria-label="Onboarding steps" className="grid gap-2">
-                    <div className="flex items-center justify-center gap-2">
-                      {pages.map((stepPage, stepIndex) => (
-                        <button
-                          key={stepPage.id}
-                          aria-current={stepPage.id === page.id ? 'step' : undefined}
-                          aria-label={`${stepPage.stepLabel}: ${stepPage.title}`}
-                          className={`h-2.5 rounded-full transition-all ${stepPage.id === page.id ? 'w-8 bg-primary' : 'w-2.5 bg-muted-foreground/30'}`}
-                          type="button"
-                        >
-                          <span className="sr-only">{stepIndex + 1}</span>
-                        </button>
-                      ))}
-                    </div>
-                    <p className="text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      {page.stepLabel} of {pages.length}
-                    </p>
-                  </nav>
-
-                  <div>
-                    {renderOnboardingPanel(page, { measurement: true })}
-                  </div>
-
-                  <OnboardingFooter
-                    isCompleting={isCompleting}
-                    isFirstPage={index === 0}
-                    isLastPage={index === pages.length - 1}
-                    missingItems={missingItems}
-                    onBack={() => undefined}
-                    onFinish={() => undefined}
-                    onNext={() => undefined}
-                  />
-                </div>
-              ))}
-            </div>
-          </TooltipProvider>,
-          measurementRoot
-        ) : null}
       </main>
     </TooltipProvider>
+  );
+}
+
+function OnboardingSteps({
+  activePageId,
+  onSelect,
+  pages
+}: {
+  activePageId: OnboardingPage['id'];
+  onSelect: (pageId: OnboardingPage['id']) => void;
+  pages: OnboardingPage[];
+}) {
+  return (
+    <nav aria-label="Onboarding steps">
+      <ToggleGroup
+        aria-label="Choose onboarding step"
+        className={cn('grid w-full', pages.length === 3 ? 'grid-cols-3' : 'grid-cols-2')}
+        onValueChange={(value) => {
+          const nextPage = value.at(-1);
+          if (nextPage) {
+            onSelect(nextPage as OnboardingPage['id']);
+          }
+        }}
+        spacing={2}
+        value={[activePageId]}
+        variant="outline"
+      >
+        {pages.map((page, index) => (
+          <ToggleGroupItem
+            key={page.id}
+            aria-current={page.id === activePageId ? 'step' : undefined}
+            aria-label={`${page.stepLabel}: ${page.title}`}
+            className="w-full"
+            value={page.id}
+          >
+            <span>{index + 1}. {page.title.replace('Local ', '')}</span>
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
+    </nav>
   );
 }
 
@@ -2041,42 +2046,47 @@ function OnboardingFooter({
   const disabled = isCompleting || missingItems.length > 0;
 
   return (
-    <div className="relative min-h-11">
-      <Button className={`absolute bottom-0 left-0 h-11 min-w-24 px-5 text-sm ${isFirstPage ? 'invisible' : ''}`} disabled={isCompleting || isFirstPage} onClick={onBack} size="default" type="button" variant="outline">
+    <div className="grid min-h-11 grid-cols-3 items-end gap-3">
+      <Button className={cn('min-w-24 justify-self-start', isFirstPage && 'invisible')} disabled={isCompleting || isFirstPage} onClick={onBack} size="lg" type="button" variant="outline">
         Back
       </Button>
 
       {isLastPage ? (
-        <span className={disabled ? 'group absolute bottom-0 left-1/2 inline-flex -translate-x-1/2 cursor-not-allowed' : 'absolute bottom-0 left-1/2 inline-flex -translate-x-1/2'}>
-          <Button
-            className={disabled
-              ? 'h-10 pointer-events-none px-5 text-sm'
-              : 'h-10 bg-[#34424A] px-5 text-sm text-white hover:bg-[#8EA6AD] focus-visible:border-[#8EA6AD] focus-visible:ring-[#34424A]/30 dark:bg-[#8EA6AD] dark:text-[#101619] dark:hover:bg-[#B8A46A]'}
-            disabled={disabled}
-            onClick={onFinish}
-            size="lg"
-            type="button"
+        <Tooltip>
+          <TooltipTrigger
+            render={<span
+              className={cn('inline-flex justify-self-center', disabled && 'cursor-not-allowed')}
+              tabIndex={disabled && !isCompleting ? 0 : -1}
+            />}
           >
-            {isCompleting ? 'Starting Caul' : 'Start using Caul'}
-          </Button>
-          {disabled && !isCompleting ? (
-            <div
-              className="pointer-events-none absolute bottom-full left-1/2 z-[2147483647] mb-2 hidden w-max max-w-64 -translate-x-1/2 rounded-md bg-primary px-2 py-1.5 text-left text-xs leading-4 text-primary-foreground shadow-md group-hover:block group-focus-within:block"
-              role="tooltip"
+            <Button
+              disabled={disabled}
+              onClick={onFinish}
+              size="lg"
+              type="button"
             >
-              <div className="font-medium">Still needed</div>
+              {isCompleting ? <Spinner aria-hidden="true" data-icon="inline-start" /> : null}
+              {isCompleting ? 'Starting Caul' : 'Start using Caul'}
+            </Button>
+          </TooltipTrigger>
+          {disabled && !isCompleting ? (
+            <TooltipContent className="max-w-64 text-left" side="top">
+              <p className="font-medium">Still needed</p>
               <ul className="mt-1 list-disc pl-4">
                 {missingItems.map((item) => <li key={item}>{item}</li>)}
               </ul>
-              <span className="absolute left-1/2 top-full size-2.5 -translate-x-1/2 -translate-y-[calc(50%_-_2px)] rotate-45 rounded-[2px] bg-primary" />
-            </div>
+            </TooltipContent>
           ) : null}
-        </span>
+        </Tooltip>
       ) : (
-        <Button className="absolute right-0 bottom-0 h-11 min-w-24 px-5 text-sm" disabled={isCompleting} onClick={onNext} size="lg" type="button">
+        <span aria-hidden="true" />
+      )}
+
+      {!isLastPage ? (
+        <Button className="min-w-24 justify-self-end" disabled={isCompleting} onClick={onNext} size="lg" type="button">
           Next
         </Button>
-      )}
+      ) : <span aria-hidden="true" />}
     </div>
   );
 }
@@ -2171,27 +2181,26 @@ function OnboardingPanel({
   children,
   description,
   sectionRef,
-  stepLabel,
   title
 }: {
   children: ReactNode;
   description?: string;
   sectionRef?: RefObject<HTMLElement | null>;
-  stepLabel?: string;
   title: string;
 }) {
   const titleId = useId();
 
   return (
-    <section ref={sectionRef} aria-labelledby={titleId} className="grid h-full grid-rows-[auto_minmax(0,1fr)] gap-3 rounded-xl border border-border bg-card/55 p-4 shadow-sm">
-      <div className="grid gap-1">
-        {stepLabel ? <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{stepLabel}</p> : null}
-        <h2 id={titleId} className="text-base font-semibold">{title}</h2>
-      </div>
-      {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
-      <div className="grid content-start gap-3">
-        {children}
-      </div>
+    <section ref={sectionRef} aria-labelledby={titleId} className="h-full">
+      <Card className="h-full" size="sm">
+        <CardHeader>
+          <CardTitle aria-level={2} id={titleId} role="heading">{title}</CardTitle>
+          {description ? <CardDescription>{description}</CardDescription> : null}
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          {children}
+        </CardContent>
+      </Card>
     </section>
   );
 }
@@ -2213,7 +2222,12 @@ function StatusRow({
         <div className="text-sm font-medium">{label}</div>
         {value ? <div aria-live="polite" className="text-xs text-muted-foreground">{value}</div> : null}
       </div>
-      {action ?? (ready ? <CheckCircle2Icon className="size-4 text-[#34424A]" /> : <XCircleIcon className="size-4 text-muted-foreground" />)}
+      {action ?? (
+        <Badge variant={ready ? 'default' : 'destructive'}>
+          {ready ? <CheckCircle2Icon data-icon="inline-start" /> : <XCircleIcon data-icon="inline-start" />}
+          {ready ? 'Ready' : 'Needs attention'}
+        </Badge>
+      )}
     </div>
   );
 }
@@ -2226,10 +2240,12 @@ function AiProviderSetup({
   localAiSetupPhase,
   localLlmStatus,
   onCancelLocalDownload,
+  onCloudStatusChange,
   onDownloadLocalAi,
   onSelectProvider,
   onSignInWithChatGpt,
   selectedProvider,
+  showCloudProviderCards = false,
   status
 }: {
   isChatGptSigningIn: boolean;
@@ -2239,10 +2255,12 @@ function AiProviderSetup({
   localAiSetupPhase: 'requesting' | 'downloading' | 'idle';
   localLlmStatus: LocalLlmStatus | null;
   onCancelLocalDownload: () => void;
+  onCloudStatusChange?: () => Promise<void> | void;
   onDownloadLocalAi: (modelId?: string) => void;
   onSelectProvider: (provider: AiProvider) => void;
-  onSignInWithChatGpt: () => void;
+  onSignInWithChatGpt: CloudSignInHandler;
   selectedProvider: AiProvider;
+  showCloudProviderCards?: boolean;
   status: OnboardingStatus | null;
 }) {
   const ai = status?.ai;
@@ -2308,23 +2326,547 @@ function AiProviderSetup({
       </TabsContent>
       <TabsContent className="grid gap-3 text-left" value="cloud">
         {selectedProvider === 'cloud' ? (
-          <>
-          <p className="text-sm leading-5 text-muted-foreground">
-            Sends to a cloud model like ChatGPT. Faster and smarter than Local.
-          </p>
-          <CloudSignInControl
-            align="start"
-            info={cloudAiInfo}
-            isReady={isCloudAiReady}
-            isSigningIn={isChatGptSigningIn}
-            onSignIn={onSignInWithChatGpt}
-            setupLabel="Cloud AI setup"
-            statusPlacement="inline"
-          />
-          </>
+          showCloudProviderCards ? (
+            <CloudProviderOnboarding
+              compact
+              info={cloudAiInfo}
+              isChatGptReady={Boolean(status?.pi.chatGptConnected)}
+              isChatGptSigningIn={isChatGptSigningIn}
+              onCloudStatusChange={onCloudStatusChange}
+              onSignInWithChatGpt={onSignInWithChatGpt}
+              piStatus={status?.pi ?? null}
+            />
+          ) : (
+            <>
+              <p className="text-sm leading-5 text-muted-foreground">
+                Sends to a cloud model like ChatGPT. Faster and smarter than Local.
+              </p>
+              <CloudSignInControl
+                align="start"
+                info={cloudAiInfo}
+                isReady={isCloudAiReady}
+                isSigningIn={isChatGptSigningIn}
+                onSignIn={onSignInWithChatGpt}
+                setupLabel="Cloud AI setup"
+                statusPlacement="inline"
+              />
+            </>
+          )
         ) : null}
       </TabsContent>
     </Tabs>
+  );
+}
+
+function CloudProviderOnboarding({
+  compact = false,
+  info,
+  isChatGptReady,
+  isChatGptSigningIn,
+  onCloudStatusChange,
+  onSignInWithChatGpt,
+  piStatus
+}: {
+  compact?: boolean;
+  info?: ReactNode;
+  isChatGptReady: boolean;
+  isChatGptSigningIn: boolean;
+  onCloudStatusChange?: () => Promise<void> | void;
+  onSignInWithChatGpt: CloudSignInHandler;
+  piStatus: PiStatus | null;
+}) {
+  const [apiKey, setApiKey] = useState('');
+  const [apiKeyError, setApiKeyError] = useState('');
+  const [apiKeyProviderId, setApiKeyProviderId] = useState<CloudApiKeyProviderId | null>(null);
+  const [apiKeyProviderIdToRemove, setApiKeyProviderIdToRemove] = useState<CloudApiKeyProviderId | null>(null);
+  const [isRemovingApiKey, setIsRemovingApiKey] = useState(false);
+  const [isSavingApiKey, setIsSavingApiKey] = useState(false);
+  const [signInError, setSignInError] = useState('');
+  const [selectedCloudSetupMethod, setSelectedCloudSetupMethod] = useState<'api-key' | 'sign-in'>('sign-in');
+  const [selectedApiKeyProviderId, setSelectedApiKeyProviderId] = useState<CloudApiKeyProviderId>('openai');
+  const [selectedSubscriptionProviderId, setSelectedSubscriptionProviderId] = useState<CloudSubscriptionProviderId>('openai-codex');
+  const apiKeyProviderSelectId = useId();
+  const subscriptionProviderSelectId = useId();
+  const apiKeyProvider = cloudApiKeyProviders.find((provider) => provider.id === apiKeyProviderId) ?? null;
+  const apiKeyProviderToRemove = cloudApiKeyProviders.find((provider) => provider.id === apiKeyProviderIdToRemove) ?? null;
+  const apiKeyStatus = piStatus?.apiKeys;
+  const selectedApiKeyProvider = cloudApiKeyProviders.find((provider) => provider.id === selectedApiKeyProviderId)
+    ?? cloudApiKeyProviders[0];
+  const selectedApiKeyProviderStatus = apiKeyStatus?.providers.find((provider) => provider.id === selectedApiKeyProviderId);
+  const selectedApiKeyConfigured = Boolean(selectedApiKeyProviderStatus?.configured);
+  const selectedApiKeyActive = selectedApiKeyConfigured
+    && piStatus?.connected
+    && piStatus.selectedProvider === selectedApiKeyProviderId;
+  const selectedSubscriptionProvider = cloudSubscriptionProviders.find((provider) => provider.id === selectedSubscriptionProviderId)
+    ?? cloudSubscriptionProviders[0];
+  const selectedSubscriptionIsChatGpt = selectedSubscriptionProvider.id === 'openai-codex';
+  const selectedSubscriptionConnected = selectedSubscriptionIsChatGpt && isChatGptReady;
+  const selectedSubscriptionActive = selectedSubscriptionConnected
+    && piStatus?.connected
+    && piStatus.selectedProvider === selectedSubscriptionProvider.id;
+  const subscriptionProviderItems = cloudSubscriptionProviders.map((provider) => ({
+    label: `${provider.name} · ${provider.product}`,
+    value: provider.id
+  }));
+  const apiKeyProviderItems = cloudApiKeyProviders.map((provider) => ({
+    label: `${provider.name} · ${provider.product}`,
+    value: provider.id
+  }));
+
+  useEffect(() => {
+    const selectedProvider = piStatus?.selectedProvider;
+
+    if (cloudApiKeyProviders.some((provider) => provider.id === selectedProvider)) {
+      setSelectedApiKeyProviderId(selectedProvider as CloudApiKeyProviderId);
+      return;
+    }
+
+    const configuredProvider = apiKeyStatus?.providers.find((provider) => provider.configured);
+
+    if (configuredProvider) {
+      setSelectedApiKeyProviderId(configuredProvider.id);
+    }
+  }, [apiKeyStatus?.providers, piStatus?.selectedProvider]);
+
+  function closeApiKeyDialog() {
+    setApiKey('');
+    setApiKeyError('');
+    setApiKeyProviderId(null);
+    setIsSavingApiKey(false);
+  }
+
+  async function signInWithChatGpt() {
+    setSignInError('');
+    const result = await onSignInWithChatGpt();
+    setSignInError(getChatGptSignInError(result));
+  }
+
+  async function saveApiKey(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!apiKeyProviderId || isSavingApiKey) {
+      return;
+    }
+
+    setApiKeyError('');
+    setIsSavingApiKey(true);
+
+    try {
+      await getSettingsBridge()?.ai?.saveApiKey(apiKeyProviderId, apiKey);
+      await onCloudStatusChange?.();
+      closeApiKeyDialog();
+    } catch (error) {
+      setApiKeyError(error instanceof Error ? error.message : String(error));
+      setIsSavingApiKey(false);
+    }
+  }
+
+  async function useCloudModel(providerId: string, defaultModel: string) {
+    try {
+      await getSettingsBridge()?.ai?.saveModel(defaultModel);
+      await onCloudStatusChange?.();
+    } catch (error) {
+      console.error(`Failed to select ${providerId} API key:`, error);
+    }
+  }
+
+  async function removeSavedApiKey(providerId: CloudApiKeyProviderId) {
+    setIsRemovingApiKey(true);
+
+    try {
+      await getSettingsBridge()?.ai?.removeApiKey(providerId);
+      await onCloudStatusChange?.();
+      setApiKeyProviderIdToRemove(null);
+    } catch (error) {
+      console.error(`Failed to remove ${providerId} API key:`, error);
+    } finally {
+      setIsRemovingApiKey(false);
+    }
+  }
+
+  return (
+    <>
+      {compact ? (
+        <FieldGroup aria-label="Cloud AI setup" className="gap-3" role="group">
+          <ToggleGroup
+            aria-label="Cloud setup method"
+            className="grid w-full grid-cols-2"
+            onValueChange={(value) => {
+              const nextMethod = value.at(-1);
+              if (nextMethod) {
+                setSelectedCloudSetupMethod(nextMethod as 'api-key' | 'sign-in');
+              }
+            }}
+            spacing={2}
+            value={[selectedCloudSetupMethod]}
+            variant="outline"
+          >
+            <ToggleGroupItem className="w-full" value="sign-in">Sign in</ToggleGroupItem>
+            <ToggleGroupItem className="w-full" value="api-key">API key</ToggleGroupItem>
+          </ToggleGroup>
+
+          {selectedCloudSetupMethod === 'sign-in' ? (
+            <FieldGroup className="gap-3">
+              <Field>
+                <FieldLabel className="sr-only" htmlFor={subscriptionProviderSelectId}>Sign-in provider</FieldLabel>
+                <Select
+                  items={subscriptionProviderItems}
+                  name="subscription-provider"
+                  onValueChange={(value) => setSelectedSubscriptionProviderId(value as CloudSubscriptionProviderId)}
+                  value={selectedSubscriptionProviderId}
+                >
+                  <SelectTrigger aria-label="Sign-in provider" className="w-full" id={subscriptionProviderSelectId}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {subscriptionProviderItems.map((provider) => (
+                        <SelectItem key={provider.value} value={provider.value}>
+                          {provider.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field>
+                <Button
+                  className="w-full"
+                  disabled={!selectedSubscriptionProvider.available || isChatGptSigningIn || selectedSubscriptionActive}
+                  onClick={selectedSubscriptionConnected
+                    ? () => void useCloudModel('openai-codex', defaultLlmModel)
+                    : () => void signInWithChatGpt()}
+                  type="button"
+                >
+                  {isChatGptSigningIn ? <Spinner aria-hidden="true" data-icon="inline-start" /> : null}
+                  {isChatGptSigningIn
+                    ? 'Opening'
+                    : selectedSubscriptionActive
+                      ? 'ChatGPT is ready'
+                      : selectedSubscriptionConnected
+                        ? 'Use ChatGPT'
+                        : `Sign in with ${selectedSubscriptionProvider.product}`}
+                </Button>
+              </Field>
+              {signInError ? (
+                <Alert role="alert" variant="destructive">
+                  <CircleAlertIcon />
+                  <AlertTitle>{signInError}</AlertTitle>
+                </Alert>
+              ) : null}
+            </FieldGroup>
+          ) : (
+            <FieldGroup className="gap-3">
+              <Field data-disabled={!apiKeyStatus?.available || undefined}>
+                <FieldLabel className="sr-only" htmlFor={apiKeyProviderSelectId}>API provider</FieldLabel>
+                <Select
+                  disabled={!apiKeyStatus?.available}
+                  items={apiKeyProviderItems}
+                  name="api-key-provider"
+                  onValueChange={(value) => setSelectedApiKeyProviderId(value as CloudApiKeyProviderId)}
+                  value={selectedApiKeyProviderId}
+                >
+                  <SelectTrigger aria-label="API provider" className="w-full" id={apiKeyProviderSelectId}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {apiKeyProviderItems.map((provider) => (
+                        <SelectItem key={provider.value} value={provider.value}>
+                          {provider.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field>
+                <Button
+                  className="w-full"
+                  disabled={!apiKeyStatus?.available}
+                  onClick={selectedApiKeyConfigured && !selectedApiKeyActive
+                    ? () => void useCloudModel(
+                      selectedApiKeyProvider.id,
+                      selectedApiKeyProviderStatus?.defaultModel ?? ''
+                    )
+                    : () => setApiKeyProviderId(selectedApiKeyProvider.id)}
+                  type="button"
+                >
+                  {selectedApiKeyConfigured
+                    ? selectedApiKeyActive
+                      ? `Replace ${selectedApiKeyProvider.name} API key`
+                      : `Use ${selectedApiKeyProvider.name}`
+                    : `Add ${selectedApiKeyProvider.name} API key`}
+                </Button>
+              </Field>
+            </FieldGroup>
+          )}
+        </FieldGroup>
+      ) : (
+        <FieldGroup aria-label="Cloud AI setup" className="gap-4" role="group">
+          <FieldDescription>
+            Sends to a cloud model like ChatGPT. Faster and smarter than Local.
+          </FieldDescription>
+          <FieldDescription>
+            Connect a subscription first, or use an API key from a supported first-party provider.
+          </FieldDescription>
+          <Alert>
+            <ShieldCheckIcon />
+            <AlertTitle>Your credentials stay on this computer</AlertTitle>
+            <AlertDescription>
+              Sign-in opens in your browser. API keys are encrypted with the operating system and are never shown again.
+            </AlertDescription>
+          </Alert>
+
+          <FieldSet className="gap-3">
+            <FieldLegend variant="label">Sign in with a subscription</FieldLegend>
+            <FieldGroup className="gap-3">
+              <Field>
+                <FieldLabel htmlFor={subscriptionProviderSelectId}>Subscription provider</FieldLabel>
+                <Select
+                  items={subscriptionProviderItems}
+                  name="subscription-provider"
+                  onValueChange={(value) => setSelectedSubscriptionProviderId(value as CloudSubscriptionProviderId)}
+                  value={selectedSubscriptionProviderId}
+                >
+                  <SelectTrigger className="w-full" id={subscriptionProviderSelectId}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {subscriptionProviderItems.map((provider) => (
+                        <SelectItem key={provider.value} value={provider.value}>
+                          {provider.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                <FieldDescription>{selectedSubscriptionProvider.description}</FieldDescription>
+                <div className="flex items-center gap-2" aria-live="polite">
+                  {selectedSubscriptionActive ? (
+                    <Badge>
+                      <CheckCircle2Icon data-icon="inline-start" />
+                      Ready
+                    </Badge>
+                  ) : selectedSubscriptionConnected ? (
+                    <Badge variant="secondary">Connected</Badge>
+                  ) : selectedSubscriptionProvider.available ? (
+                    <FieldDescription>
+                      {isChatGptSigningIn ? 'Opening ChatGPT sign in...' : 'Not signed in'}
+                    </FieldDescription>
+                  ) : (
+                    <Badge variant="secondary">Coming next</Badge>
+                  )}
+                  {selectedSubscriptionIsChatGpt ? info : null}
+                </div>
+              </Field>
+              <Field>
+                <Button
+                  className="w-full"
+                  disabled={!selectedSubscriptionProvider.available || isChatGptSigningIn || selectedSubscriptionActive}
+                  onClick={selectedSubscriptionConnected
+                    ? () => void useCloudModel('openai-codex', defaultLlmModel)
+                    : () => void signInWithChatGpt()}
+                  type="button"
+                >
+                  {isChatGptSigningIn ? <Spinner aria-hidden="true" data-icon="inline-start" /> : null}
+                  {isChatGptSigningIn
+                    ? 'Opening'
+                    : selectedSubscriptionActive
+                      ? 'ChatGPT is ready'
+                      : selectedSubscriptionConnected
+                        ? 'Use ChatGPT'
+                        : `Sign in with ${selectedSubscriptionProvider.product}`}
+                </Button>
+              </Field>
+              {signInError ? (
+                <Alert role="alert" variant="destructive">
+                  <CircleAlertIcon />
+                  <AlertTitle>{signInError}</AlertTitle>
+                </Alert>
+              ) : null}
+            </FieldGroup>
+          </FieldSet>
+
+          <Separator />
+
+          <FieldSet className="gap-3">
+            <FieldLegend variant="label">Use an API key</FieldLegend>
+            <FieldDescription>
+              API usage is billed separately by the provider. GitHub Copilot is not included because it does not use a first-party model API key.
+            </FieldDescription>
+            <FieldGroup className="gap-3">
+              <Field data-disabled={!apiKeyStatus?.available || undefined}>
+                <FieldLabel htmlFor={apiKeyProviderSelectId}>API provider</FieldLabel>
+                <Select
+                  disabled={!apiKeyStatus?.available}
+                  items={apiKeyProviderItems}
+                  name="api-key-provider"
+                  onValueChange={(value) => setSelectedApiKeyProviderId(value as CloudApiKeyProviderId)}
+                  value={selectedApiKeyProviderId}
+                >
+                  <SelectTrigger className="w-full" id={apiKeyProviderSelectId}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {apiKeyProviderItems.map((provider) => (
+                        <SelectItem key={provider.value} value={provider.value}>
+                          {provider.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                <div className="flex items-center gap-2" aria-live="polite">
+                  {selectedApiKeyActive ? (
+                    <Badge>In use</Badge>
+                  ) : selectedApiKeyConfigured ? (
+                    <Badge variant="secondary">Saved</Badge>
+                  ) : null}
+                  <FieldDescription>
+                    {selectedApiKeyActive
+                      ? 'This API key is in use.'
+                      : selectedApiKeyConfigured
+                        ? 'API key saved securely.'
+                        : 'No API key saved.'}
+                  </FieldDescription>
+                </div>
+              </Field>
+              <Field>
+                <div
+                  aria-label={`${selectedApiKeyProvider.name} ${selectedApiKeyProvider.product} API key controls`}
+                  className="flex flex-wrap gap-2"
+                  role="group"
+                >
+                  {selectedApiKeyConfigured && !selectedApiKeyActive ? (
+                    <Button
+                      onClick={() => void useCloudModel(
+                        selectedApiKeyProvider.id,
+                        selectedApiKeyProviderStatus?.defaultModel ?? ''
+                      )}
+                      type="button"
+                    >
+                      Use {selectedApiKeyProvider.name}
+                    </Button>
+                  ) : null}
+                  <Button
+                    className={cn(!selectedApiKeyConfigured && 'w-full')}
+                    disabled={!apiKeyStatus?.available}
+                    onClick={() => setApiKeyProviderId(selectedApiKeyProvider.id)}
+                    type="button"
+                    variant={selectedApiKeyConfigured ? 'outline' : 'default'}
+                  >
+                    {selectedApiKeyConfigured
+                      ? `Replace ${selectedApiKeyProvider.name} API key`
+                      : `Add ${selectedApiKeyProvider.name} API key`}
+                  </Button>
+                  {selectedApiKeyConfigured ? (
+                    <Button
+                      onClick={() => setApiKeyProviderIdToRemove(selectedApiKeyProvider.id)}
+                      type="button"
+                      variant="ghost"
+                    >
+                      Remove
+                    </Button>
+                  ) : null}
+                </div>
+              </Field>
+            </FieldGroup>
+            {!apiKeyStatus?.available && apiKeyStatus?.message ? (
+              <FieldDescription role="alert">{apiKeyStatus.message}</FieldDescription>
+            ) : null}
+          </FieldSet>
+        </FieldGroup>
+      )}
+
+      <Dialog
+        open={Boolean(apiKeyProvider)}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeApiKeyDialog();
+          }
+        }}
+      >
+        <DialogContent>
+          <form className="flex flex-col gap-6" onSubmit={(event) => void saveApiKey(event)}>
+            <DialogHeader>
+              <DialogTitle>{apiKeyProvider ? `${apiKeyProvider.name} API key` : 'API key'}</DialogTitle>
+              {!compact ? (
+                <DialogDescription>
+                  The key is encrypted using this computer’s operating-system credential storage. Caul will not display it after saving.
+                </DialogDescription>
+              ) : null}
+            </DialogHeader>
+            <FieldGroup>
+              <Field data-invalid={Boolean(apiKeyError) || undefined}>
+                <FieldLabel htmlFor="cloud-api-key">API key</FieldLabel>
+                <Input
+                  aria-invalid={Boolean(apiKeyError) || undefined}
+                  autoComplete="off"
+                  autoFocus
+                  id="cloud-api-key"
+                  onChange={(event) => setApiKey(event.target.value)}
+                  placeholder="Paste API key"
+                  required
+                  spellCheck={false}
+                  type="password"
+                  value={apiKey}
+                />
+                {!compact ? (
+                  <FieldDescription>The key goes directly to the selected provider when Caul makes a request.</FieldDescription>
+                ) : null}
+                <FieldError>{apiKeyError}</FieldError>
+              </Field>
+            </FieldGroup>
+            <DialogFooter>
+              <DialogClose render={<Button disabled={isSavingApiKey} type="button" variant="outline" />}>
+                Cancel
+              </DialogClose>
+              <Button disabled={isSavingApiKey || !apiKey.trim()} type="submit">
+                {isSavingApiKey ? <Spinner aria-hidden="true" data-icon="inline-start" /> : null}
+                {isSavingApiKey ? 'Saving' : 'Save API key'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(apiKeyProviderToRemove)}
+        onOpenChange={(open) => {
+          if (!open && !isRemovingApiKey) {
+            setApiKeyProviderIdToRemove(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {apiKeyProviderToRemove ? `Remove ${apiKeyProviderToRemove.name} API key?` : 'Remove API key?'}
+            </DialogTitle>
+            <DialogDescription>
+              Caul will permanently delete the encrypted key from this computer. This does not revoke or delete the key in your provider account.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose render={<Button disabled={isRemovingApiKey} type="button" variant="outline" />}>
+              Cancel
+            </DialogClose>
+            <Button
+              disabled={isRemovingApiKey || !apiKeyProviderIdToRemove}
+              onClick={() => apiKeyProviderIdToRemove && void removeSavedApiKey(apiKeyProviderIdToRemove)}
+              type="button"
+              variant="destructive"
+            >
+              {isRemovingApiKey ? <Spinner aria-hidden="true" data-icon="inline-start" /> : null}
+              {isRemovingApiKey ? 'Removing' : 'Remove key'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -2578,10 +3120,11 @@ function CloudSignInControl({
   info?: ReactNode;
   isReady: boolean;
   isSigningIn: boolean;
-  onSignIn: () => void;
+  onSignIn: CloudSignInHandler;
   setupLabel?: string;
   statusPlacement?: 'below' | 'inline';
 }) {
+  const [signInError, setSignInError] = useState('');
   const alignmentClassName = align === 'start' ? 'justify-items-start text-left' : 'justify-items-center text-center';
   const statusClassName = align === 'start'
     ? 'max-w-sm text-sm leading-5 text-muted-foreground'
@@ -2593,6 +3136,12 @@ function CloudSignInControl({
   const inlineStatusClassName = align === 'start'
     ? 'min-w-0 text-sm leading-5 text-muted-foreground'
     : 'min-w-0 text-center text-sm leading-5 text-muted-foreground';
+
+  async function signIn() {
+    setSignInError('');
+    const result = await onSignIn();
+    setSignInError(getChatGptSignInError(result));
+  }
 
   if (isReady) {
     return (
@@ -2607,8 +3156,8 @@ function CloudSignInControl({
   return (
     <div aria-label={setupLabel} className={rootClassName} role={setupLabel ? 'group' : undefined}>
       <div className={actionClassName}>
-        <Button disabled={disabled || isSigningIn} onClick={onSignIn} type="button">
-          {isSigningIn ? <LoaderCircleIcon className="mr-1.5 size-3.5 animate-spin" /> : null}
+        <Button disabled={disabled || isSigningIn} onClick={() => void signIn()} type="button">
+          {isSigningIn ? <Spinner aria-hidden="true" data-icon="inline-start" /> : null}
           {isSigningIn ? 'Opening' : 'Sign in with ChatGPT'}
         </Button>
         {info}
@@ -2616,6 +3165,12 @@ function CloudSignInControl({
       <p aria-live="polite" className={statusPlacement === 'inline' ? inlineStatusClassName : statusClassName}>
         {isSigningIn ? 'Opening ChatGPT sign in...' : 'Not signed in'}
       </p>
+      {signInError ? (
+        <Alert className="max-w-sm" role="alert" variant="destructive">
+          <CircleAlertIcon />
+          <AlertTitle>{signInError}</AlertTitle>
+        </Alert>
+      ) : null}
     </div>
   );
 }
@@ -2714,21 +3269,14 @@ function EmbeddedInfoTooltip({
 }
 
 function RecommendedMarker({
-  className,
-  infoIconClassName,
   selected = false
 }: {
-  className?: string;
-  infoIconClassName?: string;
   selected?: boolean;
 }) {
   return (
-    <span
-      aria-hidden="true"
-      className={className ?? (selected ? selectedRecommendedMarkerClassName : recommendedMarkerClassName)}
-    >
-      <StarIcon aria-hidden="true" className={infoIconClassName ?? 'size-3.5'} fill="currentColor" />
-    </span>
+    <Badge aria-label={recommendedPillLabel} className="size-5 p-0" variant={selected ? 'default' : 'secondary'}>
+      <StarIcon aria-hidden="true" fill="currentColor" />
+    </Badge>
   );
 }
 
@@ -2976,7 +3524,7 @@ function OnboardingTranscriptionStatus({ status }: { status: OnboardingStatus | 
   if (!status) {
     return (
       <StatusRow
-        action={<LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />}
+        action={<Spinner />}
         label="Checking transcription setup"
         ready={false}
       />
@@ -3017,7 +3565,7 @@ function OnboardingTranscriptionStatus({ status }: { status: OnboardingStatus | 
   if (status.parakeet.status === 'installed') {
     return (
       <StatusRow
-        action={<LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />}
+        action={<Spinner />}
         label="Finishing transcription setup"
         ready={false}
       />
@@ -3027,8 +3575,8 @@ function OnboardingTranscriptionStatus({ status }: { status: OnboardingStatus | 
   return (
     <StatusRow
       action={canAutoDownload
-        ? <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />
-        : <StatusPill ready={false} size="action">Not ready</StatusPill>}
+        ? <Spinner />
+        : <Badge className="h-8 px-2.5 text-sm" variant="destructive">Not ready</Badge>}
       label={canAutoDownload ? 'Preparing local transcription' : 'Transcription setup needs attention'}
       ready={false}
     />
@@ -3218,13 +3766,13 @@ function ReadySetupPill({
 }) {
   return (
     <div className="inline-flex shrink-0 items-center gap-1.5">
-      <StatusPill ready size={size}>
+      <Badge className={cn(size === 'action' && 'h-8 px-2.5 text-sm')} variant="default">
         <span className="inline-flex items-center gap-1">
-          <CheckCircle2Icon className="size-3.5" />
+          <CheckCircle2Icon data-icon="inline-start" />
           {label}
           {info}
         </span>
-      </StatusPill>
+      </Badge>
     </div>
   );
 }
@@ -3236,7 +3784,7 @@ function UnavailableSetupPill({
 }) {
   return (
     <div className="inline-flex shrink-0 items-center gap-1.5">
-      <StatusPill ready={false}>Unavailable</StatusPill>
+      <Badge variant="destructive">Unavailable</Badge>
       {info}
     </div>
   );
@@ -3317,26 +3865,6 @@ function getLocalAiDownloadProgressLabel(
   };
 }
 
-function StatusPill({
-  children,
-  ready,
-  size = 'default'
-}: {
-  children: ReactNode;
-  ready: boolean;
-  size?: 'action' | 'default';
-}) {
-  const sizeClassName = size === 'action'
-    ? 'inline-flex h-8 items-center rounded-lg px-2.5 text-sm'
-    : 'rounded-full px-2 py-1 text-xs';
-
-  return (
-    <span className={`border font-medium ${sizeClassName} ${ready ? 'border-primary bg-primary text-primary-foreground' : 'border-destructive/35 text-destructive'}`}>
-      {children}
-    </span>
-  );
-}
-
 function getOnboardingPermissionRows(permissions: PermissionItem[]) {
   return permissions;
 }
@@ -3359,20 +3887,15 @@ function PermissionSetupRow({
   const ready = permission.status === 'granted' || permission.status === 'unsupported';
   const statusLabel = getPermissionStatusLabel(permission.status);
   const macosPermissionName = getMacosPermissionName(permission.id);
-  const statusClassName = issuePanel
-    ? 'rounded-full border px-2.5 py-1 text-sm font-medium'
-    : 'rounded-full border px-2 py-1 text-xs font-medium';
   const permissionButtonSize = actionSize ?? (issuePanel ? 'default' : 'sm');
 
   return (
-    <div className={`${showDivider ? 'border-b border-border/70 last:border-b-0' : ''} text-sm`.trim()}>
+    <div className={cn('text-sm', showDivider && 'border-b border-border/70 last:border-b-0')}>
       <div className="grid min-h-10 grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
         <div className="flex min-w-0 items-center gap-1.5">
           <h3 className="truncate text-sm font-medium">{permission.label}</h3>
           {contextLabel ? (
-            <span className="rounded-full border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
-              {contextLabel}
-            </span>
+            <Badge variant="outline">{contextLabel}</Badge>
           ) : null}
           <Tooltip>
             <TooltipTrigger
@@ -3384,7 +3907,7 @@ function PermissionSetupRow({
                 variant="ghost"
               />}
             >
-              <InfoIcon className="size-3.5" />
+              <InfoIcon />
             </TooltipTrigger>
             <TooltipContent>
               <span className="block max-w-72">
@@ -3394,9 +3917,9 @@ function PermissionSetupRow({
           </Tooltip>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className={`${statusClassName} ${ready ? 'border-[#34424A]/35 text-[#34424A] dark:text-[#8EA6AD]' : 'border-destructive/35 text-destructive'}`}>
+          <Badge className={cn(issuePanel && 'h-7 px-2.5 text-sm')} variant={ready ? 'secondary' : 'destructive'}>
             {statusLabel}
-          </span>
+          </Badge>
           {!ready ? (
             <Button
               aria-label={`Grant ${permission.label}`}
@@ -4225,7 +4748,7 @@ function HomePage({
   onSelectTranscriptionModel: (modelId: LocalTranscriptionModelId) => void;
   onSetListenToMicrophone: (listen: boolean) => void;
   onSetListenToSystemAudio: (listen: boolean) => void;
-  onSignInWithChatGpt: () => void;
+  onSignInWithChatGpt: CloudSignInHandler;
   onboardingStatus: OnboardingStatus | null;
   outputRef: RefObject<HTMLDivElement | null>;
   promptTemplates: PromptTemplate[];
@@ -4771,7 +5294,7 @@ function PanelIssueRecovery({
   onRequestPermission: (permission: PermissionItem['id']) => void;
   onSelectAiProvider: (provider: AiProvider) => void;
   onSelectTranscriptionModel: (modelId: LocalTranscriptionModelId) => void;
-  onSignInWithChatGpt: () => void;
+  onSignInWithChatGpt: CloudSignInHandler;
   onboardingStatus: OnboardingStatus | null;
   recommendedLocalAiModelReady: boolean;
   selectedAiProvider: AiProvider;
@@ -5689,10 +6212,7 @@ function AiResponseSection({
       {!isCollapsed ? (
       <div className={layout.aiSectionBody}>
         {isWaiting && !hasResponse ? (
-          <LoaderCircleIcon
-            aria-label="Waiting for response"
-            className="size-4 animate-spin text-muted-foreground"
-          />
+          <Spinner aria-label="Waiting for response" />
         ) : (
           <ReactMarkdown>{response}</ReactMarkdown>
         )}
@@ -7610,6 +8130,10 @@ function SettingsPage({
   const isRestartingForUpdate = automaticallyInstallsUpdates
     && (isInstallingUpdate || isUpdateInstalling(updateStatus));
   const isCloudAiReady = Boolean(onboardingStatus?.pi.connected);
+  const availableCloudLlmModels = getAvailableCloudLlmModels(onboardingStatus?.pi ?? null);
+  const selectedCloudLlmModel = availableCloudLlmModels.some((model) => model.value === llmModel)
+    ? llmModel
+    : availableCloudLlmModels[0]?.value;
   const recommendedLocalAiModel = onboardingStatus?.ai.recommended === 'local' ? onboardingStatus.ai.recommendedModel : null;
   const recommendedLocalAiModelReady = Boolean(
     localLlmStatus?.runtime.installed
@@ -7759,6 +8283,10 @@ function SettingsPage({
     setSelectedAiProviderState(nextStatus.ai?.provider ?? 'local');
     setLocalLlmStatus(getCaulLocalLlmStatus(nextStatus));
 
+    if (nextStatus.pi.selectedModel && llmModelValues.has(nextStatus.pi.selectedModel)) {
+      setLlmModel(nextStatus.pi.selectedModel);
+    }
+
     if (!hasInitialisedTranscriptionModelRef.current) {
       hasInitialisedTranscriptionModelRef.current = true;
       setSelectedTranscriptionModelId(getInitialTranscriptionModelId(nextStatus));
@@ -7862,13 +8390,10 @@ function SettingsPage({
     }
   }
 
-  async function signInWithChatGptFromSettings() {
+  async function signInWithChatGptFromSettings(): Promise<CloudSignInResult> {
     setIsChatGptSigningIn(true);
     try {
-      await getSettingsBridge()?.ai?.openChatGptLogin?.();
-      await refreshOnboardingStatus();
-    } catch (error) {
-      console.error('Failed to open ChatGPT sign in:', error);
+      return await requestChatGptSignIn(refreshOnboardingStatus);
     } finally {
       setIsChatGptSigningIn(false);
     }
@@ -8107,7 +8632,7 @@ function SettingsPage({
                             type="button"
                             variant="outline"
                           >
-                            {updateStatus?.checking ? <LoaderCircleIcon className="animate-spin" /> : <DownloadIcon />}
+                            {updateStatus?.checking ? <Spinner aria-hidden="true" data-icon="inline-start" /> : <DownloadIcon data-icon="inline-start" />}
                             Check now
                           </TooltipButton>
                         ) : !hasDownloadedUpdate && !isRestartingForUpdate ? (
@@ -8118,7 +8643,7 @@ function SettingsPage({
                             tooltip="Download this update"
                             type="button"
                           >
-                            {updateStatus.downloading ? <LoaderCircleIcon className="animate-spin" /> : <DownloadIcon />}
+                            {updateStatus.downloading ? <Spinner aria-hidden="true" data-icon="inline-start" /> : <DownloadIcon data-icon="inline-start" />}
                             Download
                           </TooltipButton>
                         ) : automaticallyInstallsUpdates ? (
@@ -8129,7 +8654,7 @@ function SettingsPage({
                             tooltip="Restart Caul and install the update"
                             type="button"
                           >
-                            {isRestartingForUpdate ? <LoaderCircleIcon className="animate-spin" /> : null}
+                            {isRestartingForUpdate ? <Spinner aria-hidden="true" data-icon="inline-start" /> : null}
                             {isRestartingForUpdate ? 'Restarting...' : 'Restart to update'}
                           </TooltipButton>
                         ) : (
@@ -8204,7 +8729,7 @@ function SettingsPage({
                           type="button"
                           variant="outline"
                         >
-                          {isRefreshingCatalogue ? <LoaderCircleIcon className="animate-spin" /> : <DownloadIcon />}
+                          {isRefreshingCatalogue ? <Spinner aria-hidden="true" data-icon="inline-start" /> : <DownloadIcon data-icon="inline-start" />}
                           Refresh catalogue
                         </TooltipButton>
                       </div>
@@ -8409,26 +8934,24 @@ function SettingsPage({
                       <TabsContent className="max-w-2xl text-sm" value="cloud">
                         {selectedAiProvider === 'cloud' ? (
                           <FieldGroup>
-                          <p className={layout.settingsDescription}>Sends to a cloud model like ChatGPT. Faster and smarter than Local.</p>
-                          <CloudSignInControl
-                            align="start"
-                            disabled={isListening || isBusy}
+                          <CloudProviderOnboarding
                             info={<CloudAiInfoButton llmModel={llmModel} llmReasoning={llmReasoning} />}
-                            isReady={isCloudAiReady}
-                            isSigningIn={isChatGptSigningIn}
-                            onSignIn={() => void signInWithChatGptFromSettings()}
-                            statusPlacement="inline"
+                            isChatGptReady={Boolean(onboardingStatus?.pi.chatGptConnected)}
+                            isChatGptSigningIn={isChatGptSigningIn}
+                            onCloudStatusChange={refreshOnboardingStatus}
+                            onSignInWithChatGpt={signInWithChatGptFromSettings}
+                            piStatus={onboardingStatus?.pi ?? null}
                           />
-                          {isCloudAiReady ? (
+                          {isCloudAiReady && selectedCloudLlmModel ? (
                             <>
                               <FieldGroup className={layout.settingsInlineGroup}>
                                 <Field className="w-auto">
                                   <FieldLabel htmlFor="llm-model">Model</FieldLabel>
                                   <Select
                                     disabled={isListening || isBusy}
-                                    items={llmModels}
+                                    items={availableCloudLlmModels}
                                     name="llm-model"
-                                    value={llmModel}
+                                    value={selectedCloudLlmModel}
                                     onValueChange={(value) => setLlmModel(value as LlmModel)}
                                   >
                                     <div>
@@ -8438,7 +8961,7 @@ function SettingsPage({
                                     </div>
                                     <SelectContent>
                                       <SelectGroup>
-                                        {llmModels.map((model) => (
+                                        {availableCloudLlmModels.map((model) => (
                                           <SelectItem key={model.value} value={model.value}>
                                             {model.label}
                                           </SelectItem>
