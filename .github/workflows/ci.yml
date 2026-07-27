@@ -110,6 +110,7 @@ jobs:
         run: |
           $scripts = @(
             './scripts/test-windows-upgrade.ps1',
+            './scripts/verify-public-windows.ps1',
             './scripts/write-windows-defender-evidence.ps1'
           )
           foreach ($script in $scripts) {

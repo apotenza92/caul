@@ -906,51 +906,10 @@ jobs:
         env:
           CAUL_RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          $variants = @(
-            @{ Channel = 'beta'; Prefix = 'Caul-Beta'; Product = 'Caul Beta' }
-          )
-          if ($env:CAUL_RELEASE_CHANNEL -eq 'stable') {
-            $variants = @(
-              @{ Channel = 'stable'; Prefix = 'Caul'; Product = 'Caul' }
-            ) + $variants
-          }
-          try {
-            foreach ($variant in $variants) {
-              $variant.InstallRoot = Join-Path $env:RUNNER_TEMP "public-$($variant.Channel)-install"
-              $installer = Join-Path $PWD "public-release/$($variant.Prefix)-windows-${{ matrix.arch }}-setup.exe"
-              $installStartedAt = Get-Date
-              $process = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$($variant.InstallRoot)") -Wait -PassThru
-              if ($process.ExitCode -ne 0) { throw "$($variant.Product) public installation failed: $($process.ExitCode)" }
-              $expectedExecutable = Join-Path $variant.InstallRoot "$($variant.Product).exe"
-              if (-not (Test-Path $expectedExecutable)) {
-                & ./scripts/write-windows-defender-evidence.ps1 `
-                  -Since $installStartedAt `
-                  -InstallRoot $variant.InstallRoot
-                throw "$($variant.Product) public installation is missing $expectedExecutable."
-              }
-              node scripts/verify-native-package.mjs `
-                --platform windows `
-                --arch '${{ matrix.arch }}' `
-                --channel $variant.Channel `
-                --release-dir public-release `
-                --unpacked-dir $variant.InstallRoot
-            }
-            if ($env:CAUL_RELEASE_CHANNEL -eq 'stable'
-              -and (-not (Test-Path (Join-Path $variants[0].InstallRoot 'Caul.exe'))
-                -or -not (Test-Path (Join-Path $variants[1].InstallRoot 'Caul Beta.exe')))) {
-              throw 'Stable and beta public Windows applications did not coexist.'
-            }
-          }
-          finally {
-            foreach ($variant in $variants) {
-              if (-not $variant.ContainsKey('InstallRoot')) { continue }
-              $uninstaller = Get-ChildItem $variant.InstallRoot -File -Filter 'Uninstall*.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
-              if ($uninstaller) {
-                Start-Process -FilePath $uninstaller.FullName -ArgumentList '/S' -Wait | Out-Null
-              }
-            }
-          }
+          ./scripts/verify-public-windows.ps1 `
+            -ReleaseChannel $env:CAUL_RELEASE_CHANNEL `
+            -Arch '${{ matrix.arch }}' `
+            -ReleaseDirectory (Join-Path $PWD 'public-release')
 
   verify-public-linux:
     name: Verify public Linux packages (${{ matrix.arch }})

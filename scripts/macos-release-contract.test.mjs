@@ -372,9 +372,9 @@ describe('macOS release contract', () => {
     expect(source).toContain('Windows N-1 upgrade');
     expect(source).toContain('Linux N-1 upgrade');
     expect(source).toContain('./scripts/test-windows-upgrade.ps1');
+    expect(source).toContain('./scripts/verify-public-windows.ps1');
     expect(source).toContain('function Resolve-InstalledFile');
     expect(source).toContain('Get-ChildItem -Path $Root -Recurse');
-    expect(source).toContain('./scripts/write-windows-defender-evidence.ps1');
     expect(source).toContain('executable remains after uninstall');
     expect(source).not.toContain('$LASTEXITCODE');
     expect(source).toContain('brew upgrade --cask apotenza92/tap/caul apotenza92/tap/caul@beta');
@@ -397,6 +397,15 @@ describe('macOS release contract', () => {
     expect(defenderEvidence).toContain('Microsoft-Windows-Windows Defender/Operational');
     expect(defenderEvidence).toContain('$_.Id -in 1116, 1117');
     expect(defenderEvidence).not.toMatch(/Add-MpPreference|Set-MpPreference/);
+    const publicWindowsVerifier = readFileSync(
+      path.join(repositoryRoot, 'scripts', 'verify-public-windows.ps1'),
+      'utf8'
+    );
+    expect(publicWindowsVerifier).toContain('./scripts/write-windows-defender-evidence.ps1');
+    expect(publicWindowsVerifier).toContain('Stable and beta public Windows applications did not coexist');
+    expect(publicWindowsVerifier).toContain('$LASTEXITCODE');
+    const windowsCiSource = readFileSync(path.join(repositoryRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
+    expect(windowsCiSource).toContain("'./scripts/verify-public-windows.ps1'");
     const windowsUpgrade = readFileSync(
       path.join(repositoryRoot, 'scripts', 'test-windows-upgrade.ps1'),
       'utf8'

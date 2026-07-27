@@ -2,6 +2,10 @@
 
 All notable Caul changes are recorded here.
 
+## [0.1.42]
+
+- Moved public Windows installation verification into a syntax-checked PowerShell script so malformed workflow-embedded expressions cannot bypass preflight validation.
+
 ## [0.1.41]
 
 - Made macOS updater relaunch verification recognise the canonical `/private/var` process path used by macOS when the test app is installed beneath a temporary `/var` path.
