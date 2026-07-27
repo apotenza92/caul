@@ -2,6 +2,11 @@
 
 All notable Caul changes are recorded here.
 
+## [0.1.40]
+
+- Installed repository dependencies before independent public macOS and Homebrew verification.
+- Corrected public Windows checksum verification so nested PowerShell pipelines retain the package filename being authenticated.
+
 ## [0.1.39]
 
 - Simplified onboarding into a fixed 560 × 560 top-aligned flow using the repository’s shadcn/Base UI controls, with clear Local and Cloud choices and no scrolling across supported AI setup combinations.

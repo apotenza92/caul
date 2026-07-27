@@ -893,11 +893,12 @@ jobs:
             --dir public-release
           $manifest = Get-Content public-release/SHA256SUMS
           Get-ChildItem public-release -File | Where-Object Name -ne 'SHA256SUMS' | ForEach-Object {
-            $line = $manifest | Where-Object { $_ -match "  $([regex]::Escape($_.Name))$" }
-            if (-not $line) { throw "Missing public checksum for $($_.Name)" }
+            $assetName = $_.Name
+            $line = $manifest | Where-Object { $_ -match "  $([regex]::Escape($assetName))$" }
+            if (-not $line) { throw "Missing public checksum for $assetName" }
             $expected = ($line -split '\s+')[0].ToLowerInvariant()
             $actual = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-            if ($actual -ne $expected) { throw "Public checksum mismatch for $($_.Name)" }
+            if ($actual -ne $expected) { throw "Public checksum mismatch for $assetName" }
           }
 
       - name: Install, inspect and launch both public variants
@@ -1065,6 +1066,15 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.tag }}
           persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install verification dependencies
+        run: npm ci
 
       - name: Extract version from tag
         id: version

@@ -332,6 +332,10 @@ describe('macOS release contract', () => {
     expect(release.jobs['publish-release'].steps.at(-1).run).toContain('gh release create');
     expect(release.jobs['publish-release'].steps.at(-1).run).toContain('--draft');
     expect(release.jobs['publish-release'].steps.at(-1).run).toContain('sha256sum --check SHA256SUMS');
+    const stableHomebrewSteps = release.jobs['prepare-homebrew-publication'].steps;
+    expect(stableHomebrewSteps.some((step) => step.name === 'Setup Node.js')).toBe(true);
+    expect(stableHomebrewSteps.some((step) => step.name === 'Install verification dependencies'
+      && step.run === 'npm ci')).toBe(true);
     expect(release.jobs['publish-release'].needs).toEqual(expect.arrayContaining([
       'test-macos-updater',
       'test-windows-upgrade',
@@ -375,6 +379,9 @@ describe('macOS release contract', () => {
     expect(source).not.toContain('$LASTEXITCODE');
     expect(source).toContain('brew upgrade --cask apotenza92/tap/caul apotenza92/tap/caul@beta');
     expect(source).toContain('Independently verify public macOS packages');
+    expect(source).toContain('$assetName = $_.Name');
+    expect(source).toContain('[regex]::Escape($assetName)');
+    expect(source).not.toContain('[regex]::Escape($_.Name)');
     const nativeVerifier = readFileSync(path.join(repositoryRoot, 'scripts', 'verify-native-package.mjs'), 'utf8');
     expect(nativeVerifier).toContain('APPIMAGE_EXTRACT_AND_RUN');
     expect(nativeVerifier).toContain("spawnSync('dpkg-deb'");
