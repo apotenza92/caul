@@ -1,7 +1,7 @@
 import { _electron as electron } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
@@ -63,10 +63,21 @@ function corrupt(buffer) {
 }
 
 function executableProcessIds(executablePath) {
-  const prefix = `${executablePath} `;
+  const executablePaths = new Set([executablePath]);
+  try {
+    executablePaths.add(realpathSync(executablePath));
+  } catch {
+    // The updater briefly replaces the bundle while this process list is polled.
+  }
+  for (const candidate of [...executablePaths]) {
+    if (candidate.startsWith('/var/')) executablePaths.add(`/private${candidate}`);
+    if (candidate.startsWith('/private/var/')) executablePaths.add(candidate.slice('/private'.length));
+  }
   return run('ps', ['-axo', 'pid=,command=']).split(/\r?\n/).flatMap((line) => {
     const match = /^\s*(\d+)\s+(.+?)\s*$/.exec(line);
-    return match && (match[2] === executablePath || match[2].startsWith(prefix))
+    return match && [...executablePaths].some((candidate) => (
+      match[2] === candidate || match[2].startsWith(`${candidate} `)
+    ))
       ? [Number(match[1])]
       : [];
   });

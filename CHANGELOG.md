@@ -2,6 +2,10 @@
 
 All notable Caul changes are recorded here.
 
+## [0.1.41]
+
+- Made macOS updater relaunch verification recognise the canonical `/private/var` process path used by macOS when the test app is installed beneath a temporary `/var` path.
+
 ## [0.1.40]
 
 - Installed repository dependencies before independent public macOS and Homebrew verification.

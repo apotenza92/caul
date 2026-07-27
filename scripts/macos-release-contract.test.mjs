@@ -453,6 +453,9 @@ describe('macOS release contract', () => {
     const updaterHarness = readFileSync(path.join(repositoryRoot, 'scripts', 'test-macos-update.mjs'), 'utf8');
     expect(updaterHarness).toContain('waitForRelaunch(executable, originalPid)');
     expect(updaterHarness).toContain('await stopRelaunch(relaunchedPid)');
+    expect(updaterHarness).toContain("candidate.startsWith('/var/')");
+    expect(updaterHarness).toContain("candidate.startsWith('/private/var/')");
+    expect(updaterHarness).toContain('realpathSync(executablePath)');
     expect(updaterHarness).toContain("option('--trusted-candidate-zip')");
     expect(updaterHarness).toContain("option('--candidate-tag')");
     expect(updaterHarness).toContain("channel === 'beta' ? '/beta-mac.yml' : '/latest-mac.yml'");
