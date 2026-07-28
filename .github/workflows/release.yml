@@ -1313,8 +1313,8 @@ jobs:
           grep -Fx "release-tag=$RELEASE_TAG" publication/PUBLICATION.txt
           grep -Fx "release-commit=$RELEASE_COMMIT" publication/PUBLICATION.txt
           version="${RELEASE_TAG#v}"
-          test "$(sed -n 's/^[[:space:]]*version \"\\([^\"]*\\)\".*/\\1/p' publication/Casks/caul.rb)" = "$version"
-          test "$(sed -n 's/^[[:space:]]*version \"\\([^\"]*\\)\".*/\\1/p' 'publication/Casks/caul@beta.rb')" = "$version"
+          test "$(sed -n 's/^[[:space:]]*version "\([^"]*\)".*/\1/p' publication/Casks/caul.rb)" = "$version"
+          test "$(sed -n 's/^[[:space:]]*version "\([^"]*\)".*/\1/p' 'publication/Casks/caul@beta.rb')" = "$version"
           cp publication/Casks/caul.rb 'publication/Casks/caul@beta.rb' homebrew-tap/Casks/
           cd homebrew-tap
           git add -- Casks/caul.rb 'Casks/caul@beta.rb'
@@ -1371,7 +1371,7 @@ jobs:
           grep -Fx "release-tag=$RELEASE_TAG" publication/PUBLICATION.txt
           grep -Fx "release-commit=$RELEASE_COMMIT" publication/PUBLICATION.txt
           version="${RELEASE_TAG#v}"
-          test "$(sed -n 's/^[[:space:]]*version \"\\([^\"]*\\)\".*/\\1/p' 'publication/Casks/caul@beta.rb')" = "$version"
+          test "$(sed -n 's/^[[:space:]]*version "\([^"]*\)".*/\1/p' 'publication/Casks/caul@beta.rb')" = "$version"
           cp 'publication/Casks/caul@beta.rb' 'homebrew-tap/Casks/caul@beta.rb'
           cd homebrew-tap
           git add -- 'Casks/caul@beta.rb'
