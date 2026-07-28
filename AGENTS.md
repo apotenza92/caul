@@ -46,4 +46,5 @@ Caul is a calm, private desktop assistant for live calls and screen work. Priori
 
 - Keep deterministic verification manually dispatchable and callable by the tag-only release workflow. Do not run routine push or pull-request CI.
 - Keep the download-page publisher manual-only because it writes to another repository.
+- Publish Homebrew casks only from the tag-only release workflow after public package verification, using the tap-specific deploy key and the exact checksum-sealed cask artefact.
 - Keep releases restricted to deliberate `v*` tags whose commits are reachable from `main`.

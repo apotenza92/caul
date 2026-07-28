@@ -248,6 +248,20 @@ describe('download page hero autodetect', () => {
     expect(alternativeDetail.textContent).toBe('v0.1.43-beta.1 · 190 MB');
   });
 
+  it('falls back from the unavailable Linux ARM64 RPM to AppImage', async () => {
+    const dom = await loadDownloadPage({ architecture: 'x86', platform: 'Linux' });
+    const document = dom.window.document;
+
+    document.getElementById('format-rpm').click();
+    document.getElementById('arch-arm64').click();
+
+    expect(document.getElementById('format-appimage').classList.contains('active')).toBe(true);
+    expect(hero(dom).label).toContain('Download Caul AppImage for Linux ARM64');
+    expect(hero(dom).href).toContain('caul-arm64.AppImage');
+    expect(primaryDownload(dom).label).toContain('Download Caul AppImage for Linux ARM64');
+    expect(primaryDownload(dom).href).toContain('caul-arm64.AppImage');
+  });
+
   it('shows and copies the Homebrew command with a local-file fallback', async () => {
     const dom = await loadDownloadPage({ architecture: 'arm64', platform: 'macOS' });
     const document = dom.window.document;
