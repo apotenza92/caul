@@ -323,6 +323,10 @@ describe('macOS release contract', () => {
       });
       const publication = job.steps.at(-1).run;
       expect(publication).toContain('sha256sum --check SHA256SUMS');
+      expect(publication).toContain(
+        String.raw`sed -n 's/^[[:space:]]*version "\([^"]*\)".*/\1/p'`
+      );
+      expect(publication).not.toContain(String.raw`version \"\\(`);
       expect(publication).toContain('git diff --cached --check');
       expect(publication).toContain('git push origin HEAD:main');
       expect(publication).not.toContain('--force');
