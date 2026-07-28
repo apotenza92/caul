@@ -11,6 +11,7 @@ const productDescription = 'Caul recommends the best setup for your computer, in
 async function loadDownloadPage({
   architecture = '',
   platform = '',
+  releases = null,
   userAgent = ''
 } = {}) {
   const dom = new JSDOM(html, {
@@ -37,6 +38,21 @@ async function loadDownloadPage({
         matches: false,
         removeEventListener: () => {}
       });
+      if (releases) {
+        window.fetch = async (url) => {
+          if (url.endsWith('/releases/latest')) {
+            return {
+              json: async () => releases.stable,
+              ok: true
+            };
+          }
+
+          return {
+            json: async () => releases.beta ? [releases.beta] : [],
+            ok: true
+          };
+        };
+      }
     },
     runScripts: 'dangerously',
     url: 'https://apotenza92.github.io/caul/'
@@ -196,6 +212,40 @@ describe('download page hero autodetect', () => {
     expect(hero(dom).href).toContain('caul-beta-x64.deb');
     expect(primaryDownload(dom).label).toContain('Download Caul Beta .deb for Ubuntu x64');
     expect(primaryDownload(dom).href).toContain('caul-beta-x64.deb');
+  });
+
+  it('shows channel-aware version details on alternative download buttons only', async () => {
+    const dom = await loadDownloadPage({
+      architecture: 'arm64',
+      platform: 'macOS',
+      releases: {
+        beta: {
+          assets: [
+            { name: 'Caul-Beta-macos-arm64.zip', size: 190_000_000 }
+          ],
+          prerelease: true,
+          tag_name: 'v0.1.43-beta.1'
+        },
+        stable: {
+          assets: [
+            { name: 'Caul-macos-arm64.zip', size: 180_000_000 }
+          ],
+          tag_name: 'v0.1.42'
+        }
+      }
+    });
+    const document = dom.window.document;
+    const alternativeDetail = document.getElementById('download-detail');
+
+    expect(hero(dom).label).toBe('Download Caul for Apple Silicon Mac · 180 MB');
+    expect(alternativeDetail.hidden).toBe(false);
+    expect(alternativeDetail.textContent).toBe('v0.1.42 · 180 MB');
+
+    document.getElementById('channel-beta').click();
+
+    expect(hero(dom).label).toBe('Download Caul Beta for Apple Silicon Mac · 190 MB');
+    expect(alternativeDetail.hidden).toBe(false);
+    expect(alternativeDetail.textContent).toBe('v0.1.43-beta.1 · 190 MB');
   });
 
   it('falls back from the unavailable Linux ARM64 RPM to AppImage', async () => {

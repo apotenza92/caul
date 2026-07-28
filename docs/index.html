@@ -360,6 +360,21 @@
         width: 16px;
       }
 
+      .download-copy {
+        align-items: flex-start;
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+        text-align: left;
+      }
+
+      .download-detail {
+        color: currentColor;
+        font-size: 0.72rem;
+        font-weight: 500;
+        opacity: 0.78;
+      }
+
       .download-links {
         align-items: center;
         display: flex;
@@ -626,7 +641,10 @@
               <path d="M7 10l5 5 5-5"/>
               <path d="M12 15V3"/>
             </svg>
-            <span id="download-label">Download for Apple Silicon Mac</span>
+            <span class="download-copy">
+              <span id="download-label">Download for Apple Silicon Mac</span>
+              <span id="download-detail" class="download-detail" hidden></span>
+            </span>
           </a>
           <a id="secondary-download-btn" class="download-btn secondary" href="https://github.com/apotenza92/caul/releases/latest/download/caul-arm64.deb">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -634,7 +652,10 @@
               <path d="M7 10l5 5 5-5"/>
               <path d="M12 15V3"/>
             </svg>
-            <span id="secondary-download-label">Download .deb</span>
+            <span class="download-copy">
+              <span id="secondary-download-label">Download .deb</span>
+              <span id="secondary-download-detail" class="download-detail" hidden></span>
+            </span>
           </a>
         </div>
         <div id="extra-download-links" class="extra-download-links"></div>
@@ -696,6 +717,10 @@
         }
       };
       const assetSizes = {};
+      const releaseVersions = {
+        stable: "",
+        beta: ""
+      };
       const detectedSystem = detectSystem();
       const state = {
         channel: "stable",
@@ -760,6 +785,13 @@
       function labelWithSize(label, url) {
         const size = formatAssetSize(assetSizes[assetNameFromUrl(url)]);
         return size ? `${label} · ${size}` : label;
+      }
+
+      function downloadDetail(url, version) {
+        return [
+          version,
+          formatAssetSize(assetSizes[assetNameFromUrl(url)])
+        ].filter(Boolean).join(" · ");
       }
 
       function productNameForChannel(channel) {
@@ -889,19 +921,30 @@
         };
       }
 
-      function setDownloadLink(link, labelElement, resolved) {
+      function setDownloadLink(link, labelElement, resolved, detailElement = null, version = "") {
         if (!resolved.available) {
           link.href = "#";
           link.setAttribute("aria-disabled", "true");
           link.setAttribute("tabindex", "-1");
           labelElement.textContent = "Choose your download";
+          if (detailElement) {
+            detailElement.hidden = true;
+            detailElement.textContent = "";
+          }
           return;
         }
 
         link.href = resolved.url;
         link.removeAttribute("aria-disabled");
         link.removeAttribute("tabindex");
-        labelElement.textContent = labelWithSize(resolved.label, resolved.url);
+        if (detailElement) {
+          const detail = downloadDetail(resolved.url, version);
+          labelElement.textContent = resolved.label;
+          detailElement.textContent = detail;
+          detailElement.hidden = !detail;
+        } else {
+          labelElement.textContent = labelWithSize(resolved.label, resolved.url);
+        }
       }
 
       function updateHeroDownload(resolved) {
@@ -975,12 +1018,14 @@
           if (stableResponse.ok) {
             const stable = await stableResponse.json();
             releaseAvailable.stable = true;
+            releaseVersions.stable = stable.tag_name || "";
             document.getElementById("version-display").textContent = stable.tag_name;
             document.getElementById("version-display").classList.add("visible");
             updateAssetSizes(stable);
 
             if (hasReleaseAsset(stable, "Caul-Beta-macos-arm64.zip")) {
               releaseAvailable.beta = true;
+              releaseVersions.beta = stable.tag_name || "";
               setBetaDownloads(stable.tag_name);
             }
           }
@@ -991,6 +1036,7 @@
             const beta = releases.find((release) => release.prerelease);
             if (beta) {
               releaseAvailable.beta = true;
+              releaseVersions.beta = beta.tag_name || "";
               updateAssetSizes(beta);
               setBetaDownloads(beta.tag_name);
             }
@@ -1046,9 +1092,11 @@
         const homebrewLabel = document.getElementById("homebrew-label");
         const homebrewCopy = document.getElementById("homebrew-copy");
         const downloadLabel = document.getElementById("download-label");
+        const downloadDetail = document.getElementById("download-detail");
         const downloadSection = document.getElementById("download-section");
         const secondaryDownload = document.getElementById("secondary-download-btn");
         const secondaryDownloadLabel = document.getElementById("secondary-download-label");
+        const secondaryDownloadDetail = document.getElementById("secondary-download-detail");
         const extraDownloadLinks = document.getElementById("extra-download-links");
         const comingSoon = document.getElementById("coming-soon");
         const comingSoonLabel = document.getElementById("coming-soon-label");
@@ -1067,6 +1115,9 @@
 
         homebrewCopy.querySelector("span").textContent = "Copy";
         secondaryDownload.style.display = "none";
+        secondaryDownloadLabel.textContent = "Download .deb";
+        secondaryDownloadDetail.hidden = true;
+        secondaryDownloadDetail.textContent = "";
         extraDownloadLinks.style.display = "none";
         extraDownloadLinks.innerHTML = "";
         archToggle.style.display = state.platform === "mac" ? "none" : "flex";
@@ -1088,7 +1139,7 @@
         comingSoon.style.display = "none";
         homebrewCode.textContent = resolved.homebrewCommand || "";
         homebrewLabel.textContent = resolved.homebrewLabel || "Or install via Homebrew:";
-        setDownloadLink(download, downloadLabel, resolved);
+        setDownloadLink(download, downloadLabel, resolved, downloadDetail, releaseVersions[state.channel]);
       }
 
       document.querySelectorAll(".channel-btn").forEach((button) => {
