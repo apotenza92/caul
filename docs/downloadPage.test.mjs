@@ -118,6 +118,37 @@ describe('download page hero autodetect', () => {
     expect(hero(dom).link.getAttribute('aria-disabled')).toBe('true');
   });
 
+  it('shows synchronised release channel selectors above the hero download and in the alternatives', async () => {
+    const dom = await loadDownloadPage({ architecture: 'arm64', platform: 'macOS' });
+    const document = dom.window.document;
+    const heroChannel = document.querySelector('[aria-label="Recommended download release channel"]');
+    const alternativeChannel = document.querySelector('[aria-label="Alternative download release channel"]');
+    const betaNotice = document.querySelector('.beta-notice');
+
+    expect(document.querySelectorAll('.channel-toggle')).toHaveLength(2);
+    expect(heroChannel.compareDocumentPosition(hero(dom).link) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(heroChannel.compareDocumentPosition(betaNotice) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(betaNotice.compareDocumentPosition(hero(dom).link) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(heroChannel.querySelectorAll('.channel-btn')).toHaveLength(2);
+    expect(alternativeChannel.querySelectorAll('.channel-btn')).toHaveLength(2);
+
+    document.getElementById('hero-channel-beta').click();
+
+    expect(document.getElementById('hero-channel-beta').classList.contains('active')).toBe(true);
+    expect(document.getElementById('channel-beta').classList.contains('active')).toBe(true);
+    expect(document.getElementById('hero-channel-beta').getAttribute('aria-pressed')).toBe('true');
+    expect(document.getElementById('channel-beta').getAttribute('aria-pressed')).toBe('true');
+    expect(hero(dom).label).toContain('Download Caul Beta for Apple Silicon Mac');
+    expect(dom.window.getComputedStyle(betaNotice).display).toBe('block');
+
+    document.getElementById('channel-stable').click();
+
+    expect(document.getElementById('hero-channel-stable').classList.contains('active')).toBe(true);
+    expect(document.getElementById('channel-stable').classList.contains('active')).toBe(true);
+    expect(hero(dom).label).toContain('Download Caul for Apple Silicon Mac');
+    expect(dom.window.getComputedStyle(betaNotice).display).toBe('none');
+  });
+
   it('updates the hero button when the user chooses another download', async () => {
     const dom = await loadDownloadPage();
     const document = dom.window.document;

@@ -554,6 +554,13 @@
       <p class="early-stage-note">Caul is still early-stage, early-development software. Expect issues for now, and please report bugs or rough edges through <a href="https://github.com/apotenza92/caul/issues">GitHub Issues</a>.</p>
 
       <section class="hero-download" aria-label="Recommended download">
+        <div class="release-controls">
+          <div class="channel-toggle" aria-label="Recommended download release channel">
+            <button id="hero-channel-stable" class="channel-btn active" data-channel="stable" type="button">Stable</button>
+            <button id="hero-channel-beta" class="channel-btn" data-channel="beta" type="button">Beta</button>
+          </div>
+        </div>
+        <p class="beta-notice">Beta builds can change quickly and may be less stable than the stable channel.</p>
         <a id="hero-download-btn" class="download-btn" href="#" aria-disabled="true" tabindex="-1">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -578,9 +585,9 @@
 
         <div class="selection-flow" id="selection-flow">
           <div class="release-controls">
-            <div class="channel-toggle" aria-label="Release channel">
-              <button id="channel-stable" class="channel-btn active" type="button">Stable</button>
-              <button id="channel-beta" class="channel-btn" type="button">Beta</button>
+            <div class="channel-toggle" aria-label="Alternative download release channel">
+              <button id="channel-stable" class="channel-btn active" data-channel="stable" type="button">Stable</button>
+              <button id="channel-beta" class="channel-btn" data-channel="beta" type="button">Beta</button>
             </div>
           </div>
 
@@ -659,8 +666,6 @@
         <strong>Coming soon</strong>
         <span id="coming-soon-label">This platform is not available yet.</span>
       </section>
-
-      <p class="beta-notice">Beta builds can change quickly and may be less stable than the stable channel.</p>
     </main>
 
     <script>
@@ -748,6 +753,14 @@
       function setActive(selector, activeId) {
         document.querySelectorAll(selector).forEach((item) => {
           item.classList.toggle("active", item.id === activeId);
+        });
+      }
+
+      function setActiveChannel(channel) {
+        document.querySelectorAll(".channel-btn").forEach((item) => {
+          const isActive = item.dataset.channel === channel;
+          item.classList.toggle("active", isActive);
+          item.setAttribute("aria-pressed", String(isActive));
         });
       }
 
@@ -1066,7 +1079,7 @@
         pageTitle.textContent = productNameForChannel(state.channel);
         document.title = `Download ${productNameForChannel(state.channel)}`;
 
-        setActive(".channel-btn", `channel-${state.channel}`);
+        setActiveChannel(state.channel);
         setActive(".platform-btn", `platform-${state.platform}`);
         setActive(".arch-btn", `arch-${state.arch}`);
         setActive(".format-btn", `format-${state.linuxFormat}`);
@@ -1102,15 +1115,17 @@
         setDownloadLink(download, downloadLabel, resolved);
       }
 
-      document.getElementById("channel-stable").addEventListener("click", () => {
-        markManualSelection();
-        state.channel = "stable";
-        updateDownload();
-      });
-      document.getElementById("channel-beta").addEventListener("click", () => {
-        markManualSelection();
-        state.channel = "beta";
-        updateDownload();
+      document.querySelectorAll(".channel-btn").forEach((button) => {
+        button.addEventListener("click", () => {
+          const channel = button.dataset.channel;
+          if (channel !== "stable" && channel !== "beta") {
+            return;
+          }
+
+          markManualSelection();
+          state.channel = channel;
+          updateDownload();
+        });
       });
       document.getElementById("platform-mac").addEventListener("click", () => {
         markManualSelection();
