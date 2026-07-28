@@ -89,12 +89,19 @@ describe('updater helpers', () => {
   it('keeps stable users on stable releases only', () => {
     const releases = [
       { draft: false, prerelease: true, tag_name: 'v0.3.0-beta.1', html_url: 'beta' },
-      { draft: false, prerelease: false, tag_name: 'v0.2.0', html_url: 'stable' },
+      {
+        body: '- Adds calmer updates.',
+        draft: false,
+        prerelease: false,
+        tag_name: 'v0.2.0',
+        html_url: 'stable'
+      },
       { draft: true, prerelease: false, tag_name: 'v9.0.0', html_url: 'draft' }
     ];
 
     expect(findTargetRelease(releases, false)).toMatchObject({
       htmlUrl: 'stable',
+      releaseNotes: '- Adds calmer updates.',
       version: '0.2.0'
     });
   });
@@ -274,6 +281,8 @@ describe('updater helpers', () => {
     const source = require('node:fs').readFileSync(require.resolve('./updater.cjs'), 'utf8');
     expect(source).not.toContain('isLinuxAppImage');
     expect(source.match(/process\.platform === 'darwin'/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(source).toContain('autoUpdater.autoDownload = false');
+    expect(source).toContain('autoUpdater.autoInstallOnAppQuit = false');
   });
 });
 

@@ -80,6 +80,8 @@ if [ "$PACKAGE_VERSION" != "$VERSION" ]; then
   exit 1
 fi
 
+node scripts/extract-release-notes.mjs --version "$VERSION" >/dev/null
+
 echo "Release: $TAG"
 
 if [ "$IS_STABLE" = true ]; then

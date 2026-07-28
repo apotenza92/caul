@@ -4,7 +4,8 @@ import { describe, expect, it } from 'vitest';
 const require = createRequire(import.meta.url);
 const {
   getBoundsFromDisplayRelativeBounds,
-  getPreferredOverlaySizeForEdge
+  getPreferredOverlaySizeForEdge,
+  getTopCentreBounds
 } = require('./privateOverlayGeometry.cjs');
 
 describe('private overlay geometry', () => {
@@ -112,6 +113,32 @@ describe('private overlay geometry', () => {
       width: 1600,
       x: 800,
       y: 500
+    });
+  });
+
+  it('places a fresh-install handle at the top centre of the selected display', () => {
+    expect(getTopCentreBounds(
+      {
+        id: 2,
+        workArea: {
+          height: 1080,
+          width: 1920,
+          x: -1920,
+          y: 25
+        }
+      },
+      {
+        height: 48,
+        width: 48
+      },
+      {
+        margin: 8
+      }
+    )).toEqual({
+      height: 48,
+      width: 48,
+      x: -984,
+      y: 33
     });
   });
 });

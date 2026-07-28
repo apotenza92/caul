@@ -32,7 +32,11 @@ if (!release) {
   process.exit(signResult.status ?? 1);
 }
 
-process.exit(0);
+const stripResult = spawnSync('strip', ['-S', '-x', helperPath], {
+  stdio: 'inherit'
+});
+
+process.exit(stripResult.status ?? 1);
 
 function runSwiftBuild() {
   const candidates = resolveDeveloperDirCandidates();

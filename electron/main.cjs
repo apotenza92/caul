@@ -15,8 +15,13 @@ const {
 } = require('./permissions.cjs');
 const {
   getBoundsFromDisplayRelativeBounds,
-  getPreferredOverlaySizeForEdge
+  getPreferredOverlaySizeForEdge,
+  getTopCentreBounds
 } = require('./privateOverlayGeometry.cjs');
+const {
+  showAndFocusOnboardingWindow,
+  shouldLaunchOnboarding
+} = require('./onboardingLaunch.cjs');
 const { createStopFlushController } = require('./transcriptionStopFlush.cjs');
 const { createUpdaterService, normaliseUpdateFrequency, shouldCheckForUpdates } = require('./updater.cjs');
 const { createHistoryService } = require('./history.cjs');
@@ -1466,9 +1471,16 @@ async function completeOnboarding() {
     return status;
   }
 
+  const setupState = readSetupState();
+  const isFirstCompletion = typeof setupState.onboardingCompletedAt !== 'string';
+
   writeSetupState({
     onboardingCompletedAt: new Date().toISOString()
   });
+
+  if (isFirstCompletion) {
+    positionPrivateOverlayHandleAtTopCentre();
+  }
 
   if (onboardingWindow && !onboardingWindow.isDestroyed()) {
     onboardingWindow.close();
@@ -1492,7 +1504,7 @@ function markOnboardingShown() {
 }
 
 async function reopenOnboarding() {
-  createOnboardingWindow().show();
+  showAndFocusOnboardingWindow(createOnboardingWindow());
   return getOnboardingStatus();
 }
 
@@ -1631,15 +1643,16 @@ function persistWindowState(mainWindow) {
 }
 
 function normalisePrivateOverlayState(state, options = {}) {
-  const primaryDisplay = screen.getPrimaryDisplay();
-  const workArea = primaryDisplay.workArea;
+  const initialDisplay = getInitialPrivateOverlayDisplay();
+  const workArea = initialDisplay.workArea;
   const rawHandle = state && typeof state === 'object' && state.handle && typeof state.handle === 'object'
     ? state.handle
     : {};
   const handleSize = normaliseHandleSizePreset(rawHandle.size);
   const handleWindowSize = getHandleWindowSize(handleSize);
-  const defaultHandleX = workArea.x + Math.round((workArea.width - handleWindowSize.width) / 2);
-  const defaultHandleY = workArea.y + windowScreenMargin;
+  const defaultHandleBounds = getTopCentreBounds(initialDisplay, handleWindowSize, {
+    margin: windowScreenMargin
+  });
   const defaultOverlayX = workArea.x + Math.round((workArea.width - defaultAppWindowSize.width) / 2);
   const defaultOverlayY = workArea.y + 48;
   const handle = rawHandle;
@@ -1651,8 +1664,8 @@ function normalisePrivateOverlayState(state, options = {}) {
     rawBounds: handle,
     size: handleSize,
     width: handleWindowSize.width,
-    x: normaliseCoordinate(handle.x, defaultHandleX),
-    y: normaliseCoordinate(handle.y, defaultHandleY)
+    x: normaliseCoordinate(handle.x, defaultHandleBounds.x),
+    y: normaliseCoordinate(handle.y, defaultHandleBounds.y)
   }, options);
   const overlayBounds = normaliseStoredOverlayBounds({
     height: clampNumber(Number(overlay.height), minimumOverlayWindowSize.height, maximumOverlayWindowSize.height, defaultAppWindowSize.height),
@@ -1684,6 +1697,44 @@ function normalisePrivateOverlayState(state, options = {}) {
     },
     privateMode: true
   };
+}
+
+function getInitialPrivateOverlayDisplay() {
+  if (onboardingWindow && !onboardingWindow.isDestroyed()) {
+    return screen.getDisplayMatching(onboardingWindow.getBounds());
+  }
+
+  try {
+    return screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  } catch {
+    return screen.getPrimaryDisplay();
+  }
+}
+
+function positionPrivateOverlayHandleAtTopCentre(display = getInitialPrivateOverlayDisplay()) {
+  const state = readPrivateOverlayState();
+  const handleWindowSize = getHandleWindowSize(state.handle.size);
+  const bounds = clampHandleBoundsToDisplay(
+    getTopCentreBounds(display, handleWindowSize, {
+      margin: windowScreenMargin
+    }),
+    display
+  );
+
+  writePrivateOverlayState({
+    ...state,
+    handle: {
+      ...state.handle,
+      x: bounds.x,
+      y: bounds.y
+    }
+  });
+
+  if (privateOverlayHandleWindow && !privateOverlayHandleWindow.isDestroyed()) {
+    privateOverlayHandleWindow.setBounds(bounds);
+  }
+
+  return bounds;
 }
 
 function normaliseStoredHandleBounds(bounds, options = {}) {
@@ -4222,6 +4273,14 @@ async function runPiChatGptBrowserLogin(cliPath) {
 }
 
 function openUrlInDefaultBrowser(url) {
+  if (
+    process.platform === 'win32'
+    && onboardingWindow
+    && !onboardingWindow.isDestroyed()
+  ) {
+    onboardingWindow.setAlwaysOnTop(false);
+  }
+
   if (process.platform !== 'darwin') {
     return shell.openExternal(url);
   }
@@ -4484,12 +4543,12 @@ async function shouldShowOnboarding() {
   }
 
   const setupState = readSetupState();
+  const status = await getOnboardingStatus();
 
-  if (setupState.onboardingCompletedAt || setupState.onboardingFirstShownAt) {
-    return false;
-  }
-
-  return (await getOnboardingStatus()).required;
+  return shouldLaunchOnboarding({
+    completedAt: setupState.onboardingCompletedAt,
+    setupRequired: status.required
+  });
 }
 
 function getAudioHelperCommand(args) {
@@ -6355,18 +6414,13 @@ function createOnboardingWindow() {
     onboardingWindow = null;
 
     if (!isQuitting) {
-      void shouldShowOnboarding().then((required) => {
-        if (!required) {
-          createPrivateOverlayHandleWindow();
-        }
-      });
+      createPrivateOverlayHandleWindow();
     }
   });
 
   onboardingWindow.once('ready-to-show', () => {
     markOnboardingShown();
-    onboardingWindow.show();
-    onboardingWindow.focus();
+    showAndFocusOnboardingWindow(onboardingWindow);
     runPackagedLaunchSmokeIfRequested(onboardingWindow, 'onboarding');
     runOnboardingSmokeIfRequested(onboardingWindow);
   });
@@ -6769,12 +6823,18 @@ async function getPackagedOnboardingCompletionSmokeSummary() {
     : null;
   const hasHandle = windowSurfaces.some((surface) => surface.hasHandle);
   const hasHomeLayout = windowSurfaces.some((surface) => surface.hasHomeLayout);
+  const toolbarLayouts = windowSurfaces
+    .map((surface) => surface.toolbarLayout)
+    .filter(Boolean);
+  const toolbarLayoutOk = toolbarLayouts.some((toolbar) => toolbar.ok === true);
 
   return {
-    ok: Boolean(completedAt && (hasHandle || hasHomeLayout)),
+    ok: Boolean(completedAt && hasHomeLayout && toolbarLayoutOk),
     completedAt,
     hasHandle,
     hasHomeLayout,
+    toolbarLayoutOk,
+    toolbarLayouts,
     windowSurfaces
   };
 }
@@ -6783,13 +6843,82 @@ function getPackagedWindowSurfaceFlags(window) {
   return window.webContents.executeJavaScript(`
     (() => {
       const bodyText = (document.body?.textContent ?? '').trim();
+      const toolbar = document.querySelector('[aria-label="Home actions"]');
+      const toolbarLayout = toolbar
+        ? (() => {
+            const sections = Array.from(toolbar.querySelectorAll('[data-toolbar-section]'));
+            const sectionResults = sections.map((section) => {
+              const sectionRect = section.getBoundingClientRect();
+              const buttons = Array.from(section.querySelectorAll('button'))
+                .filter((button) => {
+                  const style = window.getComputedStyle(button);
+                  const rect = button.getBoundingClientRect();
+                  return rect.width > 0
+                    && rect.height > 0
+                    && style.display !== 'none'
+                    && style.visibility !== 'hidden';
+                })
+                .map((button) => {
+                  const rect = button.getBoundingClientRect();
+                  return {
+                    label: button.getAttribute('aria-label') || (button.textContent ?? '').trim(),
+                    bottom: rect.bottom,
+                    left: rect.left,
+                    right: rect.right,
+                    top: rect.top
+                  };
+                });
+              const overlaps = [];
+
+              for (let firstIndex = 0; firstIndex < buttons.length; firstIndex += 1) {
+                for (let secondIndex = firstIndex + 1; secondIndex < buttons.length; secondIndex += 1) {
+                  const first = buttons[firstIndex];
+                  const second = buttons[secondIndex];
+                  const intersects = first.left < second.right
+                    && first.right > second.left
+                    && first.top < second.bottom
+                    && first.bottom > second.top;
+
+                  if (intersects) {
+                    overlaps.push([first.label, second.label]);
+                  }
+                }
+              }
+
+              const outside = buttons
+                .filter((button) => (
+                  button.left < sectionRect.left - 0.5
+                  || button.right > sectionRect.right + 0.5
+                  || button.top < sectionRect.top - 0.5
+                  || button.bottom > sectionRect.bottom + 0.5
+                ))
+                .map((button) => button.label);
+
+              return {
+                buttons: buttons.map((button) => button.label),
+                outside,
+                overlaps,
+                section: section.getAttribute('data-toolbar-section'),
+                width: sectionRect.width
+              };
+            });
+
+            return {
+              ok: sectionResults.length === 2
+                && sectionResults.every((section) => section.outside.length === 0 && section.overlaps.length === 0),
+              sections: sectionResults
+            };
+          })()
+        : null;
+
       return {
         hasHandle: Boolean(document.querySelector('[aria-label="Caul overlay handle"]')),
         hasHomeLayout: Boolean(document.querySelector('[aria-label="Home layout"]')),
         hasOnboarding: Boolean(document.querySelector('[aria-label="Caul setup"]'))
           || (bodyText.includes('Welcome to Caul') && bodyText.includes('Start using Caul')),
         location: window.location.href,
-        title: document.title
+        title: document.title,
+        toolbarLayout
       };
     })()
   `);

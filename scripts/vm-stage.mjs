@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { readFile, rm, stat } from 'node:fs/promises';
 import http from 'node:http';
@@ -42,7 +43,7 @@ async function stageMacos(profile) {
   const zip = await runInteractive('ditto', ['-c', '-k', '--keepParent', profile.localPackagePath, '/tmp/Caul.app.zip']);
   if (!zip.ok) process.exit(zip.code ?? 1);
 
-  const server = await startStaticFileServer('/tmp', 8765);
+  const server = await startStaticFileServer('/tmp/Caul.app.zip', 8765);
   try {
     const guestScript = [
       `mkdir -p ${shellQuote(path.posix.dirname(profile.stagedPackagePath))}`,
@@ -103,21 +104,43 @@ async function stageLinux(profile) {
 }
 
 async function stageWindows(profile) {
-  const script = [
-    `$release=${JSON.stringify(profile.releaseDir)}`,
-    'if (!(Test-Path $release)) { New-Item -ItemType Directory -Force -Path $release | Out-Null }',
-    `$src='\\\\Mac\\Home\\code\\caul\\${profile.localPackagePath.replaceAll('/', '\\')}'`,
-    `$dst=${JSON.stringify(profile.stagedPackagePath)}`,
-    'Copy-Item -Force $src $dst',
-    `${JSON.stringify(expectedVersion)} | Set-Content -NoNewline "$dst.version"`
-  ].join('\n');
-  const staged = await runPrlctl(['exec', profile.vmName, ...createPowerShellEncodedArgs(script)], {
-    timeout: 90_000,
-    maxBuffer: 20 * 1024 * 1024
-  });
+  const localPackagePath = path.resolve(profile.localPackagePath);
+  const localAppAsarPath = path.join(
+    path.dirname(localPackagePath),
+    'win-arm64-unpacked',
+    'resources',
+    'app.asar'
+  );
+  await stat(localPackagePath);
+  await stat(localAppAsarPath);
+  const expectedAppAsarHash = createHash('sha256')
+    .update(await readFile(localAppAsarPath))
+    .digest('hex');
+  const server = await startStaticFileServer(localPackagePath, 8766);
+  let staged;
 
-  if (!staged.ok) {
-    console.error(staged.text);
+  try {
+    const script = [
+      '$ErrorActionPreference = "Stop"',
+      `$release=${JSON.stringify(profile.releaseDir)}`,
+      'if (!(Test-Path $release)) { New-Item -ItemType Directory -Force -Path $release | Out-Null }',
+      `$dst=${JSON.stringify(profile.stagedPackagePath)}`,
+      `$url=${JSON.stringify(`http://10.211.55.2:8766/${path.basename(localPackagePath)}`)}`,
+      'Invoke-WebRequest -UseBasicParsing $url -OutFile $dst',
+      'if (!(Test-Path $dst)) { throw "Windows package download did not create $dst" }',
+      `${JSON.stringify(expectedVersion)} | Set-Content -NoNewline "$dst.version"`,
+      `${JSON.stringify(expectedAppAsarHash)} | Set-Content -NoNewline "$dst.app-asar.sha256"`
+    ].join('\n');
+    staged = await runPrlctl(['exec', profile.vmName, '--current-user', ...createPowerShellEncodedArgs(script)], {
+      timeout: 90_000,
+      maxBuffer: 20 * 1024 * 1024
+    });
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+
+  if (!staged?.ok) {
+    console.error(staged?.text);
     process.exit(1);
   }
 
@@ -165,14 +188,15 @@ async function readText(filePath) {
   return readFile(filePath, 'utf8');
 }
 
-async function startStaticFileServer(directory, port) {
+async function startStaticFileServer(filePath, port) {
+  const route = `/${path.basename(filePath)}`;
   const server = http.createServer(async (request, response) => {
-    if (request.url !== '/Caul.app.zip') {
+    if (request.url !== route) {
       response.writeHead(404);
       response.end();
       return;
     }
-    createReadStream(path.join(directory, 'Caul.app.zip')).pipe(response);
+    createReadStream(filePath).pipe(response);
   });
   await new Promise((resolve) => server.listen(port, '0.0.0.0', resolve));
   return server;

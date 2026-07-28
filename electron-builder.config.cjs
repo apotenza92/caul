@@ -158,11 +158,17 @@ module.exports = {
   },
   files: [
     'dist/**/*',
-    'electron/**/*',
+    '!dist/**/*.map',
+    'electron/**/*.cjs',
+    'electron/**/*.json',
     'model-catalog.json',
     'package.json',
-    'assets/icons/**/*'
+    '!node_modules/**/*.d.ts',
+    '!node_modules/**/*.d.cts',
+    '!node_modules/**/*.d.mts',
+    '!node_modules/**/*.map'
   ],
+  electronLanguages: ['en', 'en-US', 'en-GB', 'en_US', 'en_GB'],
   extraResources: packagePlatform === 'darwin' || packagePlatform === 'mac'
     ? macExtraResources
     : commonExtraResources,

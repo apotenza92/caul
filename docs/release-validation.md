@@ -95,3 +95,7 @@ Each applicable packaged gate must verify:
 ## Release Workflow
 
 Keep active GitHub CI, release, Pages, security and package workflows intact. A release is eligible only when the shared hosted checks, licence verification, platform packaging and applicable hardware gates pass. Record released changes in the changelog rather than rewriting history when an implementation is later replaced.
+
+Before creating a release tag, add a matching version section to `CHANGELOG.md`. The release workflow extracts that section into the GitHub release body, and Caul displays the same notes when it detects the update. Release preparation fails if the matching changelog section is missing.
+
+Caul checks for app updates weekly by default, with other check frequencies available in Settings. Checks do not silently download or install software. A user must start the download, and signed macOS builds then require an explicit restart to install. Windows and Linux builds download and verify the selected package before the user runs it.

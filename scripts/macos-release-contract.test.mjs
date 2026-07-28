@@ -541,6 +541,9 @@ describe('macOS release contract', () => {
     expect(builderSource).toContain("process.env.ELECTRON_BUILDER_7Z_FILTER = 'BCJ'");
     expect(builderSource).not.toContain("version.includes('-alpha')");
     expect(builderSource).not.toContain("version.includes('-rc')");
+    expect(source).toContain('node scripts/extract-release-notes.mjs --version "${RELEASE_TAG#v}" --output release-notes.md');
+    expect(source).toContain('--notes-file release-notes.md');
+    expect(source).not.toContain('--generate-notes');
   });
 
   it('preserves stable and beta macOS ZIPs, feeds, checksums and Homebrew targets', () => {
