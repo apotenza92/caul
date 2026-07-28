@@ -695,24 +695,7 @@
           }
         }
       };
-      const assetSizes = {
-        "caul-arm64.AppImage": 196125349,
-        "caul-arm64.deb": 129210060,
-        "caul-beta-arm64.AppImage": 196154906,
-        "caul-beta-arm64.deb": 129230612,
-        "Caul-Beta-macos-arm64.zip": 190994244,
-        "Caul-Beta-windows-arm64-setup.exe": 143357738,
-        "Caul-Beta-windows-x64-setup.exe": 152243048,
-        "caul-beta-x64.AppImage": 195256517,
-        "caul-beta-x64.deb": 129297880,
-        "caul-beta-x64.rpm": 121138113,
-        "Caul-macos-arm64.zip": 190701766,
-        "Caul-windows-arm64-setup.exe": 143340581,
-        "Caul-windows-x64-setup.exe": 152225542,
-        "caul-x64.AppImage": 195227432,
-        "caul-x64.deb": 129315974,
-        "caul-x64.rpm": 121116809
-      };
+      const assetSizes = {};
       const detectedSystem = detectSystem();
       const state = {
         channel: "stable",
@@ -1050,6 +1033,10 @@
       }
 
       function updateDownload() {
+        if (state.platform === "linux" && state.arch === "arm64" && state.linuxFormat === "rpm") {
+          state.linuxFormat = "appimage";
+        }
+
         const icon = document.getElementById("app-icon");
         const download = document.getElementById("download-btn");
         const archToggle = document.getElementById("arch-toggle");
@@ -1085,11 +1072,6 @@
         archToggle.style.display = state.platform === "mac" ? "none" : "flex";
         formatToggle.style.display = state.platform === "linux" ? "flex" : "none";
         document.getElementById("format-rpm").style.display = state.platform === "linux" && state.arch !== "arm64" ? "inline-flex" : "none";
-
-        if (state.platform === "linux" && state.arch === "arm64" && state.linuxFormat === "rpm") {
-          state.linuxFormat = "appimage";
-          setActive(".format-btn", "format-appimage");
-        }
 
         updateHeroDownload(resolved);
 
