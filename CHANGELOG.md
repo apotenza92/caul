@@ -2,6 +2,15 @@
 
 All notable Caul changes are recorded here.
 
+## [0.1.43]
+
+- Kept incomplete onboarding visible across launches, improved Windows onboarding focus around browser sign-in, and placed the first floating handle at the top centre of the display where setup was completed.
+- Made the main toolbar responsive at compact window widths, kept window resizing available while Settings is open, and extended packaged onboarding checks to reject overlapping or clipped toolbar actions.
+- Made Parallels Windows release staging use the host bridge with an exact `app.asar` checksum, then locate and verify the installed package without relying on a blocked shared folder or installer process wait.
+- Added stable and beta version details to every alternative download while keeping beta builds inside the secondary download area.
+- Reduced the packaged app by excluding already-bundled renderer tooling, development files and unused Electron localisations, and by stripping release symbols from the Rust and Swift helpers.
+- Made `CHANGELOG.md` the source for GitHub release notes and displayed those notes inside Caul when an update is available.
+
 ## [0.1.42]
 
 - Moved public Windows installation verification into a syntax-checked PowerShell script so malformed workflow-embedded expressions cannot bypass preflight validation.

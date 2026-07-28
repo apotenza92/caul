@@ -35,8 +35,22 @@ function getBoundsFromDisplayRelativeBounds(relative, displayOrWorkArea) {
   };
 }
 
+function getTopCentreBounds(displayOrWorkArea, size, { margin = 0 } = {}) {
+  const workArea = displayOrWorkArea?.workArea ?? displayOrWorkArea;
+  const width = Math.round(Number(size.width));
+  const height = Math.round(Number(size.height));
+
+  return {
+    height,
+    width,
+    x: Math.round(Number(workArea.x)) + Math.round((Number(workArea.width) - width) / 2),
+    y: Math.round(Number(workArea.y)) + Math.round(Number(margin))
+  };
+}
+
 module.exports = {
   getBoundsFromDisplayRelativeBounds,
   getPreferredOverlaySizeForEdge,
+  getTopCentreBounds,
   orientOverlaySizeForEdge
 };

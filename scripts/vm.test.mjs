@@ -65,6 +65,21 @@ describe('VM release profiles', () => {
 });
 
 describe('VM command helpers', () => {
+  it('stages Windows packages through the active user over the host bridge', () => {
+    const stageSource = readFileSync(path.join(import.meta.dirname, 'vm-stage.mjs'), 'utf8');
+    const smokeSource = readFileSync(path.join(import.meta.dirname, 'smoke-parallels-release-vm.mjs'), 'utf8');
+
+    expect(stageSource).toContain("'--current-user'");
+    expect(stageSource).toContain('Invoke-WebRequest -UseBasicParsing $url -OutFile $dst');
+    expect(stageSource).toContain('if (!(Test-Path $dst)) { throw "Windows package download did not create $dst" }');
+    expect(stageSource).toContain('Set-Content -NoNewline "$dst.app-asar.sha256"');
+    expect(stageSource).not.toContain("'\\\\\\\\Mac\\\\Home\\\\code\\\\caul\\\\");
+    expect(smokeSource).toContain('Invoke-CimMethod -ClassName Win32_Process -MethodName Create');
+    expect(smokeSource).toContain('setTimeout(resolve, 90_000)');
+    expect(smokeSource).toContain('Get-FileHash -Algorithm SHA256 $candidateAppAsar');
+    expect(smokeSource).not.toContain('Start-Process -PassThru -Wait -FilePath $packagePath -ArgumentList "/S"');
+  });
+
   it('encodes PowerShell without losing UNC paths or dollar variables', () => {
     const script = "$src='\\\\Mac\\Home\\code\\caul'; $dst='C:\\\\Users\\\\alex\\\\caul-e2e'";
     const args = createPowerShellEncodedArgs(script);

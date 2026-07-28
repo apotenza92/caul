@@ -158,7 +158,7 @@ const layout = {
   homeToolbarRight: 'grid h-full w-12 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] items-stretch divide-y divide-border border-l border-border p-0',
   homeToolbarBottom: 'grid h-12 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center divide-x divide-border border-t border-border',
   homeToolbarLeft: 'grid h-full w-12 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] items-stretch divide-y divide-border border-r border-border p-0',
-  homeToolbarHorizontalSection: 'flex min-w-0 items-center gap-2 px-3 py-1.5',
+  homeToolbarHorizontalSection: 'caul-home-toolbar-section flex min-w-0 items-center gap-2 px-3 py-1.5',
   homeToolbarHorizontalSectionAi: 'justify-center',
   homeToolbarBottomActions: 'z-10 grid h-12 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center divide-x divide-border border-t border-border bg-background',
   homeToolbarBottomActionSection: 'flex min-w-0 items-center justify-center gap-2 px-3 py-1.5',
@@ -426,6 +426,7 @@ function useManagedDialogFocus(open: boolean, onClose: () => void) {
           sibling instanceof HTMLElement
           && sibling !== activeBranch
           && !sibling.hasAttribute('data-dialog-backdrop')
+          && !sibling.hasAttribute('data-dialog-interaction-preserved')
         ) {
           siblingInertStates.set(sibling, sibling.hasAttribute('inert'));
           sibling.setAttribute('inert', '');
@@ -4171,6 +4172,7 @@ function PrivateOverlayResizeHandles() {
           key={handle.direction}
           aria-hidden="true"
           className={`${layout.overlayResizeHandle} ${handle.className}`}
+          data-dialog-interaction-preserved
           data-resize-direction={handle.direction}
           onPointerCancel={handlePointerEnd}
           onPointerDown={(event) => handlePointerDown(event, handle.direction)}
@@ -8684,6 +8686,23 @@ function SettingsPage({
                         <p className={layout.settingsDescription} aria-live="polite">
                           {updateStatus.lastResult.message}
                         </p>
+                      ) : null}
+                      {updateStatus?.availableUpdate?.releaseNotes ? (
+                        <Card className="w-full max-w-2xl" size="sm">
+                          <CardHeader>
+                            <CardTitle aria-level={3} role="heading">
+                              What&apos;s new in Caul {updateStatus.availableUpdate.version}
+                            </CardTitle>
+                            <CardDescription>
+                              Review the changes before downloading and restarting.
+                            </CardDescription>
+                          </CardHeader>
+                          <CardContent className="markdown-output max-h-48 overflow-y-auto">
+                            <ReactMarkdown components={{ img: () => null }}>
+                              {updateStatus.availableUpdate.releaseNotes}
+                            </ReactMarkdown>
+                          </CardContent>
+                        </Card>
                       ) : null}
                     </div>
                   </FieldGroup>

@@ -753,6 +753,7 @@ jobs:
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
+          node scripts/extract-release-notes.mjs --version "${RELEASE_TAG#v}" --output release-notes.md
           find release-assets -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort > expected-assets.txt
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true || {
@@ -760,10 +761,11 @@ jobs:
               exit 1
             }
           else
-            CREATE_ARGS=("$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "Caul ${RELEASE_TAG#v}" --generate-notes --draft)
+            CREATE_ARGS=("$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "Caul ${RELEASE_TAG#v}" --notes-file release-notes.md --draft)
             [[ "$RELEASE_PRERELEASE" == true ]] && CREATE_ARGS+=(--prerelease)
             gh release create "${CREATE_ARGS[@]}"
           fi
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --notes-file release-notes.md
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | LC_ALL=C sort > existing-assets.txt
           comm -23 existing-assets.txt expected-assets.txt > unexpected-assets.txt
           if [[ -s unexpected-assets.txt ]]; then

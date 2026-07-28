@@ -251,6 +251,7 @@ function createUpdaterService({
         downloadUrl: targetRelease.htmlUrl,
         prerelease: targetRelease.prerelease,
         releaseName: targetRelease.name,
+        releaseNotes: targetRelease.releaseNotes,
         version: targetRelease.version
       };
       checking = false;
@@ -394,6 +395,7 @@ function createUpdaterService({
       buttons: ['Download', 'Later'],
       cancelId: 1,
       defaultId: 0,
+      detail: availableUpdate.releaseNotes || 'Open Caul settings to review and download this update.',
       message: `Caul ${availableUpdate.version} is available.`,
       type: 'info'
     }).then((result) => {
@@ -512,6 +514,7 @@ function findTargetRelease(releases, includePrereleases) {
         htmlUrl: release.html_url,
         name: release.name || release.tag_name,
         prerelease: Boolean(release.prerelease),
+        releaseNotes: typeof release.body === 'string' ? release.body.trim() : '',
         version: normaliseReleaseVersion(release.tag_name || release.name || '')
       }))
       .filter((release) => release.version)

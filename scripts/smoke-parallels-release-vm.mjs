@@ -615,7 +615,7 @@ async function prepareWindowsPackageForSmoke() {
     return directoryPreparation;
   }
 
-  const install = await runPrlctl([
+  const installerStart = await runPrlctl([
     'exec',
     vmName,
     '--current-user',
@@ -623,52 +623,57 @@ async function prepareWindowsPackageForSmoke() {
       '$ErrorActionPreference = "Stop"',
       `$packagePath = ${powershellString(packagePath)}`,
       'if (!(Test-Path $packagePath)) { throw "Missing package artefact: $packagePath" }',
-      '$isDirectory = (Get-Item $packagePath).PSIsContainer',
-      '$appRoot = $null',
-      'if ($isDirectory) {',
-      '  $appRoot = $packagePath',
-      '} else {',
-      '  $packageItem = Get-Item $packagePath',
-      '  if ($packageItem.Length -le 0) { throw "Package artefact is empty: $packagePath" }',
-      '  Get-Process Caul -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue',
-      '  $process = Start-Process -PassThru -FilePath $packagePath -ArgumentList "/S"',
-      '  $completed = Wait-Process -Id $process.Id -Timeout 120 -ErrorAction SilentlyContinue',
-      '  if (!$completed) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue; throw "Installer did not finish within 120 seconds." }',
-      '  $process.Refresh()',
-      '  if ($process.ExitCode -ne 0) { throw "Installer exited with code $($process.ExitCode)" }',
-      '  $candidateRoots = @(',
-      '    (Join-Path $env:LOCALAPPDATA "Programs\\Caul"),',
-      '    (Join-Path $env:ProgramFiles "Caul")',
-      '  )',
-      '  $appRoot = $candidateRoots | Where-Object { Test-Path (Join-Path $_ "Caul.exe") } | Select-Object -First 1',
-      '}',
+      '$packageItem = Get-Item $packagePath',
+      'if ($packageItem.Length -le 0) { throw "Package artefact is empty: $packagePath" }',
+      'if (!(Test-Path "$packagePath.app-asar.sha256")) { throw "Missing staged app.asar checksum." }',
+      'Get-Process Caul -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue',
+      '$installerCommand = "`"$packagePath`" /S"',
+      '$installerLaunch = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $installerCommand }',
+      'if ($installerLaunch.ReturnValue -ne 0) { throw "Could not launch installer: Win32_Process.Create returned $($installerLaunch.ReturnValue)." }',
+      '$installerSummary = [pscustomobject]@{ pid = $installerLaunch.ProcessId }',
+      'Write-Output ("caul-windows-installer-started " + ($installerSummary | ConvertTo-Json -Compress))'
+    ].join('; '))
+  ], { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 });
+  const installerSummary = parsePrefixedJson(installerStart.text, 'caul-windows-installer-started');
+
+  if (!installerStart.ok || !Number.isInteger(installerSummary?.pid)) {
+    await failVmE2e(`Windows packaged smoke failed while starting ${packagePath}.`, {
+      details: installerStart.text
+    });
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, 90_000));
+
+  const install = await runPrlctl([
+    'exec',
+    vmName,
+    '--current-user',
+    ...powershellEncodedArgs([
+      '$ErrorActionPreference = "Stop"',
+      `$packagePath = ${powershellString(packagePath)}`,
+      '$expectedAppAsarHash = (Get-Content "$packagePath.app-asar.sha256" -Raw).Trim().ToLowerInvariant()',
+      '$candidateRoots = @((Join-Path $env:LOCALAPPDATA "Programs\\Caul"), (Join-Path $env:ProgramFiles "Caul"))',
+      '$appRoot = $candidateRoots | Where-Object {',
+      '  $candidateAppAsar = Join-Path $_ "resources\\app.asar"',
+      '  (Test-Path $candidateAppAsar) -and ((Get-FileHash -Algorithm SHA256 $candidateAppAsar).Hash.ToLowerInvariant() -eq $expectedAppAsarHash)',
+      '} | Select-Object -First 1',
       'if (!$appRoot) { throw "Installed Caul app root was not found." }',
       '$appExe = Join-Path $appRoot "Caul.exe"',
       '$backendPath = Join-Path $appRoot "resources\\bin\\caul-desktop-backend.exe"',
       'if (!(Test-Path $appExe)) { throw "Missing installed app executable: $appExe" }',
       'if (!(Test-Path $backendPath)) { throw "Missing installed backend: $backendPath" }',
-      'if ($isDirectory) {',
-      '  $summary = New-Object psobject -Property @{ appExe = $appExe; backendPath = $backendPath; installedFromSetup = $false; uninstallDisplayName = $null }',
-      '  Write-Output ("caul-windows-install-smoke " + ($summary | ConvertTo-Json -Compress))',
-      '  exit 0',
-      '}',
       '$uninstallDisplayName = $null',
-      'if (!$isDirectory) {',
-      '  $uninstallRoots = @(',
-      '    "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall",',
-      '    "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall"',
-      '  )',
-      '  foreach ($root in $uninstallRoots) {',
-      '    if (!(Test-Path $root)) { continue }',
-      '    $entry = Get-ChildItem $root | ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_.DisplayName -eq "Caul" -or $_.DisplayName -eq "Caul Beta" } | Select-Object -First 1',
-      '    if ($entry) { $uninstallDisplayName = $entry.DisplayName; break }',
-      '  }',
+      '$uninstallRoots = @("HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall", "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall")',
+      'foreach ($root in $uninstallRoots) {',
+      '  if (!(Test-Path $root)) { continue }',
+      '  $entry = Get-ChildItem $root | ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_.DisplayName -eq "Caul" -or $_.DisplayName -eq "Caul Beta" } | Select-Object -First 1',
+      '  if ($entry) { $uninstallDisplayName = $entry.DisplayName; break }',
       '}',
-      'if (!$isDirectory -and !$uninstallDisplayName) { throw "Could not find Caul product-only uninstall display name in Windows Apps registry entries." }',
-      '$summary = New-Object psobject -Property @{ appExe = $appExe; backendPath = $backendPath; installedFromSetup = (-not $isDirectory); uninstallDisplayName = $uninstallDisplayName }',
+      'if (!$uninstallDisplayName) { throw "Could not find Caul product-only uninstall display name in Windows Apps registry entries." }',
+      '$summary = New-Object psobject -Property @{ appExe = $appExe; backendPath = $backendPath; installedFromSetup = $true; uninstallDisplayName = $uninstallDisplayName }',
       'Write-Output ("caul-windows-install-smoke " + ($summary | ConvertTo-Json -Compress))'
     ].join('; '))
-  ], { timeout: 180_000, maxBuffer: 10 * 1024 * 1024 });
+  ], { timeout: 200_000, maxBuffer: 10 * 1024 * 1024 });
 
   const summary = parsePrefixedJson(install.text, 'caul-windows-install-smoke');
 

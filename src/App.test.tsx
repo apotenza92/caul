@@ -1858,6 +1858,42 @@ describe('App', () => {
     expect(bridge.privateOverlayWindowResizeEnds).toBe(1);
   });
 
+  it('keeps the window resize affordance active while settings is open', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge();
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Caul Settings' }));
+    expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
+
+    const resizeHandle = document.querySelector('[data-resize-direction="se"]') as HTMLElement;
+
+    expect(resizeHandle).not.toHaveAttribute('inert');
+    expect(resizeHandle).toHaveAttribute('data-dialog-interaction-preserved');
+
+    fireEvent.pointerDown(resizeHandle, {
+      button: 0,
+      pointerId: 4,
+      screenX: 600,
+      screenY: 480
+    });
+    fireEvent.pointerMove(resizeHandle, {
+      pointerId: 4,
+      screenX: 624,
+      screenY: 504
+    });
+    fireEvent.pointerUp(resizeHandle, {
+      pointerId: 4,
+      screenX: 624,
+      screenY: 504
+    });
+
+    expect(bridge.privateOverlayWindowResizeStarts).toBe(1);
+    expect(bridge.privateOverlayWindowResizeMoves).toBe(1);
+    expect(bridge.privateOverlayWindowResizeEnds).toBe(1);
+  });
+
   it('uses a centred title and macOS traffic-light close dot on macOS', async () => {
     installTestBridge({
       runtimeContext: testRuntimeContext({
@@ -2008,6 +2044,8 @@ describe('App', () => {
 
     expect(transcriptSection).toBeInTheDocument();
     expect(aiSection).toBeInTheDocument();
+    expect(transcriptSection).toHaveClass('caul-home-toolbar-section');
+    expect(aiSection).toHaveClass('caul-home-toolbar-section');
 
     expect(bottomToolbar).toBeInTheDocument();
     expect(transcriptBottomSection).toBeInTheDocument();
@@ -4173,6 +4211,34 @@ describe('App', () => {
     expect(screen.getByText(/^Last checked: Never\.$/)).toBeInTheDocument();
     expect(screen.getByText('Downloading update 42%')).toBeInTheDocument();
     expect(screen.queryByText(/Last checked: Never\. Downloading update 42%/)).not.toBeInTheDocument();
+  });
+
+  it('shows release notes with an available update', async () => {
+    const user = userEvent.setup();
+    installTestBridge({
+      updateStatus: testUpdateStatus({
+        availableUpdate: {
+          prerelease: false,
+          releaseName: 'Caul 0.1.9',
+          releaseNotes: '- Adds calmer updates.\n- Reduces the app download size.',
+          version: '0.1.9'
+        },
+        lastResult: {
+          ok: true,
+          status: 'available',
+          message: 'Caul 0.1.9 is available.'
+        }
+      })
+    });
+
+    render(<App />);
+
+    await openSettings(user);
+    await openSettingsSection(user, 'General');
+
+    expect(screen.getByRole('heading', { name: "What's new in Caul 0.1.9" })).toBeInTheDocument();
+    expect(screen.getByText('Adds calmer updates.')).toBeInTheDocument();
+    expect(screen.getByText('Reduces the app download size.')).toBeInTheDocument();
   });
 
   it('hides the update download button once the update is downloaded', async () => {

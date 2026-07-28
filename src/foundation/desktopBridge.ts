@@ -293,6 +293,7 @@ export type UpdateStatus = {
     downloadUrl?: string;
     prerelease: boolean;
     releaseName?: string;
+    releaseNotes?: string;
     version: string;
   };
   checking: boolean;

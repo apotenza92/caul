@@ -447,6 +447,53 @@ textarea,
     display: none;
   }
 
+  .caul-home-toolbar-section {
+    container-name: caul-home-toolbar-section;
+    container-type: inline-size;
+  }
+
+  @container caul-home-toolbar-section (max-width: 32.5rem) {
+    .compact-toolbar-button-label {
+      display: none;
+    }
+
+    .compact-toolbar-button {
+      width: 2.25rem !important;
+      min-width: 2.25rem !important;
+      padding-left: 0 !important;
+      padding-right: 0 !important;
+      justify-content: center !important;
+    }
+
+    .prompt-template-trigger {
+      gap: 0.375rem;
+      width: 3.75rem !important;
+      min-width: 3.75rem !important;
+      padding-left: 0.5rem !important;
+      padding-right: 0.5rem !important;
+      justify-content: center !important;
+    }
+
+    .prompt-template-selector-root,
+    .prompt-template-selector-picker {
+      flex: 0 0 auto !important;
+    }
+
+    .prompt-template-trigger-icon {
+      display: block !important;
+    }
+
+    .prompt-template-trigger-label {
+      display: none !important;
+    }
+
+    .prompt-template-trigger-chevron {
+      display: block !important;
+      width: 0.875rem;
+      height: 0.875rem;
+    }
+  }
+
   @media (max-width: 959px) {
     .section-title-full {
       display: none;

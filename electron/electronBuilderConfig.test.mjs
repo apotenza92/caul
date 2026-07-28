@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const require = createRequire(import.meta.url);
 const configPath = require.resolve('../electron-builder.config.cjs');
+const packageJson = require('../package.json');
 
 function loadConfig(env = {}) {
   const originalEnv = {
@@ -43,7 +44,58 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe('packaged dependency boundary', () => {
+  it('ships only dependencies used directly by the Electron runtime', () => {
+    for (const packageName of [
+      '@base-ui/react',
+      '@fontsource-variable/geist',
+      '@tailwindcss/vite',
+      'class-variance-authority',
+      'clsx',
+      'lucide-react',
+      'react',
+      'react-dom',
+      'react-markdown',
+      'tailwind-merge',
+      'tailwindcss',
+      'tw-animate-css',
+      'ws'
+    ]) {
+      expect(packageJson.dependencies?.[packageName]).toBeUndefined();
+      expect(packageJson.devDependencies?.[packageName]).toEqual(expect.any(String));
+    }
+
+    for (const packageName of [
+      '@earendil-works/pi-coding-agent',
+      'brace-expansion',
+      'electron-updater',
+      'pdfjs-dist'
+    ]) {
+      expect(packageJson.dependencies?.[packageName]).toEqual(expect.any(String));
+    }
+  });
+});
+
 describe('electron-builder macOS config', () => {
+  it('keeps only Caul-supported Electron languages and runtime package files', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const config = loadConfig();
+
+    expect(config.electronLanguages).toEqual(['en', 'en-US', 'en-GB', 'en_US', 'en_GB']);
+    expect(config.files).toEqual(expect.arrayContaining([
+      '!dist/**/*.map',
+      'electron/**/*.cjs',
+      'electron/**/*.json',
+      '!node_modules/**/*.d.ts',
+      '!node_modules/**/*.d.cts',
+      '!node_modules/**/*.d.mts',
+      '!node_modules/**/*.map'
+    ]));
+    expect(config.files).not.toContain('electron/**/*');
+    expect(config.files).not.toContain('assets/icons/**/*');
+  });
+
   it('marks packaged stable and beta macOS apps as Dockless agents', () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
 
