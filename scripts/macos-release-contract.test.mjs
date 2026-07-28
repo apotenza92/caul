@@ -239,7 +239,7 @@ describe('macOS release contract', () => {
     expect(workflow).toMatch(/publish-release:[\s\S]*?permissions:\n      attestations: write\n      contents: write\n      id-token: write/);
   });
 
-  it('pins external actions and prevents checkout credential persistence', () => {
+  it('pins external actions and limits checkout credential persistence to the Homebrew publisher', () => {
     for (const name of ['ci.yml', 'release.yml']) {
       const workflow = loadWorkflow(name);
       const steps = collectWorkflowSteps(workflow);
@@ -255,7 +255,11 @@ describe('macOS release contract', () => {
       const checkouts = steps.filter((step) => step.uses?.startsWith('actions/checkout@'));
       expect(checkouts.length).toBeGreaterThan(0);
       for (const checkout of checkouts) {
-        expect(checkout.with?.['persist-credentials']).toBe(false);
+        const homebrewPublisher = checkout.with?.repository === 'apotenza92/homebrew-tap';
+        expect(checkout.with?.['persist-credentials']).toBe(homebrewPublisher);
+        if (homebrewPublisher) {
+          expect(checkout.with?.['ssh-key']).toBe('${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}');
+        }
         expect(checkout.with?.ref).toBeTruthy();
       }
     }
@@ -284,17 +288,46 @@ describe('macOS release contract', () => {
     expect(preparation).not.toContain('git push');
   });
 
-  it('never commits or pushes publication changes from workflows', () => {
-    for (const name of ['ci.yml', 'pages.yml', 'release.yml']) {
+  it('keeps the download page manual while publishing validated Homebrew casks automatically', () => {
+    for (const name of ['ci.yml', 'pages.yml']) {
       const source = readFileSync(path.join(repositoryRoot, '.github', 'workflows', name), 'utf8');
       expect(source).not.toMatch(/\bgit (?:commit|push)\b/);
-      expect(source).not.toContain('HOMEBREW_TAP_TOKEN');
       expect(source).not.toContain('PAGES_DEPLOY_KEY');
     }
-    const release = readFileSync(path.join(repositoryRoot, '.github', 'workflows', 'release.yml'), 'utf8');
+    const releasePath = path.join(repositoryRoot, '.github', 'workflows', 'release.yml');
+    const release = readFileSync(releasePath, 'utf8');
+    const workflow = loadWorkflow('release.yml');
     expect(release).toContain('prepare-homebrew-publication:');
     expect(release).toContain('prepare-homebrew-beta-publication:');
-    expect(release).toContain('Apply these exact natively validated bytes manually');
+    expect(release).not.toContain('HOMEBREW_TAP_TOKEN');
+    expect(release).not.toContain('PAGES_DEPLOY_KEY');
+    for (const [jobName, preparationJob, channel] of [
+      ['publish-homebrew-stable', 'prepare-homebrew-publication', 'stable'],
+      ['publish-homebrew-beta', 'prepare-homebrew-beta-publication', 'beta']
+    ]) {
+      const job = workflow.jobs[jobName];
+      expect(job.needs).toEqual([
+        'prepare',
+        preparationJob,
+        'verify-public-windows',
+        'verify-public-linux'
+      ]);
+      expect(job.if).toBe(`needs.prepare.outputs.channel == '${channel}'`);
+      expect(job.permissions).toEqual({ contents: 'read' });
+      const checkout = job.steps.find((step) => step.name === 'Checkout Homebrew tap');
+      expect(checkout.with).toMatchObject({
+        repository: 'apotenza92/homebrew-tap',
+        ref: 'main',
+        path: 'homebrew-tap',
+        'ssh-key': '${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}'
+      });
+      const publication = job.steps.at(-1).run;
+      expect(publication).toContain('sha256sum --check SHA256SUMS');
+      expect(publication).toContain('git diff --cached --check');
+      expect(publication).toContain('git push origin HEAD:main');
+      expect(publication).not.toContain('--force');
+      expect(publication).not.toContain('git add -A');
+    }
   });
 
   it('serialises releases by selected tag and validates that exact ref', () => {

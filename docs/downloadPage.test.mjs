@@ -118,6 +118,36 @@ describe('download page hero autodetect', () => {
     expect(hero(dom).link.getAttribute('aria-disabled')).toBe('true');
   });
 
+  it('keeps beta selection in the alternatives and explains its purpose concisely', async () => {
+    const dom = await loadDownloadPage({ architecture: 'arm64', platform: 'macOS' });
+    const document = dom.window.document;
+    const details = document.getElementById('download-options');
+    const alternativeChannel = document.querySelector('[aria-label="Alternative download release channel"]');
+    const betaNotice = document.querySelector('.beta-notice');
+
+    expect(details.querySelector('summary').textContent).toBe('Choose another platform or test upcoming updates in beta');
+    expect(document.querySelectorAll('.channel-toggle')).toHaveLength(1);
+    expect(document.querySelector('.hero-download .channel-toggle')).toBeNull();
+    expect(details.contains(alternativeChannel)).toBe(true);
+    expect(alternativeChannel.querySelectorAll('.channel-btn')).toHaveLength(2);
+    expect(alternativeChannel.compareDocumentPosition(betaNotice) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(dom.window.getComputedStyle(betaNotice).display).toBe('none');
+
+    details.open = true;
+    document.getElementById('channel-beta').click();
+
+    expect(document.getElementById('channel-beta').classList.contains('active')).toBe(true);
+    expect(document.getElementById('channel-beta').getAttribute('aria-pressed')).toBe('true');
+    expect(hero(dom).label).toContain('Download Caul Beta for Apple Silicon Mac');
+    expect(dom.window.getComputedStyle(betaNotice).display).toBe('block');
+
+    document.getElementById('channel-stable').click();
+
+    expect(document.getElementById('channel-stable').classList.contains('active')).toBe(true);
+    expect(hero(dom).label).toContain('Download Caul for Apple Silicon Mac');
+    expect(dom.window.getComputedStyle(betaNotice).display).toBe('none');
+  });
+
   it('updates the hero button when the user chooses another download', async () => {
     const dom = await loadDownloadPage();
     const document = dom.window.document;
@@ -166,6 +196,20 @@ describe('download page hero autodetect', () => {
     expect(hero(dom).href).toContain('caul-beta-x64.deb');
     expect(primaryDownload(dom).label).toContain('Download Caul Beta .deb for Ubuntu x64');
     expect(primaryDownload(dom).href).toContain('caul-beta-x64.deb');
+  });
+
+  it('falls back from the unavailable Linux ARM64 RPM to AppImage', async () => {
+    const dom = await loadDownloadPage({ architecture: 'x86', platform: 'Linux' });
+    const document = dom.window.document;
+
+    document.getElementById('format-rpm').click();
+    document.getElementById('arch-arm64').click();
+
+    expect(document.getElementById('format-appimage').classList.contains('active')).toBe(true);
+    expect(hero(dom).label).toContain('Download Caul AppImage for Linux ARM64');
+    expect(hero(dom).href).toContain('caul-arm64.AppImage');
+    expect(primaryDownload(dom).label).toContain('Download Caul AppImage for Linux ARM64');
+    expect(primaryDownload(dom).href).toContain('caul-arm64.AppImage');
   });
 
   it('shows and copies the Homebrew command with a local-file fallback', async () => {

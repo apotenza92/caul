@@ -574,15 +574,16 @@
       </section>
 
       <details id="download-options" class="download-options">
-        <summary>Choose another download</summary>
+        <summary>Choose another platform or test upcoming updates in beta</summary>
 
         <div class="selection-flow" id="selection-flow">
           <div class="release-controls">
-            <div class="channel-toggle" aria-label="Release channel">
-              <button id="channel-stable" class="channel-btn active" type="button">Stable</button>
-              <button id="channel-beta" class="channel-btn" type="button">Beta</button>
+            <div class="channel-toggle" aria-label="Alternative download release channel">
+              <button id="channel-stable" class="channel-btn active" data-channel="stable" type="button">Stable</button>
+              <button id="channel-beta" class="channel-btn" data-channel="beta" type="button">Beta</button>
             </div>
           </div>
+          <p class="beta-notice">Beta builds can change quickly and may be less stable than the stable channel.</p>
 
           <div class="platform-toggle" aria-label="Platform">
             <button id="platform-mac" class="platform-btn active" type="button">
@@ -659,8 +660,6 @@
         <strong>Coming soon</strong>
         <span id="coming-soon-label">This platform is not available yet.</span>
       </section>
-
-      <p class="beta-notice">Beta builds can change quickly and may be less stable than the stable channel.</p>
     </main>
 
     <script>
@@ -696,24 +695,7 @@
           }
         }
       };
-      const assetSizes = {
-        "caul-arm64.AppImage": 196125349,
-        "caul-arm64.deb": 129210060,
-        "caul-beta-arm64.AppImage": 196154906,
-        "caul-beta-arm64.deb": 129230612,
-        "Caul-Beta-macos-arm64.zip": 190994244,
-        "Caul-Beta-windows-arm64-setup.exe": 143357738,
-        "Caul-Beta-windows-x64-setup.exe": 152243048,
-        "caul-beta-x64.AppImage": 195256517,
-        "caul-beta-x64.deb": 129297880,
-        "caul-beta-x64.rpm": 121138113,
-        "Caul-macos-arm64.zip": 190701766,
-        "Caul-windows-arm64-setup.exe": 143340581,
-        "Caul-windows-x64-setup.exe": 152225542,
-        "caul-x64.AppImage": 195227432,
-        "caul-x64.deb": 129315974,
-        "caul-x64.rpm": 121116809
-      };
+      const assetSizes = {};
       const detectedSystem = detectSystem();
       const state = {
         channel: "stable",
@@ -748,6 +730,14 @@
       function setActive(selector, activeId) {
         document.querySelectorAll(selector).forEach((item) => {
           item.classList.toggle("active", item.id === activeId);
+        });
+      }
+
+      function setActiveChannel(channel) {
+        document.querySelectorAll(".channel-btn").forEach((item) => {
+          const isActive = item.dataset.channel === channel;
+          item.classList.toggle("active", isActive);
+          item.setAttribute("aria-pressed", String(isActive));
         });
       }
 
@@ -1043,6 +1033,10 @@
       }
 
       function updateDownload() {
+        if (state.platform === "linux" && state.arch === "arm64" && state.linuxFormat === "rpm") {
+          state.linuxFormat = "appimage";
+        }
+
         const icon = document.getElementById("app-icon");
         const download = document.getElementById("download-btn");
         const archToggle = document.getElementById("arch-toggle");
@@ -1066,7 +1060,7 @@
         pageTitle.textContent = productNameForChannel(state.channel);
         document.title = `Download ${productNameForChannel(state.channel)}`;
 
-        setActive(".channel-btn", `channel-${state.channel}`);
+        setActiveChannel(state.channel);
         setActive(".platform-btn", `platform-${state.platform}`);
         setActive(".arch-btn", `arch-${state.arch}`);
         setActive(".format-btn", `format-${state.linuxFormat}`);
@@ -1078,11 +1072,6 @@
         archToggle.style.display = state.platform === "mac" ? "none" : "flex";
         formatToggle.style.display = state.platform === "linux" ? "flex" : "none";
         document.getElementById("format-rpm").style.display = state.platform === "linux" && state.arch !== "arm64" ? "inline-flex" : "none";
-
-        if (state.platform === "linux" && state.arch === "arm64" && state.linuxFormat === "rpm") {
-          state.linuxFormat = "appimage";
-          setActive(".format-btn", "format-appimage");
-        }
 
         updateHeroDownload(resolved);
 
@@ -1102,15 +1091,17 @@
         setDownloadLink(download, downloadLabel, resolved);
       }
 
-      document.getElementById("channel-stable").addEventListener("click", () => {
-        markManualSelection();
-        state.channel = "stable";
-        updateDownload();
-      });
-      document.getElementById("channel-beta").addEventListener("click", () => {
-        markManualSelection();
-        state.channel = "beta";
-        updateDownload();
+      document.querySelectorAll(".channel-btn").forEach((button) => {
+        button.addEventListener("click", () => {
+          const channel = button.dataset.channel;
+          if (channel !== "stable" && channel !== "beta") {
+            return;
+          }
+
+          markManualSelection();
+          state.channel = channel;
+          updateDownload();
+        });
       });
       document.getElementById("platform-mac").addEventListener("click", () => {
         markManualSelection();
