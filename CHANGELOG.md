@@ -2,7 +2,12 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.55]
+## [0.1.56]
+
+- Seeded the Windows native updater audit with the exact verified prior installer and now require both previous and candidate blockmap requests before accepting a valid differential update.
+- Carries forward the isolated Windows updater profile correction from the unpublished 0.1.55 candidate.
+
+## [0.1.55] (unpublished release candidate)
 
 - Isolated every Windows native updater scenario's roaming profile and updater cache inside its disposable audit directory so pending installers cannot leak between scenarios.
 - Carries forward the Windows updater audit corrections from the unpublished 0.1.54 candidate.

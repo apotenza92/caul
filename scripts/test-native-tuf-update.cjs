@@ -84,6 +84,16 @@ function candidatePackageRequestPaths(artifactNames, version) {
   ));
 }
 
+function windowsDifferentialRequestPaths(artifactNames, version) {
+  return [...artifactNames].flatMap((name) => {
+    const packageName = artifactName(name);
+    return [
+      `/assets/${version}/${packageName}.blockmap`,
+      `/assets/0.0.1/${packageName}.blockmap`
+    ];
+  });
+}
+
 function resolveAuditAssetPath({
   candidateDirectory,
   candidateVersion,
@@ -469,6 +479,20 @@ function windowsAuditProfileDirectories(temporaryRoot) {
   };
 }
 
+function stageWindowsDifferentialBase({ channel, localAppData, previousArtifact }) {
+  if (!['stable', 'beta'].includes(channel)) {
+    throw new Error('Windows differential base requires a stable or beta channel.');
+  }
+  const cacheDirectory = path.join(
+    localAppData,
+    `${channel === 'beta' ? 'caul-beta' : 'caul'}-updater`
+  );
+  const installerPath = path.join(cacheDirectory, 'installer.exe');
+  fs.mkdirSync(cacheDirectory, { recursive: true });
+  fs.copyFileSync(previousArtifact, installerPath, fs.constants.COPYFILE_EXCL);
+  return installerPath;
+}
+
 async function waitForInstalledCandidate({
   candidateAsar,
   eventPath,
@@ -675,6 +699,16 @@ async function main(argv = process.argv.slice(2)) {
         throw new Error('The synthetic previous Windows package has the wrong version.');
       }
       previousInstalledDigest = installedPackageDigest(installedExecutable);
+      if (scenario === 'valid') {
+        const cachedInstaller = stageWindowsDifferentialBase({
+          channel,
+          localAppData: windowsProfile.localAppData,
+          previousArtifact
+        });
+        if (digest(cachedInstaller) !== digest(previousArtifact)) {
+          throw new Error('The cached Windows differential base does not match the previous installer.');
+        }
+      }
     } else {
       installedAppImage = path.join(temporaryRoot, path.basename(previousArtifact));
       fs.copyFileSync(previousArtifact, installedAppImage);
@@ -796,6 +830,15 @@ async function main(argv = process.argv.slice(2)) {
       }
     }
     if (scenario === 'valid') {
+      if (process.platform === 'win32') {
+        const missingBlockmap = windowsDifferentialRequestPaths(
+          server.artifactNames,
+          server.version
+        ).find((requestPath) => !server.requests.includes(requestPath));
+        if (missingBlockmap) {
+          throw new Error(`Windows updater did not request differential base ${missingBlockmap}.`);
+        }
+      }
       const expectedEvents = [
         'update-available',
         'update-downloaded',
@@ -933,5 +976,7 @@ module.exports = {
   waitForInstalledCandidate,
   waitForPathRemoval,
   windowsAuditProfileDirectories,
+  windowsDifferentialRequestPaths,
+  stageWindowsDifferentialBase,
   windowsSilentInstallArguments
 };
