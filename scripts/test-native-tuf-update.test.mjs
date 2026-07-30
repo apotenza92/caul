@@ -20,9 +20,11 @@ const {
   prepareSignedTarget,
   requireAuditScenario,
   resolveAuditAssetPath,
+  stageWindowsDifferentialBase,
   updaterEventTimeoutMs,
   waitForPathRemoval,
   windowsAuditProfileDirectories,
+  windowsDifferentialRequestPaths,
   windowsSilentInstallArguments
 } = require('./test-native-tuf-update.cjs');
 
@@ -104,6 +106,11 @@ describe('native TUF updater audit helpers', () => {
       requestedName: 'setup.exe',
       requestedVersion: '0.0.1'
     })).toBeNull();
+    expect(windowsDifferentialRequestPaths(new Set(['setup.exe']), '0.1.56'))
+      .toEqual([
+        '/assets/0.1.56/setup.exe.blockmap',
+        '/assets/0.0.1/setup.exe.blockmap'
+      ]);
   });
 
   it('uses only the explicit native audit scenarios', () => {
@@ -166,5 +173,36 @@ describe('native TUF updater audit helpers', () => {
       appData: path.join('C:\\audit\\scenario', 'windows-profile', 'roaming'),
       localAppData: path.join('C:\\audit\\scenario', 'windows-profile', 'local')
     });
+  });
+
+  it('seeds the exact previous installer for a Windows differential update', () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'caul-windows-differential-'));
+    try {
+      const previousArtifact = path.join(directory, 'previous.exe');
+      writeFileSync(previousArtifact, 'verified previous installer');
+      const localAppData = path.join(directory, 'local');
+      const stable = stageWindowsDifferentialBase({
+        channel: 'stable',
+        localAppData,
+        previousArtifact
+      });
+      expect(stable).toBe(path.join(localAppData, 'caul-updater', 'installer.exe'));
+      expect(readFileSync(stable)).toEqual(readFileSync(previousArtifact));
+
+      const beta = stageWindowsDifferentialBase({
+        channel: 'beta',
+        localAppData,
+        previousArtifact
+      });
+      expect(beta).toBe(path.join(localAppData, 'caul-beta-updater', 'installer.exe'));
+      expect(readFileSync(beta)).toEqual(readFileSync(previousArtifact));
+      expect(() => stageWindowsDifferentialBase({
+        channel: 'preview',
+        localAppData,
+        previousArtifact
+      })).toThrow(/stable or beta/);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });
