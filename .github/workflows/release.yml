@@ -38,9 +38,14 @@ jobs:
         env:
           CAUL_RELEASE_TAG: ${{ github.ref_name }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
           RELEASE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
+          if [[ "$REPOSITORY_VISIBILITY" != public ]]; then
+            echo "Releases require public source; repository visibility is $REPOSITORY_VISIBILITY." >&2
+            exit 1
+          fi
           if [[ "$DEFAULT_BRANCH" != main ]]; then
             echo "Repository default branch $DEFAULT_BRANCH is not the approved release source main." >&2
             exit 1
@@ -91,6 +96,9 @@ jobs:
     needs: [prepare, quality]
     runs-on: macos-26
     environment: release-signing
+    env:
+      CAUL_XCODE_VERSION: "26.4.1"
+      DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
     permissions:
       contents: read
     steps:
@@ -110,6 +118,13 @@ jobs:
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Verify reviewed Xcode
+        run: |
+          set -euo pipefail
+          test -x "$DEVELOPER_DIR/usr/bin/actool"
+          test "$(xcodebuild -version | sed -n '1p')" = "Xcode $CAUL_XCODE_VERSION"
+          test "$(xcrun --find actool)" = "$DEVELOPER_DIR/usr/bin/actool"
 
       - name: Install dependencies
         run: npm ci

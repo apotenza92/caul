@@ -116,6 +116,17 @@ jobs:
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
+      - name: Select and verify reviewed Xcode
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          developer_directory=/Applications/Xcode_26.4.1.app/Contents/Developer
+          test -x "$developer_directory/usr/bin/actool"
+          export DEVELOPER_DIR="$developer_directory"
+          test "$(xcodebuild -version | sed -n '1p')" = 'Xcode 26.4.1'
+          test "$(xcrun --find actool)" = "$developer_directory/usr/bin/actool"
+          echo "DEVELOPER_DIR=$developer_directory" >> "$GITHUB_ENV"
+
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev

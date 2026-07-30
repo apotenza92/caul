@@ -225,6 +225,7 @@ describe('macOS release contract', () => {
 
   it('keeps privileged credentials in protected, narrowly permissioned release jobs', () => {
     const workflow = readFileSync(path.join(repositoryRoot, '.github', 'workflows', 'release.yml'), 'utf8');
+    const parsed = loadWorkflow('release.yml');
     expect(workflow).toContain('environment: release-signing');
     expect(workflow).toContain('APPLE_SIGNING_CERTIFICATE_P12_BASE64');
     expect(workflow).toContain('APPLE_NOTARYTOOL_KEY_P8_BASE64');
@@ -237,6 +238,23 @@ describe('macOS release contract', () => {
     expect(workflow).not.toMatch(/APPLE_ID|APPLE_APP_SPECIFIC_PASSWORD|CSC_LINK|CSC_KEY_PASSWORD/);
     expect(workflow).toMatch(/permissions:\n  contents: read/);
     expect(workflow).toMatch(/publish-release:[\s\S]*?permissions:\n      attestations: write\n      contents: write\n      id-token: write/);
+
+    const macSteps = parsed.jobs['build-macos'].steps;
+    const signingStepIndex = macSteps.findIndex(
+      (step) => step.name === 'Build, sign, notarise and verify macOS artefacts'
+    );
+    expect(signingStepIndex).toBeGreaterThan(0);
+    expect(macSteps.slice(0, signingStepIndex).map(JSON.stringify).join('\n'))
+      .not.toContain('secrets.');
+    expect(macSteps[signingStepIndex].env).toMatchObject({
+      APPLE_NOTARYTOOL_KEY_P8_BASE64: '${{ secrets.APPLE_NOTARYTOOL_KEY_P8_BASE64 }}',
+      APPLE_SIGNING_CERTIFICATE_P12_BASE64:
+        '${{ secrets.APPLE_SIGNING_CERTIFICATE_P12_BASE64 }}',
+      APPLE_SIGNING_CERTIFICATE_PASSWORD:
+        '${{ secrets.APPLE_SIGNING_CERTIFICATE_PASSWORD }}'
+    });
+    expect(macSteps.slice(signingStepIndex + 1).map(JSON.stringify).join('\n'))
+      .not.toContain('secrets.');
   });
 
   it('pins external actions and limits checkout credential persistence to the Homebrew publisher', () => {
@@ -276,6 +294,19 @@ describe('macOS release contract', () => {
         RUST_TOOLCHAIN: '1.88.0'
       });
     }
+    const ci = loadWorkflow('ci.yml');
+    const xcodePreflight = ci.jobs['platform-preflight'].steps.find(
+      (step) => step.name === 'Select and verify reviewed Xcode'
+    );
+    expect(xcodePreflight.if).toBe("runner.os == 'macOS'");
+    expect(xcodePreflight.run).toContain('/Applications/Xcode_26.4.1.app/Contents/Developer');
+    expect(xcodePreflight.run).toContain("'Xcode 26.4.1'");
+
+    const release = loadWorkflow('release.yml');
+    expect(release.jobs['build-macos'].env).toEqual({
+      CAUL_XCODE_VERSION: '26.4.1',
+      DEVELOPER_DIR: '/Applications/Xcode_26.4.1.app/Contents/Developer'
+    });
   });
 
   it('keeps verification manual or release-called and publication deliberate', () => {
@@ -373,8 +404,10 @@ describe('macOS release contract', () => {
     const provenance = release.jobs.prepare.steps.find((step) => step.name === 'Verify tag commit is on main');
     expect(provenance.env).toMatchObject({
       DEFAULT_BRANCH: '${{ github.event.repository.default_branch }}',
+      REPOSITORY_VISIBILITY: '${{ github.event.repository.visibility }}',
       RELEASE_SHA: '${{ github.sha }}'
     });
+    expect(provenance.run).toContain('[[ "$REPOSITORY_VISIBILITY" != public ]]');
     expect(provenance.run).toContain('git merge-base --is-ancestor');
     expect(provenance.run).toContain('refs/tags/$CAUL_RELEASE_TAG^{commit}');
     expect(provenance.run).toContain('test "$TAG_COMMIT" = "$RELEASE_SHA"');
@@ -597,6 +630,12 @@ describe('macOS release contract', () => {
     expect(releaseGuide).toContain('beta-updater-verification');
     expect(releaseGuide).toContain("MACOS_UPDATER_BOOTSTRAP_TAG` in that channel's updater-verification environment");
     expect(releaseGuide).toContain('WINDOWS_ARM64_LEGACY_PUBLIC_BOOTSTRAP_TAG');
+    expect(releaseGuide).toContain(
+      'Record explicitly that no prior `updates` branch commit exists for this first feed.'
+    );
+    expect(releaseGuide).toContain(
+      'recover only with higher-version metadata or a corrected higher application version'
+    );
     expect(releaseGuide).not.toContain('`MACOS_UPDATER_BOOTSTRAP_TAG` repository variable');
     const packageVerifier = readFileSync(path.join(repositoryRoot, 'scripts', 'verify-macos-package.mjs'), 'utf8');
     expect(packageVerifier).toContain("'bin', 'caul-desktop-backend'");
