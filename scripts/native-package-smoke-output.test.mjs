@@ -40,8 +40,14 @@ describe('native package launch process result', () => {
     })).not.toThrow();
   });
 
-  it('accepts a Windows timeout only after successful packaged launch evidence', () => {
+  it('accepts a native process timeout only after successful packaged launch evidence', () => {
     expect(() => validatePackagedLaunchProcessResult('windows', {
+      status: null,
+      error: { code: 'ETIMEDOUT', message: 'timed out' },
+      stdout: successfulSmoke,
+      stderr: ''
+    })).not.toThrow();
+    expect(() => validatePackagedLaunchProcessResult('linux', {
       status: null,
       error: { code: 'ETIMEDOUT', message: 'timed out' },
       stdout: successfulSmoke,
@@ -49,21 +55,14 @@ describe('native package launch process result', () => {
     })).not.toThrow();
   });
 
-  it('rejects a Windows timeout without successful packaged launch evidence', () => {
-    expect(() => validatePackagedLaunchProcessResult('windows', {
-      status: null,
-      error: { code: 'ETIMEDOUT', message: 'timed out' },
-      stdout: '',
-      stderr: ''
-    })).toThrow('Packaged launch smoke emitted no result');
-  });
-
-  it('rejects non-Windows timeouts even with successful packaged launch evidence', () => {
-    expect(() => validatePackagedLaunchProcessResult('linux', {
-      status: null,
-      error: { code: 'ETIMEDOUT', message: 'timed out' },
-      stdout: successfulSmoke,
-      stderr: ''
-    })).toThrow('timed out');
+  it('rejects native process timeouts without successful packaged launch evidence', () => {
+    for (const platform of ['windows', 'linux']) {
+      expect(() => validatePackagedLaunchProcessResult(platform, {
+        status: null,
+        error: { code: 'ETIMEDOUT', message: 'timed out' },
+        stdout: '',
+        stderr: ''
+      })).toThrow('Packaged launch smoke emitted no result');
+    }
   });
 });
