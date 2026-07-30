@@ -247,6 +247,10 @@ module.exports = {
   rpm: {
     packageName: `caul${isBeta ? '-beta' : ''}`,
     artifactName: `caul${isBeta ? '-beta' : ''}-${linuxArtifactArch}.\${ext}`,
-    fpm: ['--rpm-rpmbuild-define=_build_id_links none']
+    afterRemove: 'build/rpm-after-remove.tpl',
+    fpm: [
+      '--rpm-rpmbuild-define=_build_id_links none',
+      '--rpm-posttrans=build/rpm-posttrans.sh'
+    ]
   }
 };

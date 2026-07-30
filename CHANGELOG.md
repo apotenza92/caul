@@ -2,7 +2,12 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.47]
+## [0.1.48]
+
+- Restored each installed RPM product's command link and AppArmor profile after an older package version is removed during an upgrade, while skipping replacement cleanup and retaining complete cleanup for a genuine final uninstall.
+- Carries forward corrected stable and beta RPM co-installation, the static AppImage runtime and TUF-authenticated cross-platform updates from the unpublished 0.1.44 through 0.1.47 candidates.
+
+## [0.1.47] (unpublished release candidate)
 
 - Made Fedora desktop-integration verification inspect the complete installed RPM file list without a `pipefail` false failure when `grep` closes a large pipeline early.
 - Carries forward corrected stable and beta RPM co-installation, the static AppImage runtime and TUF-authenticated cross-platform updates from the unpublished 0.1.44 through 0.1.46 candidates.
