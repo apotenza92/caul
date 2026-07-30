@@ -19,6 +19,7 @@ const {
   corruptedPayload,
   prepareSignedTarget,
   requireAuditScenario,
+  resolveAuditAssetPath,
   updaterEventTimeoutMs,
   waitForPathRemoval,
   windowsSilentInstallArguments
@@ -50,7 +51,7 @@ describe('native TUF updater audit helpers', () => {
       });
       const rewritten = yaml.load(prepared.bytes.toString('utf8'));
       expect(rewritten.files[0].url)
-        .toBe('http://127.0.0.1:43127/assets/Caul-windows-x64-setup.exe');
+        .toBe('http://127.0.0.1:43127/assets/0.1.44/Caul-windows-x64-setup.exe');
       expect(rewritten.path).toBe(rewritten.files[0].url);
       expect(prepared.version).toBe('0.1.44');
 
@@ -73,11 +74,35 @@ describe('native TUF updater audit helpers', () => {
   });
 
   it('distinguishes package requests from optional blockmap requests', () => {
-    const packagePaths = candidatePackageRequestPaths(new Set([
-      'Caul windows x64 setup.exe'
-    ]));
-    expect(packagePaths.has('/assets/Caul%20windows%20x64%20setup.exe')).toBe(true);
-    expect(packagePaths.has('/assets/Caul%20windows%20x64%20setup.exe.blockmap')).toBe(false);
+    const packagePaths = candidatePackageRequestPaths(
+      new Set(['Caul windows x64 setup.exe']),
+      '0.1.54'
+    );
+    expect(packagePaths.has('/assets/0.1.54/Caul windows x64 setup.exe')).toBe(true);
+    expect(packagePaths.has('/assets/0.1.54/Caul windows x64 setup.exe.blockmap'))
+      .toBe(false);
+  });
+
+  it('maps versioned audit URLs to distinct current and previous blockmaps', () => {
+    const inputs = {
+      candidateDirectory: '/audit/candidate',
+      candidateVersion: '0.1.54',
+      previousBlockmap: '/audit/previous/setup.exe.blockmap',
+      requestedName: 'setup.exe.blockmap'
+    };
+    expect(resolveAuditAssetPath({
+      ...inputs,
+      requestedVersion: '0.1.54'
+    })).toBe('/audit/candidate/setup.exe.blockmap');
+    expect(resolveAuditAssetPath({
+      ...inputs,
+      requestedVersion: '0.0.1'
+    })).toBe('/audit/previous/setup.exe.blockmap');
+    expect(resolveAuditAssetPath({
+      ...inputs,
+      requestedName: 'setup.exe',
+      requestedVersion: '0.0.1'
+    })).toBeNull();
   });
 
   it('uses only the explicit native audit scenarios', () => {
@@ -92,20 +117,20 @@ describe('native TUF updater audit helpers', () => {
     expect(updaterEventTimeoutMs('linux')).toBe(5 * 60_000);
   });
 
-  it('corrupts package bytes without changing their size or source file', () => {
+  it('truncates corrupt package bytes without changing the source file', () => {
     const directory = mkdtempSync(path.join(tmpdir(), 'caul-corrupt-payload-'));
     try {
       const packagePath = path.join(directory, 'Caul.AppImage');
-      const original = Buffer.from('native package bytes');
+      const original = Buffer.alloc(2 * 1024 * 1024, 0x43);
       writeFileSync(packagePath, original);
       const corrupted = corruptedPayload(packagePath);
       expect(corrupted).not.toEqual(original);
-      expect(corrupted).toHaveLength(original.length);
+      expect(corrupted).toHaveLength(1024 * 1024);
       expect(readFileSync(packagePath)).toEqual(original);
 
       const emptyPath = path.join(directory, 'empty');
       writeFileSync(emptyPath, '');
-      expect(() => corruptedPayload(emptyPath)).toThrow(/empty updater payload/);
+      expect(() => corruptedPayload(emptyPath)).toThrow(/Cannot truncate/);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

@@ -2,7 +2,13 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.53]
+## [0.1.54]
+
+- Gave synthetic Windows updater packages versioned audit URLs so valid differential updates receive distinct previous and candidate blockmaps.
+- Made the corrupt-payload audit serve a small truncated package so checksum rejection completes deterministically without streaming an entire damaged installer.
+- Carries forward the native updater audit corrections from the unpublished 0.1.53 candidate.
+
+## [0.1.53] (unpublished release candidate)
 
 - Required a valid packaged-launch marker for the native updater audit's final ordinary relaunch, while accepting a bounded post-success process timeout on Linux or Windows.
 - Captured the final smoke result through an explicit file so GUI-process output remains deterministic across native runners.

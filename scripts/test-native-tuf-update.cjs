@@ -78,10 +78,30 @@ function artifactName(value) {
   return decoded;
 }
 
-function candidatePackageRequestPaths(artifactNames) {
+function candidatePackageRequestPaths(artifactNames, version) {
   return new Set([...artifactNames].map(
-    (name) => `/assets/${encodeURIComponent(artifactName(name))}`
+    (name) => `/assets/${version}/${artifactName(name)}`
   ));
+}
+
+function resolveAuditAssetPath({
+  candidateDirectory,
+  candidateVersion,
+  previousBlockmap,
+  requestedName,
+  requestedVersion
+}) {
+  if (requestedVersion === candidateVersion) {
+    return path.join(candidateDirectory, requestedName);
+  }
+  if (
+    requestedVersion === '0.0.1'
+    && requestedName.endsWith('.blockmap')
+    && previousBlockmap
+  ) {
+    return previousBlockmap;
+  }
+  return null;
 }
 
 function prepareSignedTarget({ baseUrl, candidateDirectory, candidateMetadata }) {
@@ -104,13 +124,17 @@ function prepareSignedTarget({ baseUrl, candidateDirectory, candidateMetadata })
     if (file.size !== undefined && fs.statSync(candidate).size !== file.size) {
       throw new Error(`Candidate updater size does not match: ${name}`);
     }
-    return { ...file, url: `${baseUrl}/assets/${encodeURIComponent(name)}` };
+    return {
+      ...file,
+      url: `${baseUrl}/assets/${encodeURIComponent(metadata.version)}/${encodeURIComponent(name)}`
+    };
   });
   if (metadata.path) {
     const name = artifactName(metadata.path);
     if (!names.has(name)) throw new Error('Legacy updater path does not match a files entry.');
-    metadata.path = `${baseUrl}/assets/${encodeURIComponent(name)}`;
-    metadata.sha512 = metadata.files.find((file) => artifactName(file.url) === name).sha512;
+    const matchingFile = metadata.files.find((file) => artifactName(file.url) === name);
+    metadata.path = matchingFile.url;
+    metadata.sha512 = matchingFile.sha512;
   }
   return {
     artifactNames: names,
@@ -149,9 +173,8 @@ function serveFile(request, response, filePath) {
 
 function corruptedPayload(filePath) {
   const bytes = Buffer.from(fs.readFileSync(filePath));
-  if (bytes.length === 0) throw new Error(`Cannot corrupt an empty updater payload: ${filePath}`);
-  bytes[Math.floor(bytes.length / 2)] ^= 0xff;
-  return bytes;
+  if (bytes.length < 2) throw new Error(`Cannot truncate updater payload: ${filePath}`);
+  return Buffer.from(bytes.subarray(0, Math.min(bytes.length - 1, 1024 * 1024)));
 }
 
 function updaterEventTimeoutMs(platform) {
@@ -172,6 +195,7 @@ async function createUpdateServer({
   candidateDirectory,
   candidateMetadata,
   privateKeyBundlePath,
+  previousBlockmap,
   rootPath,
   scenario,
   targetName,
@@ -202,18 +226,29 @@ async function createUpdateServer({
       serveFile(request, response, path.join(repositoryDirectory, 'targets', targetName));
       return;
     }
-    const assetMatch = pathname.match(/^\/assets\/([^/]+)$/);
+    const assetMatch = pathname.match(/^\/assets\/([^/]+)\/([^/]+)$/);
     if (assetMatch) {
-      const requestedName = assetMatch[1];
+      const requestedVersion = assetMatch[1];
+      const requestedName = assetMatch[2];
       const packageName = requestedName.endsWith('.blockmap')
         ? requestedName.slice(0, -'.blockmap'.length)
         : requestedName;
-      const assetPath = path.join(candidateDirectory, requestedName);
+      const isCandidateVersion = requestedVersion === signedTarget.version;
+      const assetPath = resolveAuditAssetPath({
+        candidateDirectory,
+        candidateVersion: signedTarget.version,
+        previousBlockmap,
+        requestedName,
+        requestedVersion
+      });
       if (
-        signedTarget.artifactNames.has(packageName)
+        assetPath
+        && signedTarget.artifactNames.has(packageName)
         && fs.statSync(assetPath, { throwIfNoEntry: false })?.isFile()
       ) {
-        const corrupted = corruptedAssets.get(requestedName);
+        const corrupted = isCandidateVersion
+          ? corruptedAssets.get(requestedName)
+          : null;
         if (corrupted) {
           serveBytes(request, response, corrupted);
         } else {
@@ -552,6 +587,9 @@ async function main(argv = process.argv.slice(2)) {
   const candidateMetadata = path.resolve(requiredOption(argv, '--candidate-metadata'));
   const evidenceDirectory = path.resolve(requiredOption(argv, '--evidence'));
   const previousArtifact = path.resolve(requiredOption(argv, '--previous-artifact'));
+  const previousBlockmap = process.platform === 'win32'
+    ? `${previousArtifact}.blockmap`
+    : null;
   const privateKeyBundlePath = path.resolve(requiredOption(argv, '--private-key-bundle'));
   const rootPath = path.resolve(requiredOption(argv, '--root'));
   const targetName = requiredOption(argv, '--target-name');
@@ -562,6 +600,7 @@ async function main(argv = process.argv.slice(2)) {
     candidateDirectory,
     candidateMetadata,
     previousArtifact,
+    ...(previousBlockmap ? [previousBlockmap] : []),
     privateKeyBundlePath,
     rootPath,
     ...(candidateAsar ? [candidateAsar] : [])
@@ -628,6 +667,7 @@ async function main(argv = process.argv.slice(2)) {
       candidateDirectory,
       candidateMetadata,
       privateKeyBundlePath,
+      previousBlockmap,
       rootPath,
       scenario,
       targetName,
@@ -714,7 +754,10 @@ async function main(argv = process.argv.slice(2)) {
       `/tuf/targets/${encodeURIComponent(targetName)}`
     );
     const assetRequested = server.requests.some((request) => request.startsWith('/assets/'));
-    const packageRequestPaths = candidatePackageRequestPaths(server.artifactNames);
+    const packageRequestPaths = candidatePackageRequestPaths(
+      server.artifactNames,
+      server.version
+    );
     const packageRequested = server.requests.some((request) => packageRequestPaths.has(request));
     if (scenario === 'wrong-signature') {
       if (targetRequested || assetRequested || eventNames.includes('update-available')) {
@@ -875,6 +918,7 @@ module.exports = {
   installedPackageVersion,
   prepareSignedTarget,
   requireAuditScenario,
+  resolveAuditAssetPath,
   updaterEventTimeoutMs,
   waitForInstalledCandidate,
   waitForPathRemoval,
