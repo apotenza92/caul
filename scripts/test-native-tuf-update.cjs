@@ -545,9 +545,7 @@ async function main(argv = process.argv.slice(2)) {
 
   const productName = channel === 'beta' ? 'Caul Beta' : 'Caul';
   const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'caul-native-updater-'));
-  const userData = process.platform === 'win32'
-    ? path.join(process.env.APPDATA, productName)
-    : path.join(temporaryRoot, 'user-data');
+  const userData = path.join(temporaryRoot, 'user-data');
   if (fs.existsSync(userData)) {
     throw new Error(`Native updater audit requires an unused user-data directory: ${userData}`);
   }
@@ -616,7 +614,7 @@ async function main(argv = process.argv.slice(2)) {
       CAUL_TUF_TEST_REPOSITORY_URL: `${server.baseUrl}/tuf`,
       CAUL_UPDATE_TEST_MODE: '1',
       CAUL_UPDATER_EVENT_PATH: eventPath,
-      ...(process.platform === 'linux' ? { CAUL_USER_DATA_DIR: userData } : {})
+      CAUL_USER_DATA_DIR: userData
     });
     child = spawn(installedExecutable, process.platform === 'linux' ? ['--no-sandbox'] : [], {
       env: environment,
@@ -725,7 +723,7 @@ async function main(argv = process.argv.slice(2)) {
       CAUL_DISABLE_MODEL_AUTO_DOWNLOAD: '1',
       CAUL_DISABLE_UPDATE_CHECKS: '1',
       CAUL_PACKAGED_LAUNCH_SMOKE_MS: '250',
-      ...(process.platform === 'linux' ? { CAUL_USER_DATA_DIR: userData } : {})
+      CAUL_USER_DATA_DIR: userData
     });
     const smoke = spawnSync(
       installedExecutable,

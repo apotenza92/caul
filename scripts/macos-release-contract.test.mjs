@@ -655,6 +655,15 @@ describe('macOS release contract', () => {
     expect(nativeUpdaterWorkflow).toContain('candidate/updater-audit/$CAUL_AUDIT_CHANNEL/app.asar');
     expect(nativeUpdaterWorkflow).toContain('electron_builder_arch=x86_64');
     expect(nativeUpdaterWorkflow).toContain('Remove ephemeral signing material and build outputs');
+    const nativeUpdaterHarness = readFileSync(
+      path.join(repositoryRoot, 'scripts', 'test-native-tuf-update.cjs'),
+      'utf8'
+    );
+    expect(nativeUpdaterHarness).toContain(
+      "const userData = path.join(temporaryRoot, 'user-data');"
+    );
+    expect(nativeUpdaterHarness).toContain('CAUL_USER_DATA_DIR: userData');
+    expect(nativeUpdaterHarness).not.toContain('path.join(process.env.APPDATA, productName)');
 
     const signedBuild = readFileSync(path.join(repositoryRoot, 'scripts', 'build-signed-macos.mjs'), 'utf8');
     expect(signedBuild).toContain("'--skip-launch'");

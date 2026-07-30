@@ -5,6 +5,7 @@ All notable Caul changes are recorded here.
 ## [0.1.50]
 
 - Normalised Linux x64 update metadata to the published `caul-x64.AppImage` name after Electron Builder emits its architecture-native `caul-x86_64.AppImage` name.
+- Made native Windows updater audits use an explicit isolated user-data directory so retained settings and TUF trust are verified at the exact path used by the packaged app.
 - Carries forward the cross-channel artefact retention and native TUF audit corrections from the unpublished 0.1.49 candidate.
 
 ## [0.1.49] (unpublished release candidate)
