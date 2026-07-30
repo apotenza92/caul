@@ -1,36 +1,28 @@
 import { createRequire } from 'node:module';
-import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync } from 'node:fs';
-import { createServer } from 'node:http';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 const require = createRequire(import.meta.url);
 const {
+  automaticInstallSupported,
   compareVersions,
   configureUpdaterFeed,
-  downloadAndVerifyAsset,
   findTargetRelease,
   isUpdateSmokeDisabled,
   isLocalDevChannel,
+  normaliseUpdaterReleaseNotes,
   normaliseReleaseVersion,
   normaliseUpdateFrequency,
-  parseReleaseChecksums,
-  resolveExpectedAssetChecksum,
+  resolveTufTestRepository,
   resolveUpdateTestFeed,
-  selectReleaseChecksumAsset,
   selectUpdateAsset,
-  shouldCheckForUpdates
+  shouldCheckForUpdates,
+  usesTufUpdater,
+  validatePackagedTufMetadata,
+  writeUpdaterTestEvent
 } = require('./updater.cjs');
-
-const servers = [];
-
-afterEach(async () => {
-  await Promise.all(servers.splice(0).map((server) => (
-    new Promise((resolve) => server.close(resolve))
-  )));
-});
 
 describe('updater helpers', () => {
   it('defaults invalid update frequencies to weekly', () => {
@@ -52,6 +44,13 @@ describe('updater helpers', () => {
       CAUL_UPDATE_TEST_MODE: '1',
       CAUL_UPDATE_FEED_URL: 'http://127.0.0.1:1234/'
     })).toBe('http://127.0.0.1:1234/');
+    expect(resolveTufTestRepository({
+      CAUL_TUF_TEST_REPOSITORY_URL: 'http://127.0.0.1:1234/tuf'
+    })).toBe('');
+    expect(resolveTufTestRepository({
+      CAUL_UPDATE_TEST_MODE: '1',
+      CAUL_TUF_TEST_REPOSITORY_URL: 'http://127.0.0.1:1234/tuf'
+    })).toBe('http://127.0.0.1:1234/tuf');
   });
 
   it('selects the stable or beta metadata file explicitly for generic updater feeds', () => {
@@ -173,131 +172,91 @@ describe('updater helpers', () => {
     } finally {
       delete process.env.APPIMAGE;
     }
-    expect(selectReleaseChecksumAsset(assets)).toMatchObject({ url: 'checksums' });
-    expect(selectReleaseChecksumAsset(assets.filter((asset) => asset.name !== 'SHA256SUMS'))).toBeNull();
     expect(selectUpdateAsset(assets, { appChannel: 'stable', arch: 'arm64', platform: 'darwin' })).toBeNull();
   });
 
-  it('parses exact release checksums and rejects missing, malformed or duplicate entries', () => {
-    const stable = 'a'.repeat(64);
-    const beta = 'b'.repeat(64);
-    const manifest = `${stable}  Caul-windows-arm64-setup.exe\n${beta}  Caul-Beta-windows-arm64-setup.exe\n`;
-
-    expect(parseReleaseChecksums(manifest)).toEqual(new Map([
-      ['Caul-windows-arm64-setup.exe', stable],
-      ['Caul-Beta-windows-arm64-setup.exe', beta]
-    ]));
-    expect(resolveExpectedAssetChecksum(manifest, 'Caul-windows-arm64-setup.exe')).toBe(stable);
-    expect(resolveExpectedAssetChecksum(manifest, 'Caul-Beta-windows-arm64-setup.exe')).toBe(beta);
-    expect(() => resolveExpectedAssetChecksum(manifest, 'caul-arm64.deb')).toThrow(/does not contain/);
-    expect(() => parseReleaseChecksums('not-a-checksum')).toThrow(/malformed/);
-    expect(() => parseReleaseChecksums(`${stable}  package.exe\n${stable}  package.exe\n`)).toThrow(/duplicate/);
+  it('allows native automatic installation only where a maintained transition exists', () => {
+    expect(automaticInstallSupported('darwin', {})).toBe(true);
+    expect(automaticInstallSupported('win32', {})).toBe(true);
+    expect(automaticInstallSupported('linux', { APPIMAGE: '/opt/Caul.AppImage' })).toBe(true);
+    expect(automaticInstallSupported('linux', {})).toBe(false);
+    expect(usesTufUpdater('win32', {})).toBe(true);
+    expect(usesTufUpdater('linux', { APPIMAGE: '/opt/Caul.AppImage' })).toBe(true);
+    expect(usesTufUpdater('linux', {})).toBe(false);
+    expect(usesTufUpdater('darwin', {})).toBe(false);
   });
 
-  it('downloads a package only after its published SHA-256 and size match', async () => {
-    const packageName = 'Caul-windows-x64-setup.exe';
-    const packageBytes = Buffer.from('verified Windows package fixture');
-    const checksum = createHash('sha256').update(packageBytes).digest('hex');
-    const server = await startFixtureServer({
-      '/SHA256SUMS': `${checksum}  ${packageName}\n`,
-      [`/${packageName}`]: packageBytes
+  it('requires the packaged channel and TUF target to match the running product', () => {
+    expect(validatePackagedTufMetadata({
+      caulReleaseChannel: 'stable',
+      caulTufRepositoryUrl: 'https://updates.example/caul/stable/win32/x64/tuf',
+      caulUpdateTargetName: 'latest.yml'
+    }, {
+      appChannel: 'stable'
+    })).toEqual({
+      channel: 'stable',
+      repositoryUrl: 'https://updates.example/caul/stable/win32/x64/tuf',
+      targetName: 'latest.yml'
     });
-    const downloadsDirectory = mkdtempSync(join(tmpdir(), 'caul-updater-download-'));
-    const baseUrl = `http://127.0.0.1:${server.address().port}`;
-
-    const filePath = await downloadAndVerifyAsset({
-      asset: { name: packageName, size: packageBytes.length, url: `${baseUrl}/${packageName}` },
-      checksumAsset: { name: 'SHA256SUMS', url: `${baseUrl}/SHA256SUMS` },
-      downloadsDirectory,
-      userAgent: 'Caul/Test'
+    expect(validatePackagedTufMetadata({
+      caulReleaseChannel: 'beta',
+      caulTufRepositoryUrl: 'https://production.invalid',
+      caulUpdateTargetName: 'beta.yml'
+    }, {
+      appChannel: 'beta',
+      testRepositoryUrl: 'http://127.0.0.1:43124/tuf'
+    })).toMatchObject({
+      repositoryUrl: 'http://127.0.0.1:43124/tuf'
     });
-
-    expect(readFileSync(filePath)).toEqual(packageBytes);
+    expect(() => validatePackagedTufMetadata({
+      caulReleaseChannel: 'beta',
+      caulTufRepositoryUrl: 'https://updates.example/caul/beta/win32/x64/tuf',
+      caulUpdateTargetName: 'beta.yml'
+    }, {
+      appChannel: 'stable'
+    })).toThrow(/invalid/);
   });
 
-  it.each([
-    {
-      label: 'missing checksum manifest',
-      checksumAsset: null,
-      manifest: null,
-      expected: /does not provide/
-    },
-    {
-      label: 'missing package checksum',
-      manifest: `${'a'.repeat(64)}  another-package.exe\n`,
-      expected: /does not contain/
-    },
-    {
-      label: 'malformed checksum manifest',
-      manifest: 'not-a-checksum\n',
-      expected: /malformed/
-    },
-    {
-      label: 'checksum mismatch',
-      manifest: `${'0'.repeat(64)}  Caul-windows-arm64-setup.exe\n`,
-      expected: /verification failed/
-    },
-    {
-      label: 'download size mismatch',
-      manifest: null,
-      sizeAdjustment: 1,
-      expected: /size mismatch/
+  it('normalises release notes without interpreting markup', () => {
+    expect(normaliseUpdaterReleaseNotes('  Fixed updates.  ')).toBe('Fixed updates.');
+    expect(normaliseUpdaterReleaseNotes([
+      { version: '0.1.44', note: 'Fixed TUF refresh.' },
+      'Improved restart handling.'
+    ])).toBe('Fixed TUF refresh.\n\nImproved restart handling.');
+    expect(normaliseUpdaterReleaseNotes(undefined)).toBe('');
+  });
+
+  it('writes updater audit events atomically only when a test path is provided', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'caul-updater-events-'));
+    try {
+      const eventPath = join(directory, 'events', 'updater.json');
+      writeUpdaterTestEvent('', 'ignored');
+      writeUpdaterTestEvent(eventPath, 'update-downloaded', {
+        currentVersion: '0.1.43',
+        version: '0.1.44'
+      });
+      expect(JSON.parse(readFileSync(eventPath, 'utf8'))).toEqual({
+        name: 'update-downloaded',
+        currentVersion: '0.1.43',
+        version: '0.1.44'
+      });
+      expect(readFileSync(`${eventPath}.jsonl`, 'utf8')).toContain('"update-downloaded"');
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
     }
-  ])('rejects a download with $label and leaves no package behind', async ({
-    checksumAsset: checksumOverride,
-    expected,
-    manifest: requestedManifest,
-    sizeAdjustment = 0
-  }) => {
-    const packageName = 'Caul-windows-arm64-setup.exe';
-    const packageBytes = Buffer.from('untrusted package fixture');
-    const actualChecksum = createHash('sha256').update(packageBytes).digest('hex');
-    const manifest = requestedManifest ?? `${actualChecksum}  ${packageName}\n`;
-    const server = await startFixtureServer({
-      '/SHA256SUMS': manifest,
-      [`/${packageName}`]: packageBytes
-    });
-    const downloadsDirectory = mkdtempSync(join(tmpdir(), 'caul-updater-reject-'));
-    const baseUrl = `http://127.0.0.1:${server.address().port}`;
-    const checksumAsset = checksumOverride === null
-      ? null
-      : { name: 'SHA256SUMS', url: `${baseUrl}/SHA256SUMS` };
-
-    await expect(downloadAndVerifyAsset({
-      asset: {
-        name: packageName,
-        size: packageBytes.length + sizeAdjustment,
-        url: `${baseUrl}/${packageName}`
-      },
-      checksumAsset,
-      downloadsDirectory,
-      userAgent: 'Caul/Test'
-    })).rejects.toThrow(expected);
-    expect(() => readFileSync(join(downloadsDirectory, packageName))).toThrow();
-    expect(() => readFileSync(join(downloadsDirectory, `${packageName}.download`))).toThrow();
   });
 
-  it('keeps automatic package installation scoped to signed macOS builds', () => {
-    const source = require('node:fs').readFileSync(require.resolve('./updater.cjs'), 'utf8');
-    expect(source).not.toContain('isLinuxAppImage');
-    expect(source.match(/process\.platform === 'darwin'/g)?.length).toBeGreaterThanOrEqual(4);
+  it('removes the unauthenticated checksum-download path', () => {
+    const source = readFileSync(require.resolve('./updater.cjs'), 'utf8');
+    expect(source).toContain('createTufVerifiedUpdateFeed');
+    expect(source).toContain("path.join(app.getPath('userData'), 'update-trust')");
+    expect(source).toContain('await closeVerifiedFeed()');
+    expect(source).toContain("return recordError(error, 'Update download failed.')");
+    expect(source).toContain("return recordError(error, 'Update installation could not start.')");
+    expect(source).not.toContain('downloadAndVerifyAsset');
+    expect(source).not.toContain('parseReleaseChecksums');
+    expect(source).not.toContain('showItemInFolder');
     expect(source).toContain('autoUpdater.autoDownload = false');
     expect(source).toContain('autoUpdater.autoInstallOnAppQuit = false');
   });
 });
-
-async function startFixtureServer(routes) {
-  const server = createServer((request, response) => {
-    const body = routes[request.url];
-    if (body == null) {
-      response.writeHead(404);
-      response.end();
-      return;
-    }
-    response.writeHead(200, { 'Content-Type': 'application/octet-stream' });
-    response.end(body);
-  });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  servers.push(server);
-  return server;
-}

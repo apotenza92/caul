@@ -1,9 +1,9 @@
 const { app, BrowserWindow, dialog, shell } = require('electron');
-const { createHash } = require('node:crypto');
 const fsSync = require('node:fs');
 const https = require('node:https');
 const os = require('node:os');
 const path = require('node:path');
+const { createTufVerifiedUpdateFeed } = require('./tufUpdateFeed.cjs');
 
 const updateFrequencyFileName = 'update-frequency.json';
 const lastUpdateCheckFileName = 'last-update-check.json';
@@ -23,19 +23,29 @@ const updateFrequencyMs = {
 function createUpdaterService({
   appChannel,
   appName,
+  createVerifiedFeed = createTufVerifiedUpdateFeed,
+  env = process.env,
   isDev,
   onAfterSuccessfulCheck,
   onBeforeInstallDownloadedUpdate,
+  packageMetadata = require('../package.json'),
+  platform = process.platform,
+  resourcesPath = process.resourcesPath,
   forceEnabled = false,
   repositoryUrl = 'https://github.com/apotenza92/caul/releases'
 } = {}) {
   const { autoUpdater } = require('electron-updater');
-  const testFeedUrl = resolveUpdateTestFeed(process.env);
+  const testFeedUrl = resolveUpdateTestFeed(env);
+  const testTufRepositoryUrl = resolveTufTestRepository(env);
+  const testMode = env.CAUL_UPDATE_TEST_MODE === '1';
+  const updaterEventPath = testMode ? String(env.CAUL_UPDATER_EVENT_PATH ?? '').trim() : '';
   let scheduleTimer = null;
   let checking = false;
   let downloading = false;
   let lastResult = null;
   let availableUpdate = null;
+  let verifiedFeed = null;
+  let verifiedFeedPromise = null;
 
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
@@ -63,18 +73,20 @@ function createUpdaterService({
       status: 'ready',
       message: 'Update downloaded. Restart Caul to install it.'
     };
+    writeUpdaterTestEvent(updaterEventPath, 'update-downloaded', {
+      currentVersion: app.getVersion(),
+      version: availableUpdate?.version
+    });
     emitStatus();
+    if (testMode && env.CAUL_E2E_INSTALL_UPDATE === '1') {
+      setTimeout(() => {
+        void installDownloadedUpdate();
+      }, 100).unref?.();
+    }
   });
 
   autoUpdater.on('error', (error) => {
-    checking = false;
-    downloading = false;
-    lastResult = {
-      ok: false,
-      status: 'error',
-      message: error?.message ?? 'Update check failed.'
-    };
-    emitStatus();
+    recordError(error);
   });
 
   function isEnabled() {
@@ -130,7 +142,7 @@ function createUpdaterService({
       appChannel,
       appName,
       appVersion: app.getVersion(),
-      automaticInstall: process.platform === 'darwin',
+      automaticInstall: automaticInstallSupported(platform, env),
       availableUpdate,
       checking,
       downloading,
@@ -150,8 +162,34 @@ function createUpdaterService({
     });
   }
 
+  function recordError(error, fallbackMessage = 'Update check failed.') {
+    const message = error?.message ?? fallbackMessage;
+    checking = false;
+    downloading = false;
+    lastResult = {
+      ok: false,
+      status: 'error',
+      message
+    };
+    writeUpdaterTestEvent(updaterEventPath, 'error', {
+      currentVersion: app.getVersion(),
+      message
+    });
+    emitStatus();
+    return status();
+  }
+
   function startSchedule() {
     stopSchedule();
+
+    if (testMode && env.CAUL_E2E_EXPECT_VERSION === app.getVersion()) {
+      writeUpdaterTestEvent(updaterEventPath, 'updated-runtime-launched', {
+        currentVersion: app.getVersion(),
+        pid: process.pid
+      });
+      setTimeout(() => app.quit(), 100).unref?.();
+      return;
+    }
 
     if (!isEnabled()) {
       emitStatus();
@@ -223,6 +261,56 @@ function createUpdaterService({
     emitStatus();
 
     try {
+      if (usesTufUpdater(platform, env)) {
+        const feed = await ensureVerifiedFeed();
+        await feed.refresh();
+        configureUpdaterFeed(autoUpdater, {
+          appChannel,
+          testFeedUrl: feed.feedUrl
+        });
+        const result = await autoUpdater.checkForUpdates();
+        const updateInfo = result?.updateInfo;
+        const currentVersion = app.getVersion();
+        writeLastCheckTime();
+        await notifyAfterSuccessfulCheck({ automatic });
+        if (!updateInfo?.version || !isVersionNewer(updateInfo.version, currentVersion)) {
+          availableUpdate = null;
+          checking = false;
+          lastResult = {
+            ok: true,
+            status: 'not-available',
+            message: 'Caul is up to date.'
+          };
+          emitStatus();
+          return status();
+        }
+        availableUpdate = {
+          authenticated: true,
+          downloadUrl: repositoryUrl,
+          prerelease: appChannel === 'beta',
+          releaseName: updateInfo.releaseName || `Caul ${updateInfo.version}`,
+          releaseNotes: normaliseUpdaterReleaseNotes(updateInfo.releaseNotes),
+          version: updateInfo.version
+        };
+        checking = false;
+        lastResult = {
+          ok: true,
+          status: 'available',
+          message: `Caul ${updateInfo.version} is available.`
+        };
+        writeUpdaterTestEvent(updaterEventPath, 'update-available', {
+          currentVersion,
+          version: updateInfo.version
+        });
+        emitStatus();
+        if (testMode && env.CAUL_E2E_INSTALL_UPDATE === '1') {
+          setTimeout(() => {
+            void downloadAndInstall();
+          }, 100).unref?.();
+        }
+        return status();
+      }
+
       const releases = await fetchGitHubReleases(testFeedUrl ? `${testFeedUrl.replace(/\/$/, '')}/releases.json` : releasesApiUrl);
       const targetRelease = findTargetRelease(releases, appChannel === 'beta');
       const currentVersion = app.getVersion();
@@ -245,9 +333,8 @@ function createUpdaterService({
         asset: selectUpdateAsset(targetRelease.assets, {
           appChannel,
           arch: process.arch,
-          platform: process.platform
+          platform
         }),
-        checksumAsset: selectReleaseChecksumAsset(targetRelease.assets),
         downloadUrl: targetRelease.htmlUrl,
         prerelease: targetRelease.prerelease,
         releaseName: targetRelease.name,
@@ -262,21 +349,14 @@ function createUpdaterService({
       };
       emitStatus();
 
-      if (process.platform === 'darwin') {
+      if (platform === 'darwin') {
         autoUpdater.allowPrerelease = targetRelease.prerelease;
         configureUpdaterFeed(autoUpdater, { appChannel, testFeedUrl });
       }
 
       return status();
     } catch (error) {
-      checking = false;
-      lastResult = {
-        ok: false,
-        status: 'error',
-        message: error?.message ?? 'Update check failed.'
-      };
-      emitStatus();
-      return status();
+      return recordError(error);
     }
   }
 
@@ -301,61 +381,38 @@ function createUpdaterService({
       return status();
     }
 
-    if (process.platform === 'darwin') {
-      downloading = true;
-      lastResult = {
-        ok: true,
-        status: 'downloading',
-        message: 'Downloading update.'
-      };
-      emitStatus();
-      autoUpdater.allowPrerelease = Boolean(availableUpdate.prerelease);
-      configureUpdaterFeed(autoUpdater, { appChannel, testFeedUrl });
-      await autoUpdater.checkForUpdates();
-      await autoUpdater.downloadUpdate();
-      return status();
-    }
-
-    if (availableUpdate.asset?.url) {
-      downloading = true;
-      lastResult = {
-        ok: true,
-        status: 'downloading',
-        message: `Downloading ${availableUpdate.asset.name}.`
-      };
-      emitStatus();
+    if (automaticInstallSupported(platform, env)) {
       try {
-        const filePath = await downloadAndVerifyAsset({
-          asset: availableUpdate.asset,
-          checksumAsset: availableUpdate.checksumAsset,
-          downloadsDirectory: app.getPath('downloads'),
-          userAgent: `Caul/${app.getVersion()}`
-        });
-        downloading = false;
+        downloading = true;
         lastResult = {
           ok: true,
-          status: 'downloaded',
-          message: `Downloaded and verified ${availableUpdate.asset.name} in Downloads.`
+          status: 'downloading',
+          message: 'Downloading update.'
         };
         emitStatus();
-        shell.showItemInFolder(filePath);
+        autoUpdater.allowPrerelease = Boolean(availableUpdate.prerelease);
+        if (usesTufUpdater(platform, env)) {
+          const feed = await ensureVerifiedFeed();
+          await feed.refresh();
+          configureUpdaterFeed(autoUpdater, { appChannel, testFeedUrl: feed.feedUrl });
+        } else {
+          configureUpdaterFeed(autoUpdater, { appChannel, testFeedUrl });
+        }
+        await autoUpdater.checkForUpdates();
+        await autoUpdater.downloadUpdate();
+        return status();
       } catch (error) {
-        downloading = false;
-        lastResult = {
-          ok: false,
-          status: 'error',
-          message: error?.message ?? 'Update download verification failed.'
-        };
-        emitStatus();
+        return recordError(error, 'Update download failed.');
       }
-      return status();
     }
 
     await shell.openExternal(availableUpdate.downloadUrl || repositoryUrl);
     lastResult = {
       ok: true,
       status: 'external',
-      message: 'Opened the Caul release page.'
+      message: platform === 'linux'
+        ? 'Opened the Caul release page. Upgrade this package with your system package manager.'
+        : 'Opened the Caul release page.'
     };
     emitStatus();
     return status();
@@ -370,10 +427,15 @@ function createUpdaterService({
     };
     emitStatus();
 
-    if (process.platform === 'darwin') {
-      onBeforeInstallDownloadedUpdate?.();
-      autoUpdater.quitAndInstall(false, true);
-      return status();
+    if (automaticInstallSupported(platform, env)) {
+      try {
+        onBeforeInstallDownloadedUpdate?.();
+        await closeVerifiedFeed();
+        autoUpdater.quitAndInstall(platform === 'win32', true);
+        return status();
+      } catch (error) {
+        return recordError(error, 'Update installation could not start.');
+      }
     }
 
     await shell.openExternal(availableUpdate?.downloadUrl || repositoryUrl);
@@ -405,6 +467,45 @@ function createUpdaterService({
     });
   }
 
+  async function ensureVerifiedFeed() {
+    if (!usesTufUpdater(platform, env)) {
+      throw new Error('TUF updating is unavailable for this package.');
+    }
+    if (verifiedFeed) return verifiedFeed;
+    if (verifiedFeedPromise) return verifiedFeedPromise;
+    const metadata = validatePackagedTufMetadata(packageMetadata, {
+      appChannel,
+      testRepositoryUrl: testTufRepositoryUrl
+    });
+    verifiedFeedPromise = createVerifiedFeed({
+      allowLoopbackHttp: Boolean(testTufRepositoryUrl),
+      embeddedRootPath: path.join(resourcesPath, 'update-trust', 'root.json'),
+      repositoryUrl: metadata.repositoryUrl,
+      targetName: metadata.targetName,
+      trustDir: path.join(app.getPath('userData'), 'update-trust')
+    }).then((feed) => {
+      verifiedFeed = feed;
+      return feed;
+    }).finally(() => {
+      verifiedFeedPromise = null;
+    });
+    return verifiedFeedPromise;
+  }
+
+  let verifiedFeedClosePromise = null;
+  function closeVerifiedFeed() {
+    if (!verifiedFeed) return Promise.resolve();
+    if (!verifiedFeedClosePromise) {
+      verifiedFeedClosePromise = Promise.resolve()
+        .then(() => verifiedFeed.close())
+        .finally(() => {
+          verifiedFeed = null;
+          verifiedFeedClosePromise = null;
+        });
+    }
+    return verifiedFeedClosePromise;
+  }
+
   return {
     checkNow,
     downloadAndInstall,
@@ -414,7 +515,10 @@ function createUpdaterService({
     showAvailableDialog,
     startSchedule,
     status,
-    stopSchedule
+    stopSchedule: () => {
+      stopSchedule();
+      void closeVerifiedFeed();
+    }
   };
 }
 
@@ -460,6 +564,55 @@ function configureUpdaterFeed(autoUpdater, { appChannel, testFeedUrl }) {
     repo: githubRepo,
     channel
   });
+}
+
+function automaticInstallSupported(platform = process.platform, env = process.env) {
+  return platform === 'darwin' || platform === 'win32' || (platform === 'linux' && Boolean(env.APPIMAGE));
+}
+
+function usesTufUpdater(platform = process.platform, env = process.env) {
+  return platform !== 'darwin' && automaticInstallSupported(platform, env);
+}
+
+function validatePackagedTufMetadata(packageMetadata, {
+  appChannel,
+  testRepositoryUrl
+} = {}) {
+  const channel = packageMetadata?.caulReleaseChannel;
+  const repositoryUrl = testRepositoryUrl || packageMetadata?.caulTufRepositoryUrl;
+  const targetName = packageMetadata?.caulUpdateTargetName;
+  if (
+    channel !== appChannel
+    || !['stable', 'beta'].includes(channel)
+    || typeof repositoryUrl !== 'string'
+    || !repositoryUrl
+    || typeof targetName !== 'string'
+    || !targetName
+  ) {
+    throw new Error('Packaged Caul TUF updater metadata is invalid.');
+  }
+  return { channel, repositoryUrl, targetName };
+}
+
+function normaliseUpdaterReleaseNotes(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => typeof entry === 'string' ? entry : entry?.note)
+      .filter((entry) => typeof entry === 'string' && entry.trim())
+      .join('\n\n');
+  }
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function writeUpdaterTestEvent(filePath, name, details = {}) {
+  if (!filePath) return;
+  const target = path.resolve(filePath);
+  const event = { name, ...details };
+  fsSync.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+  fsSync.appendFileSync(`${target}.jsonl`, `${JSON.stringify(event)}\n`, { mode: 0o600 });
+  const temporary = `${target}.${process.pid}.tmp`;
+  fsSync.writeFileSync(temporary, `${JSON.stringify(event)}\n`, { mode: 0o600 });
+  fsSync.renameSync(temporary, target);
 }
 
 function fetchGitHubReleases(url = releasesApiUrl) {
@@ -554,223 +707,6 @@ function selectUpdateAsset(assets, { appChannel, arch, platform }) {
   return null;
 }
 
-function selectReleaseChecksumAsset(assets) {
-  const candidates = Array.isArray(assets) ? assets : [];
-  return candidates.find((asset) => asset?.name === 'SHA256SUMS' && typeof asset.url === 'string') ?? null;
-}
-
-function parseReleaseChecksums(contents) {
-  if (typeof contents !== 'string') {
-    throw new Error('Release checksum manifest is unreadable.');
-  }
-
-  const checksums = new Map();
-  const lines = contents.split(/\r?\n/).filter((line) => line.length > 0);
-  if (lines.length === 0) {
-    throw new Error('Release checksum manifest is empty.');
-  }
-
-  for (const line of lines) {
-    const match = line.match(/^([a-fA-F0-9]{64}) {2}([^/\\]+)$/);
-    if (!match) {
-      throw new Error('Release checksum manifest contains a malformed entry.');
-    }
-    const [, checksum, fileName] = match;
-    if (checksums.has(fileName)) {
-      throw new Error(`Release checksum manifest contains duplicate entries for ${fileName}.`);
-    }
-    checksums.set(fileName, checksum.toLowerCase());
-  }
-
-  return checksums;
-}
-
-function resolveExpectedAssetChecksum(contents, assetName) {
-  if (typeof assetName !== 'string' || path.basename(assetName) !== assetName) {
-    throw new Error('Update asset name is invalid.');
-  }
-  const checksum = parseReleaseChecksums(contents).get(assetName);
-  if (!checksum) {
-    throw new Error(`Release checksum manifest does not contain ${assetName}.`);
-  }
-  return checksum;
-}
-
-async function downloadAndVerifyAsset({
-  asset,
-  checksumAsset,
-  downloadsDirectory,
-  userAgent
-}) {
-  if (!asset || typeof asset.name !== 'string' || typeof asset.url !== 'string') {
-    throw new Error('The selected update package is invalid.');
-  }
-  if (path.basename(asset.name) !== asset.name) {
-    throw new Error('The selected update package name is invalid.');
-  }
-  if (!checksumAsset || typeof checksumAsset.url !== 'string') {
-    throw new Error('This release does not provide the required SHA256SUMS integrity manifest.');
-  }
-
-  const checksumManifest = await downloadText(checksumAsset.url, { userAgent });
-  const expectedChecksum = resolveExpectedAssetChecksum(checksumManifest, asset.name);
-  const filePath = resolveAvailableDownloadPath(downloadsDirectory, asset.name);
-  const temporaryPath = `${filePath}.download`;
-  fsSync.mkdirSync(downloadsDirectory, { recursive: true });
-  fsSync.rmSync(temporaryPath, { force: true });
-
-  try {
-    const downloaded = await downloadFile(asset.url, temporaryPath, { userAgent });
-    if (Number.isSafeInteger(asset.size) && asset.size >= 0 && downloaded.size !== asset.size) {
-      throw new Error(`Downloaded size mismatch for ${asset.name}.`);
-    }
-    if (downloaded.sha256 !== expectedChecksum) {
-      throw new Error(`SHA-256 verification failed for ${asset.name}.`);
-    }
-    fsSync.renameSync(temporaryPath, filePath);
-    return filePath;
-  } catch (error) {
-    fsSync.rmSync(temporaryPath, { force: true });
-    throw error;
-  }
-}
-
-function resolveAvailableDownloadPath(directory, fileName) {
-  const initialPath = path.join(directory, fileName);
-  if (!fsSync.existsSync(initialPath)) {
-    return initialPath;
-  }
-
-  const extension = path.extname(fileName);
-  const stem = fileName.slice(0, fileName.length - extension.length);
-  for (let index = 1; index <= 10_000; index += 1) {
-    const candidate = path.join(directory, `${stem} (${index})${extension}`);
-    if (!fsSync.existsSync(candidate)) {
-      return candidate;
-    }
-  }
-  throw new Error(`Could not select an available download path for ${fileName}.`);
-}
-
-function downloadText(url, options = {}, redirectCount = 0) {
-  return new Promise((resolve, reject) => {
-    const request = requestUrl(url, {
-      headers: {
-        'User-Agent': options.userAgent ?? 'Caul'
-      }
-    }, (response) => {
-      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-        response.resume();
-        if (redirectCount >= 5) {
-          reject(new Error('Update download exceeded the redirect limit.'));
-          return;
-        }
-        const redirectUrl = new URL(response.headers.location, url).toString();
-        downloadText(redirectUrl, options, redirectCount + 1).then(resolve, reject);
-        return;
-      }
-
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        response.resume();
-        reject(new Error(`Checksum download returned HTTP ${response.statusCode}.`));
-        return;
-      }
-
-      const chunks = [];
-      let size = 0;
-      response.on('data', (chunk) => {
-        size += chunk.length;
-        if (size > 1024 * 1024) {
-          request.destroy(new Error('Release checksum manifest exceeds 1 MiB.'));
-          return;
-        }
-        chunks.push(chunk);
-      });
-      response.on('end', () => {
-        resolve(Buffer.concat(chunks).toString('utf8'));
-      });
-      response.on('error', reject);
-    });
-
-    request.on('error', reject);
-    request.setTimeout(15_000, () => {
-      request.destroy(new Error('Checksum download timed out.'));
-    });
-  });
-}
-
-function downloadFile(url, destination, options = {}, redirectCount = 0) {
-  return new Promise((resolve, reject) => {
-    let file = null;
-    let settled = false;
-    const fail = (error) => {
-      if (settled) return;
-      settled = true;
-      file?.destroy();
-      reject(error);
-    };
-    const request = requestUrl(url, {
-      headers: {
-        'User-Agent': options.userAgent ?? 'Caul'
-      }
-    }, (response) => {
-      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-        response.resume();
-        if (redirectCount >= 5) {
-          fail(new Error('Update download exceeded the redirect limit.'));
-          return;
-        }
-        const redirectUrl = new URL(response.headers.location, url).toString();
-        settled = true;
-        downloadFile(redirectUrl, destination, options, redirectCount + 1).then(resolve, reject);
-        return;
-      }
-
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        response.resume();
-        fail(new Error(`Update download returned HTTP ${response.statusCode}.`));
-        return;
-      }
-
-      const hash = createHash('sha256');
-      file = fsSync.createWriteStream(destination);
-      let size = 0;
-
-      response.on('data', (chunk) => {
-        hash.update(chunk);
-        size += chunk.length;
-      });
-      response.on('error', fail);
-      file.on('error', fail);
-      file.on('finish', () => {
-        file.close(() => {
-          if (settled) return;
-          settled = true;
-          resolve({ sha256: hash.digest('hex'), size });
-        });
-      });
-      response.pipe(file);
-    });
-
-    request.on('error', fail);
-    request.setTimeout(30_000, () => {
-      request.destroy(new Error('Update download timed out.'));
-    });
-  });
-}
-
-function requestUrl(url, options, onResponse) {
-  const parsed = new URL(url);
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-    throw new Error(`Unsupported update download protocol: ${parsed.protocol}`);
-  }
-  if (parsed.protocol === 'http:' && parsed.hostname !== '127.0.0.1' && parsed.hostname !== '[::1]') {
-    throw new Error('Insecure update downloads are allowed only from a loopback test feed.');
-  }
-  const client = parsed.protocol === 'https:' ? https : require('node:http');
-  return client.get(parsed, options, onResponse);
-}
-
 function normaliseReleaseVersion(value) {
   const version = String(value ?? '').trim().replace(/^v/i, '');
   return /^(?:\d+\.\d+\.\d+|\d+\.\d+\.\d+-beta\.[1-9]\d*)$/.test(version) ? version : null;
@@ -783,6 +719,12 @@ function isUpdateSmokeDisabled(env = process.env) {
 function resolveUpdateTestFeed(env = process.env) {
   return env.CAUL_UPDATE_TEST_MODE === '1'
     ? String(env.CAUL_UPDATE_FEED_URL ?? '').trim()
+    : '';
+}
+
+function resolveTufTestRepository(env = process.env) {
+  return env.CAUL_UPDATE_TEST_MODE === '1'
+    ? String(env.CAUL_TUF_TEST_REPOSITORY_URL ?? '').trim()
     : '';
 }
 
@@ -826,20 +768,22 @@ function parseVersion(version) {
 }
 
 module.exports = {
+  automaticInstallSupported,
   compareVersions,
   configureUpdaterFeed,
   createUpdaterService,
-  downloadAndVerifyAsset,
   findTargetRelease,
   isUpdateSmokeDisabled,
   isLocalDevChannel,
+  normaliseUpdaterReleaseNotes,
   normaliseReleaseVersion,
   normaliseUpdateFrequency,
-  parseReleaseChecksums,
-  resolveExpectedAssetChecksum,
+  resolveTufTestRepository,
   resolveUpdateTestFeed,
-  selectReleaseChecksumAsset,
   selectUpdateAsset,
   shouldCheckForUpdates,
+  usesTufUpdater,
+  validatePackagedTufMetadata,
+  writeUpdaterTestEvent,
   updateFrequencies
 };

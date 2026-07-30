@@ -69,7 +69,8 @@ describe('packaged dependency boundary', () => {
       '@earendil-works/pi-coding-agent',
       'brace-expansion',
       'electron-updater',
-      'pdfjs-dist'
+      'pdfjs-dist',
+      'tuf-js'
     ]) {
       expect(packageJson.dependencies?.[packageName]).toEqual(expect.any(String));
     }
@@ -156,6 +157,22 @@ describe('electron-builder Windows config', () => {
       to: expect.stringContaining('pi-coding-agent')
     }));
   });
+
+  it('pins the stable Windows package to its TUF channel contract', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const config = loadConfig({
+      CAUL_PACKAGE_ARCH: 'x64',
+      CAUL_PACKAGE_PLATFORM: 'win'
+    });
+
+    expect(config.extraMetadata).toMatchObject({
+      caulReleaseChannel: 'stable',
+      caulTufRepositoryUrl: 'https://raw.githubusercontent.com/apotenza92/caul/updates/stable/win32/x64/tuf',
+      caulUpdateFeedUrl: 'https://raw.githubusercontent.com/apotenza92/caul/updates/stable/win32/x64',
+      caulUpdateTargetName: 'latest.yml'
+    });
+  });
 });
 
 describe('electron-builder Linux config', () => {
@@ -184,6 +201,22 @@ describe('electron-builder Linux config', () => {
     expect(config.extraResources[0]).toMatchObject({
       from: 'target/x86_64-unknown-linux-gnu/release/caul-desktop-backend',
       to: 'bin/caul-desktop-backend'
+    });
+  });
+
+  it('pins beta AppImages to the distinct beta TUF channel contract', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const config = loadConfig({
+      CAUL_PACKAGE_ARCH: 'arm64',
+      CAUL_PACKAGE_PLATFORM: 'linux',
+      FORCE_BETA_BUILD: 'true'
+    });
+
+    expect(config.extraMetadata).toMatchObject({
+      caulReleaseChannel: 'beta',
+      caulTufRepositoryUrl: 'https://raw.githubusercontent.com/apotenza92/caul/updates/beta/linux/arm64/tuf',
+      caulUpdateTargetName: 'beta-linux-arm64.yml'
     });
   });
 });

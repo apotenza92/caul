@@ -93,6 +93,9 @@ describe('download page hero autodetect', () => {
 
     expect(hero(dom).label).toContain('Download Caul for Windows x64');
     expect(hero(dom).href).toContain('Caul-windows-x64-setup.exe');
+    expect(dom.window.document.getElementById('unsigned-package-notice').hidden).toBe(false);
+    expect(dom.window.document.getElementById('unsigned-package-notice').textContent)
+      .toContain('currently unsigned');
     expect([...dom.window.document.querySelectorAll('.arch-btn')].map((button) => button.id)).toEqual([
       'arch-x64',
       'arch-arm64'
@@ -125,6 +128,7 @@ describe('download page hero autodetect', () => {
 
     expect(hero(dom).label).toContain('Download Caul for Apple Silicon Mac');
     expect(hero(dom).href).toContain('Caul-macos-arm64.zip');
+    expect(dom.window.document.getElementById('unsigned-package-notice').hidden).toBe(true);
   });
 
   it('asks unknown platforms to choose a download', async () => {

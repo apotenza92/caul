@@ -3,6 +3,15 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync,
 import { basename, join, resolve } from 'node:path';
 import process from 'node:process';
 
+const feedOnlyMetadataNames = new Set([
+  'beta-linux-arm64.yml',
+  'beta-linux.yml',
+  'beta.yml',
+  'latest-linux-arm64.yml',
+  'latest-linux.yml',
+  'latest.yml'
+]);
+
 function option(name, fallback) {
   const index = process.argv.indexOf(name);
   return index >= 0 ? process.argv[index + 1] : fallback;
@@ -14,6 +23,7 @@ export function expectedReleaseAssetNames(channel) {
     'Caul-Beta-macos-arm64.zip.sha256',
     'beta-mac.yml',
     'notarization-beta-macos-arm64.json',
+    'notarization-beta-macos-arm64-distributable.json',
     ...['arm64', 'x64'].flatMap((arch) => [
       `Caul-Beta-windows-${arch}-setup.exe`,
       `Caul-Beta-windows-${arch}-setup.exe.blockmap`,
@@ -31,6 +41,7 @@ export function expectedReleaseAssetNames(channel) {
     'Caul-macos-arm64.zip.sha256',
     'latest-mac.yml',
     'notarization-stable-macos-arm64.json',
+    'notarization-stable-macos-arm64-distributable.json',
     ...['arm64', 'x64'].flatMap((arch) => [
       `Caul-windows-${arch}-setup.exe`,
       `Caul-windows-${arch}-setup.exe.blockmap`,
@@ -47,6 +58,7 @@ export function assembleReleaseAssets({ inputDirectory, outputDirectory, channel
     if (!artifact.isDirectory()) throw new Error(`Unexpected non-directory artifact input ${artifact.name}`);
     for (const entry of readdirSync(join(inputDirectory, artifact.name), { withFileTypes: true })) {
       if (!entry.isFile()) continue;
+      if (feedOnlyMetadataNames.has(entry.name)) continue;
       const source = join(inputDirectory, artifact.name, entry.name);
       if (sources.has(entry.name)) {
         throw new Error(`Release asset collision for ${entry.name}: ${sources.get(entry.name)} and ${source}`);

@@ -13,8 +13,8 @@ on:
   workflow_dispatch:
 
 env:
-  NODE_VERSION: "22"
-  RUST_TOOLCHAIN: "1.88"
+  NODE_VERSION: "22.22.1"
+  RUST_TOOLCHAIN: "1.88.0"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ inputs.ref || github.ref }}
@@ -49,6 +49,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
         timeout-minutes: 10
+
+      - name: Validate GitHub Actions workflows
+        run: |
+          set -euo pipefail
+          version=1.7.7
+          archive="actionlint_${version}_linux_amd64.tar.gz"
+          curl --fail --location --silent --show-error \
+            --retry 5 --retry-all-errors \
+            "https://github.com/rhysd/actionlint/releases/download/v${version}/${archive}" \
+            --output "$RUNNER_TEMP/$archive"
+          printf '%s  %s\n' \
+            '023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757' \
+            "$RUNNER_TEMP/$archive" \
+            | sha256sum --check --strict -
+          tar --extract --gzip --file "$RUNNER_TEMP/$archive" --directory "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" .github/workflows/*.yml
 
       - name: Check renderer and TypeScript
         run: npm run check

@@ -438,8 +438,21 @@ export function main() {
   const artifactPath = join(releaseDirectory, contract.artifactName);
   const blockmapPath = join(releaseDirectory, contract.blockmapName);
   const metadataPath = join(releaseDirectory, contract.metadataName);
-  const notarisationPath = join(releaseDirectory, `notarization-${channel}-macos-arm64.json`);
-  for (const requiredPath of [artifactPath, blockmapPath, metadataPath, notarisationPath]) {
+  const appNotarisationPath = join(
+    releaseDirectory,
+    `notarization-${channel}-macos-arm64.json`
+  );
+  const distributableNotarisationPath = join(
+    releaseDirectory,
+    `notarization-${channel}-macos-arm64-distributable.json`
+  );
+  for (const requiredPath of [
+    artifactPath,
+    blockmapPath,
+    metadataPath,
+    appNotarisationPath,
+    distributableNotarisationPath
+  ]) {
     if (!existsSync(requiredPath)) {
       fail(`Required macOS release output is missing: ${requiredPath}`);
     }
@@ -450,7 +463,8 @@ export function main() {
   validateChecksum(artifactPath, requireChecksum);
   validateBlockmap(blockmapPath, artifactPath);
   validateUpdateMetadata(metadataPath, artifactPath);
-  validateNotarisationRecord(JSON.parse(readFileSync(notarisationPath, 'utf8')));
+  validateNotarisationRecord(JSON.parse(readFileSync(appNotarisationPath, 'utf8')));
+  validateNotarisationRecord(JSON.parse(readFileSync(distributableNotarisationPath, 'utf8')));
 
   const temporaryDirectory = mkdtempSync(join(tmpdir(), 'caul-verify-'));
   const extractionDirectory = join(temporaryDirectory, 'zip');

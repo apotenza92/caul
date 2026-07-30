@@ -16,6 +16,8 @@ Electron and React own visible application behaviour. Rust owns capture process 
 
 - Use the repository's shadcn/ui components, CSS variables and Lucide icons for visible controls. Extend local primitives instead of adding a second component system.
 - Support Apple Silicon macOS, Windows ARM64/x64 and Linux ARM64/x64 in the current package matrix. Intel macOS is not supported.
+- Maintain stable and beta as separate products. Their bundle or application IDs, install paths, package names, `userData` directories and updater channels must not converge.
+- Authenticate Windows NSIS and Linux AppImage automatic updates with TUF before handing metadata to Electron Updater. Keep the root key offline, protect the three online role keys separately, and retain advanced root trust in the product's existing `userData` directory. Debian and RPM upgrades remain owned by the system package manager.
 - Use ScreenCaptureKit for product system-audio capture on macOS. Keep Core Audio Process Tap available only for explicit diagnostics and comparison.
 - Use WASAPI loopback through CPAL on Windows and PipeWire sink capture on Linux.
 - Keep microphone and system audio as independently selected sources.

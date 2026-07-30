@@ -1,0 +1,203 @@
+name: Native TUF Updater Audit
+
+permissions:
+  contents: read
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact release tag or commit to audit
+        required: true
+        type: string
+      release-channel:
+        description: Release projection built by the caller
+        required: true
+        type: string
+      version:
+        description: Candidate package version
+        required: true
+        type: string
+
+env:
+  NODE_VERSION: "22.22.1"
+  RUST_TOOLCHAIN: "1.88.0"
+
+jobs:
+  audit:
+    name: ${{ matrix.channel }} ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: ${{ fromJSON(inputs.release-channel == 'stable' && '["stable","beta"]' || '["beta"]') }}
+        target:
+          - windows-arm64
+          - windows-x64
+          - linux-arm64
+          - linux-x64
+        include:
+          - target: windows-arm64
+            platform: windows
+            os: win32
+            arch: arm64
+            runner: windows-11-arm
+          - target: windows-x64
+            platform: windows
+            os: win32
+            arch: x64
+            runner: windows-2025
+          - target: linux-arm64
+            platform: linux
+            os: linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+          - target: linux-x64
+            platform: linux
+            os: linux
+            arch: x64
+            runner: ubuntu-24.04
+    steps:
+      - name: Checkout exact release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Install Linux build and UI dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev xvfb
+
+      - name: Install dependencies
+        run: npm ci
+        timeout-minutes: 10
+
+      - name: Download exact candidate packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-${{ matrix.platform }}-${{ matrix.arch }}
+          path: candidate
+
+      - name: Validate candidate contract
+        shell: bash
+        env:
+          CAUL_AUDIT_ARCH: ${{ matrix.arch }}
+          CAUL_AUDIT_CHANNEL: ${{ matrix.channel }}
+          CAUL_AUDIT_PLATFORM: ${{ matrix.os }}
+          CAUL_CANDIDATE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          test "$(node -p "require('./package.json').version")" = "$CAUL_CANDIDATE_VERSION"
+          target_name="$(node -p \
+            "require('./electron/updateContract.cjs').updateMetadataFileName('$CAUL_AUDIT_PLATFORM', '$CAUL_AUDIT_ARCH', '$CAUL_AUDIT_CHANNEL')")"
+          test -f "candidate/$target_name"
+          test -f "candidate/updater-audit/$CAUL_AUDIT_CHANNEL/app.asar"
+          echo "CAUL_AUDIT_TARGET_NAME=$target_name" >> "$GITHUB_ENV"
+
+      - name: Create ephemeral test trust and synthetic previous package
+        shell: bash
+        env:
+          CAUL_AUDIT_ARCH: ${{ matrix.arch }}
+          CAUL_AUDIT_CHANNEL: ${{ matrix.channel }}
+          CAUL_AUDIT_PLATFORM: ${{ matrix.platform }}
+          CAUL_PACKAGE_ARCH: ${{ matrix.arch }}
+          CAUL_PACKAGE_PLATFORM: ${{ matrix.os }}
+          CAUL_REQUIRE_TUF_ROOT: "true"
+          FORCE_BETA_BUILD: ${{ matrix.channel == 'beta' && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/caul-tuf-audit"
+          if [[ -e build/update-trust/root.json ]]; then
+            mv build/update-trust/root.json "$RUNNER_TEMP/caul-tuf-audit/production-root.json"
+          fi
+          node scripts/create-tuf-production-trust.cjs \
+            --root build/update-trust/root.json \
+            --private-key-bundle "$RUNNER_TEMP/caul-tuf-audit/private-keys.json"
+          npm version 0.0.1 --no-git-tag-version --allow-same-version
+          if [[ "$CAUL_AUDIT_PLATFORM" == windows ]]; then
+            npm run "dist:win:$CAUL_AUDIT_ARCH"
+            prefix=Caul
+            if [[ "$CAUL_AUDIT_CHANNEL" == beta ]]; then
+              prefix=Caul-Beta
+            fi
+            previous="$PWD/release/$prefix-windows-$CAUL_AUDIT_ARCH-setup.exe"
+          else
+            npm run package:prepare:linux
+            npx --no-install electron-builder \
+              --config electron-builder.config.cjs \
+              --linux AppImage \
+              "--$CAUL_AUDIT_ARCH" \
+              --publish=never
+            prefix=caul
+            if [[ "$CAUL_AUDIT_CHANNEL" == beta ]]; then
+              prefix=caul-beta
+            fi
+            previous="$PWD/release/$prefix-$CAUL_AUDIT_ARCH.AppImage"
+          fi
+          test -f "$previous"
+          {
+            echo "CAUL_AUDIT_PREVIOUS=$previous"
+            echo "CAUL_AUDIT_ROOT=$PWD/build/update-trust/root.json"
+            echo "CAUL_AUDIT_PRIVATE_KEYS=$RUNNER_TEMP/caul-tuf-audit/private-keys.json"
+          } >> "$GITHUB_ENV"
+
+      - name: Exercise native success and fail-closed update scenarios
+        shell: bash
+        env:
+          CAUL_AUDIT_ARCH: ${{ matrix.arch }}
+          CAUL_AUDIT_CHANNEL: ${{ matrix.channel }}
+          CAUL_AUDIT_PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          for scenario in wrong-signature corrupt-payload valid; do
+            command=(node scripts/test-native-tuf-update.cjs
+              --arch "$CAUL_AUDIT_ARCH"
+              --channel "$CAUL_AUDIT_CHANNEL"
+              --scenario "$scenario"
+              --candidate-directory candidate
+              --candidate-metadata "candidate/$CAUL_AUDIT_TARGET_NAME"
+              --evidence "$RUNNER_TEMP/caul-native-updater-evidence/$scenario"
+              --previous-artifact "$CAUL_AUDIT_PREVIOUS"
+              --private-key-bundle "$CAUL_AUDIT_PRIVATE_KEYS"
+              --root "$CAUL_AUDIT_ROOT"
+              --target-name "$CAUL_AUDIT_TARGET_NAME")
+            if [[ "$CAUL_AUDIT_PLATFORM" == windows ]]; then
+              command+=(--candidate-asar "candidate/updater-audit/$CAUL_AUDIT_CHANNEL/app.asar")
+              "${command[@]}"
+            else
+              xvfb-run -a "${command[@]}"
+            fi
+          done
+
+      - name: Upload updater evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-tuf-${{ matrix.channel }}-${{ matrix.target }}
+          path: ${{ runner.temp }}/caul-native-updater-evidence
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove ephemeral signing material and build outputs
+        if: always()
+        shell: bash
+        run: |
+          rm -rf \
+            "$RUNNER_TEMP/caul-tuf-audit" \
+            build/update-trust/root.json \
+            release \
+            target

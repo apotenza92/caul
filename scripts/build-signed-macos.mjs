@@ -17,7 +17,8 @@ import {
   CAUL_MAC_MINIMUM_KERNEL_VERSION,
   CAUL_TEAM_ID,
   normaliseFingerprint,
-  resolveMacReleaseContract
+  resolveMacReleaseContract,
+  validateNotarisationRecord
 } from './macos-release-contract.mjs';
 
 const repositoryRoot = resolve(import.meta.dirname, '..');
@@ -153,6 +154,53 @@ function writeChecksum(filePath) {
   writeFileSync(`${filePath}.sha256`, `${hash}  ${basename(filePath)}\n`, { mode: 0o644 });
 }
 
+function parseNotaryJson(result, label) {
+  for (const value of [result.stdout, result.stderr]) {
+    if (!value?.trim()) continue;
+    try {
+      return JSON.parse(value);
+    } catch {
+      // notarytool can write non-JSON diagnostics to either stream.
+    }
+  }
+  throw new Error(`${label} did not return valid JSON.`);
+}
+
+function notariseDistributable(artifactPath, builderEnvironment) {
+  const authorisation = [
+    '--key', builderEnvironment.APPLE_API_KEY,
+    '--key-id', builderEnvironment.APPLE_API_KEY_ID,
+    '--issuer', builderEnvironment.APPLE_API_ISSUER
+  ];
+  const submission = parseNotaryJson(run('xcrun', [
+    'notarytool', 'submit', artifactPath,
+    ...authorisation,
+    '--wait',
+    '--output-format', 'json'
+  ], {
+    capture: true,
+    env: builderEnvironment
+  }), 'Distributable notarisation submission');
+  if (typeof submission.id !== 'string') {
+    throw new Error(`Distributable notarisation did not return an ID: ${JSON.stringify(submission)}`);
+  }
+  const log = parseNotaryJson(run('xcrun', [
+    'notarytool', 'log', submission.id,
+    ...authorisation,
+    '--output-format', 'json'
+  ], {
+    capture: true,
+    env: builderEnvironment
+  }), `Distributable notarisation log ${submission.id}`);
+  const record = validateNotarisationRecord({ submission, log });
+  const evidencePath = join(
+    repositoryRoot,
+    'release',
+    `notarization-${contract.channel}-macos-arm64-distributable.json`
+  );
+  writeFileSync(evidencePath, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o644 });
+}
+
 function stampUpdaterMinimumSystemVersion(metadataPath) {
   const metadata = YAML.load(readFileSync(metadataPath, 'utf8'));
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
@@ -285,6 +333,7 @@ try {
   ], { env: builderEnvironment });
 
   const artifactPath = join(repositoryRoot, 'release', contract.artifactName);
+  notariseDistributable(artifactPath, builderEnvironment);
   stampUpdaterMinimumSystemVersion(join(repositoryRoot, 'release', contract.metadataName));
   writeChecksum(artifactPath);
   run('node', [

@@ -240,7 +240,7 @@ describe('macOS release contract', () => {
   });
 
   it('pins external actions and limits checkout credential persistence to the Homebrew publisher', () => {
-    for (const name of ['ci.yml', 'release.yml']) {
+    for (const name of ['ci.yml', 'native-updater-audit.yml', 'release.yml']) {
       const workflow = loadWorkflow(name);
       const steps = collectWorkflowSteps(workflow);
       const externalActions = steps
@@ -256,7 +256,10 @@ describe('macOS release contract', () => {
       expect(checkouts.length).toBeGreaterThan(0);
       for (const checkout of checkouts) {
         const homebrewPublisher = checkout.with?.repository === 'apotenza92/homebrew-tap';
-        expect(checkout.with?.['persist-credentials']).toBe(homebrewPublisher);
+        const updateFeedPublisher = checkout.with?.path === 'update-site';
+        expect(checkout.with?.['persist-credentials']).toBe(
+          homebrewPublisher || updateFeedPublisher
+        );
         if (homebrewPublisher) {
           expect(checkout.with?.['ssh-key']).toBe('${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}');
         }
@@ -265,9 +268,22 @@ describe('macOS release contract', () => {
     }
   });
 
+  it('pins the release language toolchains to exact versions', () => {
+    for (const name of ['ci.yml', 'native-updater-audit.yml', 'release.yml']) {
+      const workflow = loadWorkflow(name);
+      expect(workflow.env).toMatchObject({
+        NODE_VERSION: '22.22.1',
+        RUST_TOOLCHAIN: '1.88.0'
+      });
+    }
+  });
+
   it('keeps verification manual or release-called and publication deliberate', () => {
     const ci = loadWorkflow('ci.yml');
     expect(Object.keys(ci.on).sort()).toEqual(['workflow_call', 'workflow_dispatch']);
+
+    const nativeUpdater = loadWorkflow('native-updater-audit.yml');
+    expect(Object.keys(nativeUpdater.on)).toEqual(['workflow_call']);
 
     const pages = loadWorkflow('pages.yml');
     expect(Object.keys(pages.on)).toEqual(['workflow_dispatch']);
@@ -362,25 +378,47 @@ describe('macOS release contract', () => {
     expect(provenance.run).toContain('git merge-base --is-ancestor');
     expect(provenance.run).toContain('refs/tags/$CAUL_RELEASE_TAG^{commit}');
     expect(provenance.run).toContain('test "$TAG_COMMIT" = "$RELEASE_SHA"');
-    expect(release.jobs['publish-release'].steps.at(-1).env).toMatchObject({
+    const publishAssets = release.jobs['publish-release'].steps.find(
+      (step) => step.name === 'Stage, verify and publish exact release assets'
+    );
+    expect(publishAssets.env).toMatchObject({
       RELEASE_TAG: '${{ needs.prepare.outputs.tag }}',
       RELEASE_PRERELEASE: '${{ needs.prepare.outputs.prerelease }}'
     });
-    expect(release.jobs['publish-release'].steps.at(-1).run).toContain('gh release create');
-    expect(release.jobs['publish-release'].steps.at(-1).run).toContain('--draft');
-    expect(release.jobs['publish-release'].steps.at(-1).run).toContain('sha256sum --check SHA256SUMS');
+    expect(publishAssets.run).toContain('gh release create');
+    expect(publishAssets.run).toContain('--draft');
+    expect(publishAssets.run).toContain('sha256sum --check SHA256SUMS');
     const stableHomebrewSteps = release.jobs['prepare-homebrew-publication'].steps;
     expect(stableHomebrewSteps.some((step) => step.name === 'Setup Node.js')).toBe(true);
     expect(stableHomebrewSteps.some((step) => step.name === 'Install verification dependencies'
       && step.run === 'npm ci')).toBe(true);
     expect(release.jobs['publish-release'].needs).toEqual(expect.arrayContaining([
       'test-macos-updater',
+      'test-native-tuf-updater',
       'test-windows-upgrade',
-      'test-linux-upgrade'
+      'test-linux-upgrade',
+      'test-linux-rpm-upgrade'
     ]));
+    expect(release.jobs['test-native-tuf-updater']).toMatchObject({
+      needs: ['prepare', 'build-windows', 'build-linux'],
+      uses: './.github/workflows/native-updater-audit.yml'
+    });
+    expect(release.jobs['seal-tuf'].needs).toEqual(['prepare', 'build-windows', 'build-linux']);
+    const priorFeedCheckout = release.jobs['seal-tuf'].steps.find(
+      (step) => step.name === 'Checkout prior updater metadata'
+    );
+    expect(priorFeedCheckout.if).toBe("steps.prior-feed.outputs.exists == 'true'");
+    expect(priorFeedCheckout['continue-on-error']).toBeUndefined();
     expect(release.jobs).toHaveProperty('verify-public-release');
     expect(release.jobs).toHaveProperty('verify-public-windows');
     expect(release.jobs).toHaveProperty('verify-public-linux');
+    expect(release.jobs['test-linux-rpm-upgrade']).toMatchObject({
+      needs: ['prepare', 'build-linux'],
+      'runs-on': 'ubuntu-24.04',
+      container: {
+        image: 'fedora:42@sha256:99e203b80b1c3d8f7e161ec10a68fd02b081ef83a3963553e513c82846b97814'
+      }
+    });
 
     const source = readFileSync(path.join(repositoryRoot, '.github', 'workflows', 'release.yml'), 'utf8');
     expect(source).not.toMatch(/GITHUB_REF#|inputs\.tag/);
@@ -408,6 +446,12 @@ describe('macOS release contract', () => {
     expect(source).toContain('env -u GH_TOKEN curl --fail --location');
     expect(source).toContain('Windows N-1 upgrade');
     expect(source).toContain('Linux N-1 upgrade');
+    expect(source).toContain('Fedora x64 RPM N-1 upgrade');
+    expect(source).toContain('for PLATFORM in win32 linux; do');
+    expect(source).not.toContain('for PLATFORM in darwin win32 linux; do');
+    expect(source).toContain('release/updater-audit/*/app.asar');
+    expect(source).toContain('../feed-publication/SHA256SUMS');
+    expect(source).toContain('git add -- .nojekyll PUBLICATION.txt SHA256SUMS');
     expect(source).toContain('./scripts/test-windows-upgrade.ps1');
     expect(source).toContain('./scripts/verify-public-windows.ps1');
     expect(source).toContain('function Resolve-InstalledFile');
@@ -416,16 +460,28 @@ describe('macOS release contract', () => {
     expect(source).not.toContain('$LASTEXITCODE');
     expect(source).toContain('brew upgrade --cask apotenza92/tap/caul apotenza92/tap/caul@beta');
     expect(source).toContain('Independently verify public macOS packages');
+    expect(source).toContain('notarization-stable-macos-arm64-distributable.json');
+    expect(source).toContain('notarization-beta-macos-arm64-distributable.json');
     expect(source).toContain('$assetName = $_.Name');
     expect(source).toContain('[regex]::Escape($assetName)');
     expect(source).not.toContain('[regex]::Escape($_.Name)');
     const nativeVerifier = readFileSync(path.join(repositoryRoot, 'scripts', 'verify-native-package.mjs'), 'utf8');
     expect(nativeVerifier).toContain('APPIMAGE_EXTRACT_AND_RUN');
+    expect(nativeVerifier).toContain("['--appimage-extract']");
     expect(nativeVerifier).toContain("spawnSync('dpkg-deb'");
     expect(nativeVerifier).toContain('rpm2cpio "$2" | cpio -idm --quiet');
     expect(nativeVerifier).toContain('inspectExtractedLinuxPackage(rpm, \'rpm\')');
+    expect(nativeVerifier).toContain('inspectLinuxRuntimeContract');
     expect(nativeVerifier).toContain("asar.extractFile(archives[0], 'package.json')");
     expect(nativeVerifier).toContain('metadata.version !== packageVersion');
+    const linuxContract = readFileSync(
+      path.join(repositoryRoot, 'scripts', 'linux-package-contract.mjs'),
+      'utf8'
+    );
+    expect(linuxContract).toContain("MAX_SUPPORTED_GLIBC_VERSION = '2.39'");
+    expect(linuxContract).toContain("runInspection('readelf'");
+    expect(linuxContract).toContain("runInspection('ldd'");
+    expect(linuxContract).toContain('assertDesktopEntryContract');
     const defenderEvidence = readFileSync(
       path.join(repositoryRoot, 'scripts', 'write-windows-defender-evidence.ps1'),
       'utf8'
@@ -491,10 +547,29 @@ describe('macOS release contract', () => {
     expect(ciSource).toContain('Verify Windows release script syntax');
     expect(ciSource).toContain('./scripts/test-windows-upgrade.ps1');
     expect(ciSource).toContain('System.Management.Automation.Language.Parser');
+    expect(ciSource).toContain('version=1.7.7');
+    expect(ciSource).toContain('archive="actionlint_${version}_linux_amd64.tar.gz"');
+    expect(ciSource).toContain('023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757');
+
+    const nativeUpdaterWorkflow = readFileSync(
+      path.join(repositoryRoot, '.github', 'workflows', 'native-updater-audit.yml'),
+      'utf8'
+    );
+    expect(nativeUpdaterWorkflow).toContain('windows-11-arm');
+    expect(nativeUpdaterWorkflow).toContain('ubuntu-24.04-arm');
+    expect(nativeUpdaterWorkflow).toContain('create-tuf-production-trust.cjs');
+    expect(nativeUpdaterWorkflow).toContain('test-native-tuf-update.cjs');
+    expect(nativeUpdaterWorkflow).toContain(
+      'for scenario in wrong-signature corrupt-payload valid; do'
+    );
+    expect(nativeUpdaterWorkflow).toContain('candidate/updater-audit/$CAUL_AUDIT_CHANNEL/app.asar');
+    expect(nativeUpdaterWorkflow).toContain('Remove ephemeral signing material and build outputs');
 
     const signedBuild = readFileSync(path.join(repositoryRoot, 'scripts', 'build-signed-macos.mjs'), 'utf8');
     expect(signedBuild).toContain("'--skip-launch'");
     expect(signedBuild).toContain('stampUpdaterMinimumSystemVersion');
+    expect(signedBuild).toContain('notariseDistributable(artifactPath, builderEnvironment)');
+    expect(signedBuild).toContain("'notarytool', 'submit', artifactPath");
     expect(signedBuild).toContain('CAUL_MAC_MINIMUM_KERNEL_VERSION');
     const updaterHarness = readFileSync(path.join(repositoryRoot, 'scripts', 'test-macos-update.mjs'), 'utf8');
     expect(updaterHarness).toContain('waitForRelaunch(executable, originalPid)');
@@ -528,6 +603,8 @@ describe('macOS release contract', () => {
     expect(packageVerifier).toContain("'bin', 'CaulAudioHelper'");
     expect(packageVerifier).toContain("['--fixture-live-pipeline']");
     expect(packageVerifier).toContain("['--capabilities']");
+    expect(packageVerifier).toContain('appNotarisationPath');
+    expect(packageVerifier).toContain('distributableNotarisationPath');
     expect(packageVerifier).not.toContain('.map(realpathSync)');
     expect(packageVerifier).toContain('map((bundlePath) => realpathSync(bundlePath))');
     expect(packageVerifier).toContain('map((filePath) => realpathSync(filePath))');
