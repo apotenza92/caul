@@ -2,7 +2,13 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.52]
+## [0.1.53]
+
+- Required a valid packaged-launch marker for the native updater audit's final ordinary relaunch, while accepting a bounded post-success process timeout on Linux or Windows.
+- Captured the final smoke result through an explicit file so GUI-process output remains deterministic across native runners.
+- Carries forward the native package smoke correction from the unpublished 0.1.52 candidate.
+
+## [0.1.52] (unpublished release candidate)
 
 - Accepted a bounded native package smoke timeout after the packaged app has already emitted its successful packaged-launch evidence.
 - Carries forward the native updater lifecycle verifier corrections from the unpublished 0.1.51 candidate.

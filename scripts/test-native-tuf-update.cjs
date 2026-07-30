@@ -742,11 +742,14 @@ async function main(argv = process.argv.slice(2)) {
 
     await stopPid(child?.pid);
     child = null;
+    const smokeOutputPath = path.join(temporaryRoot, 'normal-launch-smoke.log');
+    fs.rmSync(smokeOutputPath, { force: true });
     const smokeEnvironment = restrictedEnvironment({
       APPIMAGE_EXTRACT_AND_RUN: process.platform === 'linux' ? '1' : undefined,
       CAUL_DISABLE_MODEL_AUTO_DOWNLOAD: '1',
       CAUL_DISABLE_UPDATE_CHECKS: '1',
       CAUL_PACKAGED_LAUNCH_SMOKE_MS: '250',
+      CAUL_SMOKE_OUTPUT_FILE: smokeOutputPath,
       CAUL_USER_DATA_DIR: userData
     });
     const smoke = spawnSync(
@@ -754,10 +757,25 @@ async function main(argv = process.argv.slice(2)) {
       process.platform === 'linux' ? ['--no-sandbox'] : [],
       { encoding: 'utf8', env: smokeEnvironment, timeout: 30_000 }
     );
-    if (smoke.error || smoke.status !== 0) {
+    const smokeFileOutput = fs.existsSync(smokeOutputPath)
+      ? fs.readFileSync(smokeOutputPath, 'utf8')
+      : '';
+    const combinedSmoke = {
+      ...smoke,
+      stdout: [smoke.stdout, smokeFileOutput].filter(Boolean).join('\n')
+    };
+    const { validatePackagedLaunchProcessResult } = await import(
+      './native-package-smoke-output.mjs'
+    );
+    try {
+      validatePackagedLaunchProcessResult(
+        process.platform === 'win32' ? 'windows' : 'linux',
+        combinedSmoke
+      );
+    } catch (error) {
       throw new Error(
         `Updated package did not pass a normal packaged launch: `
-        + `${smoke.error?.message || smoke.stderr || smoke.status}`
+        + `${error.message}`
       );
     }
   } catch (error) {
