@@ -547,9 +547,9 @@ describe('macOS release contract', () => {
     expect(ciSource).toContain('Verify Windows release script syntax');
     expect(ciSource).toContain('./scripts/test-windows-upgrade.ps1');
     expect(ciSource).toContain('System.Management.Automation.Language.Parser');
-    expect(ciSource).toContain('version=1.7.7');
+    expect(ciSource).toContain('version=1.7.12');
     expect(ciSource).toContain('archive="actionlint_${version}_linux_amd64.tar.gz"');
-    expect(ciSource).toContain('023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757');
+    expect(ciSource).toContain('8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8');
 
     const nativeUpdaterWorkflow = readFileSync(
       path.join(repositoryRoot, '.github', 'workflows', 'native-updater-audit.yml'),
