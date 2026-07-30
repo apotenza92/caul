@@ -504,6 +504,8 @@ describe('macOS release contract', () => {
     expect(source).toContain('for PLATFORM in win32 linux; do');
     expect(source).not.toContain('for PLATFORM in darwin win32 linux; do');
     expect(source).toContain('release/updater-audit/*/app.asar');
+    expect(source).toContain('stable_assets="$RUNNER_TEMP/caul-stable-linux-${{ matrix.arch }}"');
+    expect(source).toContain('cmp "$stable_asset" "release/$(basename "$stable_asset")"');
     expect(source).toContain('../feed-publication/SHA256SUMS');
     expect(source).toContain('git add -- .nojekyll PUBLICATION.txt SHA256SUMS');
     expect(source).toContain('./scripts/test-windows-upgrade.ps1');
@@ -644,6 +646,7 @@ describe('macOS release contract', () => {
       'for scenario in wrong-signature corrupt-payload valid; do'
     );
     expect(nativeUpdaterWorkflow).toContain('candidate/updater-audit/$CAUL_AUDIT_CHANNEL/app.asar');
+    expect(nativeUpdaterWorkflow).toContain('electron_builder_arch=x86_64');
     expect(nativeUpdaterWorkflow).toContain('Remove ephemeral signing material and build outputs');
 
     const signedBuild = readFileSync(path.join(repositoryRoot, 'scripts', 'build-signed-macos.mjs'), 'utf8');

@@ -152,8 +152,9 @@ function rebuildSnapshotAndTimestamp(fixture) {
   }, fixture.keyID, fixture.privateKey)));
 }
 
-async function fixtureServer(fixture, { redirectTimestamp = false } = {}) {
+async function fixtureServer(fixture, { redirectTimestamp = false, requests = [] } = {}) {
   const server = createServer((request, response) => {
+    requests.push(request.url);
     const match = request.url.match(/^\/(metadata|targets)\/([^/?]+)$/);
     if (!match) {
       response.writeHead(404).end();
@@ -236,7 +237,8 @@ describe('TUF update feed', () => {
   it('serves only metadata bytes authenticated by TUF and closes idempotently', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'caul-tuf-feed-'));
     const fixture = tufFixture();
-    const repositoryUrl = await fixtureServer(fixture);
+    const requests = [];
+    const repositoryUrl = await fixtureServer(fixture, { requests });
     let feed;
     try {
       const embeddedRootPath = path.join(root, 'embedded-root.json');
@@ -256,6 +258,8 @@ describe('TUF update feed', () => {
       expect(readFileSync(feed.targetPath)).toEqual(fixture.targetBytes);
       await feed.refresh();
       expect(readFileSync(feed.targetPath)).toEqual(fixture.targetBytes);
+      expect(requests.filter((request) => request === `/targets/${fixture.targetName}`))
+        .toHaveLength(1);
       await feed.close();
       await feed.close();
       feed = null;

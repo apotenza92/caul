@@ -18,7 +18,8 @@ const {
   corruptedPayload,
   prepareSignedTarget,
   requireAuditScenario,
-  waitForPathRemoval
+  waitForPathRemoval,
+  windowsSilentInstallArguments
 } = require('./test-native-tuf-update.cjs');
 
 describe('native TUF updater audit helpers', () => {
@@ -110,5 +111,11 @@ describe('native TUF updater audit helpers', () => {
     } finally {
       rmSync(retained, { recursive: true, force: true });
     }
+  });
+
+  it('puts the explicit NSIS install directory last for silent audits', () => {
+    expect(windowsSilentInstallArguments('C:\\audit\\Caul Beta'))
+      .toEqual(['/S', '/D=C:\\audit\\Caul Beta']);
+    expect(() => windowsSilentInstallArguments('')).toThrow(/requires a destination/);
   });
 });
