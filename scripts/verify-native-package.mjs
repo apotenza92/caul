@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
+import { inspectLinuxRuntimeContract } from './linux-package-contract.mjs';
 import { unpackedDirectoryName } from './native-package-layout.mjs';
 import { validatePackagedLaunchProcessResult } from './native-package-smoke-output.mjs';
 import { createReleaseLaunchEnvironment } from './release-launch-env.mjs';
@@ -117,6 +118,7 @@ function inspectLinuxPackages() {
   }
   chmodSync(appImage, 0o755);
   runSmoke(appImage);
+  inspectExtractedLinuxPackage(appImage, 'appimage');
   inspectExtractedLinuxPackage(deb, 'deb');
   if (arch === 'x64') {
     const rpm = join(releaseDirectory, `${prefix}-${arch}.rpm`);
@@ -147,26 +149,52 @@ function findNamedFiles(root, name) {
 function inspectExtractedLinuxPackage(packagePath, format) {
   const extractionRoot = mkdtempSync(join(tmpdir(), `caul-${format}-package-`));
   try {
-    const extraction = format === 'deb'
-      ? spawnSync('dpkg-deb', ['--extract', packagePath, extractionRoot], { encoding: 'utf8' })
-      : spawnSync('bash', [
+    let extraction;
+    let packageRoot = extractionRoot;
+    if (format === 'appimage') {
+      extraction = spawnSync(packagePath, ['--appimage-extract'], {
+        cwd: extractionRoot,
+        encoding: 'utf8',
+        maxBuffer: 32 * 1024 * 1024
+      });
+      packageRoot = join(extractionRoot, 'squashfs-root');
+    } else if (format === 'deb') {
+      extraction = spawnSync('dpkg-deb', ['--extract', packagePath, extractionRoot], {
+        encoding: 'utf8'
+      });
+    } else {
+      extraction = spawnSync('bash', [
         '-c', 'cd "$1" && rpm2cpio "$2" | cpio -idm --quiet',
         'bash', extractionRoot, packagePath
       ], { encoding: 'utf8' });
+    }
     if (extraction.error || extraction.status !== 0) {
       fail(`${format} extraction failed: ${extraction.error?.message ?? ''}\n${extraction.stderr ?? ''}`);
     }
     const executableName = channel === 'beta' ? 'caul-beta' : 'caul';
-    const appExecutables = findNamedFiles(extractionRoot, executableName);
-    const backends = findNamedFiles(extractionRoot, 'caul-desktop-backend');
+    const appExecutables = findNamedFiles(packageRoot, executableName);
+    const backends = findNamedFiles(packageRoot, 'caul-desktop-backend');
     if (appExecutables.length !== 1 || backends.length !== 1) {
       fail(`${format} package must contain one app and backend, found ${appExecutables.length} and ${backends.length}`);
     }
-    validatePackagedMetadata(extractionRoot);
+    validatePackagedMetadata(packageRoot);
     assertArchitecture(appExecutables[0]);
     assertArchitecture(backends[0]);
-    chmodSync(appExecutables[0], 0o755);
-    runSmoke(appExecutables[0]);
+    const runtimeEvidence = inspectLinuxRuntimeContract(packageRoot, {
+      arch,
+      channel,
+      format
+    });
+    console.log(
+      `${format} runtime contract: ${runtimeEvidence.elfFileCount} ELF files, `
+      + `${runtimeEvidence.dynamicFileCount} dynamic files, `
+      + `maximum GLIBC_${runtimeEvidence.glibcMaximum}, `
+      + `${runtimeEvidence.iconCount} desktop icons.`
+    );
+    if (format !== 'appimage') {
+      chmodSync(appExecutables[0], 0o755);
+      runSmoke(appExecutables[0]);
+    }
   } finally {
     rmSync(extractionRoot, { recursive: true, force: true });
   }

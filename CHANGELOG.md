@@ -2,6 +2,15 @@
 
 All notable Caul changes are recorded here.
 
+## [0.1.44]
+
+- Added TUF-authenticated automatic updates for Windows NSIS and Linux AppImage packages while keeping Debian and RPM upgrades with the system package manager.
+- Added native Windows and Linux release gates for authenticated update, restart, corrupt-payload and wrong-signature rejection, retained settings, credential state, project data, updater trust and Windows uninstall across ARM64 and x64.
+- Added GLIBC, dependency and desktop-integration inspection for every Linux package, plus a Fedora-native RPM upgrade and uninstall gate.
+- Separated offline root trust from protected online signing keys, sealed stable and beta update feeds, and independently verified every public feed byte and TUF target after publication.
+- Added separate accepted notarisation evidence for the signed macOS application and its exact final distributable.
+- Disclosed unsigned Windows and Linux packages on the download page and added checksum-pinned actionlint to the deterministic release checks.
+
 ## [0.1.43]
 
 - Kept incomplete onboarding visible across launches, improved Windows onboarding focus around browser sign-in, and placed the first floating handle at the top centre of the display where setup was completed.

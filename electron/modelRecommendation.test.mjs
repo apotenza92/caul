@@ -99,13 +99,6 @@ function fakeFetch(routes) {
   };
 }
 
-function delayedFakeFetch(routes, delayMs) {
-  return async (url, options = {}) => {
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-    return fakeFetch(routes)(url, options);
-  };
-}
-
 function fakeResponse({ body = '', headers = {}, ok = true, status = 200, text = null, url = '' }) {
   const bodyText = text ?? (typeof body === 'string' ? body : JSON.stringify(body));
 
@@ -454,14 +447,24 @@ describe('model recommendation catalogue', () => {
   it('refreshes independent live catalogue sources concurrently', async () => {
     const bundled = loadModelCatalogue(resolve(root, 'model-catalog.json'));
     const routes = liveCatalogueRoutes();
-    const start = Date.now();
-    await refreshModelCatalogue(bundled, {
-      fetchFn: delayedFakeFetch(routes, 30),
+    const started = [];
+    let releaseInitialRequests;
+    const initialRequestGate = new Promise((resolveGate) => {
+      releaseInitialRequests = resolveGate;
+    });
+    const refresh = refreshModelCatalogue(bundled, {
+      fetchFn: async (url, options = {}) => {
+        started.push(`${options.method ?? 'GET'} ${url}`);
+        await initialRequestGate;
+        return fakeFetch(routes)(url, options);
+      },
       now: new Date('2026-06-08T00:00:00.000Z')
     });
-    const elapsedMs = Date.now() - start;
+    const simultaneousStarts = started.length;
+    releaseInitialRequests();
+    await refresh;
 
-    expect(elapsedMs).toBeLessThan(260);
+    expect(simultaneousStarts).toBeGreaterThan(5);
   });
 
   it('uses macOS reclaimable memory instead of raw free memory', () => {

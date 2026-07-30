@@ -1,4 +1,7 @@
+const fs = require('node:fs');
+const path = require('node:path');
 const packageJson = require('./package.json');
+const { embeddedTufRootPath, updateContract } = require('./electron/updateContract.cjs');
 
 const version = packageJson.version;
 const isDevBuild = process.env.FORCE_DEV_BUILD === 'true';
@@ -23,6 +26,22 @@ const isWindowsArm64Package = ['win', 'win32'].includes(packagePlatform)
   && winArchitectures[0] === 'arm64';
 const linuxArtifactArch = packageArch ?? '${arch}';
 const backendTargetTriple = resolveBackendTargetTriple(packagePlatform, packageArch);
+const releaseUpdateContract = isDevBuild
+  ? null
+  : updateContract({
+    arch: packageArch ?? process.arch,
+    channel: isBeta ? 'beta' : 'stable',
+    platform: packagePlatform
+  });
+const tufRootPath = embeddedTufRootPath(__dirname);
+const packagesWithTuf = releaseUpdateContract && releaseUpdateContract.platform !== 'darwin';
+if (
+  packagesWithTuf
+  && process.env.CAUL_REQUIRE_TUF_ROOT === 'true'
+  && !fs.statSync(tufRootPath, { throwIfNoEntry: false })?.isFile()
+) {
+  throw new Error(`A reviewed Caul TUF trust root is required at ${tufRootPath}.`);
+}
 
 // The NSIS 7-Zip plug-in cannot restore entries encoded with the filter that
 // modern 7-Zip automatically selects for ARM64 executables. BCJ remains fully
@@ -97,7 +116,11 @@ const commonExtraResources = [
   {
     from: 'scripts/run-pi-json.py',
     to: 'scripts/run-pi-json.py'
-  }
+  },
+  ...(packagesWithTuf && fs.existsSync(tufRootPath) ? [{
+    from: tufRootPath,
+    to: path.join('update-trust', 'root.json')
+  }] : [])
 ];
 const macExtraResources = [
   ...commonExtraResources,
@@ -140,19 +163,21 @@ module.exports = {
   appId,
   productName: appDisplayName,
   forceCodeSigning: process.env.CAUL_REQUIRE_RELEASE_SIGNING === 'true',
-  ...(isPrivateDevBuild ? {
-    extraMetadata: {
-      name: 'caul-dev-private'
-    }
-  } : isDevBuild ? {
-    extraMetadata: {
-      name: 'caul-dev'
-    }
-  } : isBeta ? {
-    extraMetadata: {
-      name: 'caul-beta'
-    }
-  } : {}),
+  extraMetadata: {
+    ...(isPrivateDevBuild
+      ? { name: 'caul-dev-private' }
+      : isDevBuild
+        ? { name: 'caul-dev' }
+        : isBeta
+          ? { name: 'caul-beta' }
+          : {}),
+    ...(releaseUpdateContract ? {
+      caulReleaseChannel: releaseUpdateContract.channel,
+      caulTufRepositoryUrl: releaseUpdateContract.tufRepositoryUrl,
+      caulUpdateFeedUrl: releaseUpdateContract.feedUrl,
+      caulUpdateTargetName: releaseUpdateContract.metadataFileName
+    } : {})
+  },
   directories: {
     output: isPrivateDevBuild ? 'release-dev-private' : isDevBuild ? 'release-dev' : 'release'
   },

@@ -115,6 +115,16 @@
         text-decoration: underline;
       }
 
+      .unsigned-package-notice {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        color: var(--text-muted);
+        font-size: 0.86rem;
+        line-height: 1.45;
+        max-width: 460px;
+        padding: 0.75rem 0.9rem;
+      }
+
       .github-icon-link {
         align-items: center;
         color: var(--text-muted);
@@ -587,6 +597,7 @@
           <div id="version-display" class="version-display"></div>
         </div>
       </section>
+      <p id="unsigned-package-notice" class="unsigned-package-notice" hidden>Windows and Linux packages are currently unsigned. Automatic updates are authenticated with TUF, and every release includes public checksums and provenance.</p>
 
       <details id="download-options" class="download-options">
         <summary>Choose another platform or test upcoming updates in beta</summary>
@@ -1101,12 +1112,18 @@
         const comingSoon = document.getElementById("coming-soon");
         const comingSoonLabel = document.getElementById("coming-soon-label");
         const pageTitle = document.getElementById("page-title");
+        const unsignedPackageNotice = document.getElementById("unsigned-package-notice");
         const resolved = resolveDownload(state);
 
         document.body.classList.toggle("beta-mode", state.channel === "beta");
         icon.src = getIconSrc();
         pageTitle.textContent = productNameForChannel(state.channel);
         document.title = `Download ${productNameForChannel(state.channel)}`;
+        unsignedPackageNotice.hidden = (
+          state.platform === "mac"
+          || !resolved.available
+          || (!detectedSystem.known && !manualSelection)
+        );
 
         setActiveChannel(state.channel);
         setActive(".platform-btn", `platform-${state.platform}`);

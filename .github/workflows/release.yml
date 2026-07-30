@@ -9,8 +9,8 @@ on:
       - "v*"
 
 env:
-  NODE_VERSION: "22"
-  RUST_TOOLCHAIN: "1.88"
+  NODE_VERSION: "22.22.1"
+  RUST_TOOLCHAIN: "1.88.0"
 
 concurrency:
   group: caul-release-${{ github.ref }}
@@ -38,9 +38,14 @@ jobs:
         env:
           CAUL_RELEASE_TAG: ${{ github.ref_name }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
           RELEASE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
+          if [[ "$REPOSITORY_VISIBILITY" != public ]]; then
+            echo "Releases require public source; repository visibility is $REPOSITORY_VISIBILITY." >&2
+            exit 1
+          fi
           if [[ "$DEFAULT_BRANCH" != main ]]; then
             echo "Repository default branch $DEFAULT_BRANCH is not the approved release source main." >&2
             exit 1
@@ -91,6 +96,9 @@ jobs:
     needs: [prepare, quality]
     runs-on: macos-26
     environment: release-signing
+    env:
+      CAUL_XCODE_VERSION: "26.4.1"
+      DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
     permissions:
       contents: read
     steps:
@@ -110,6 +118,13 @@ jobs:
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Verify reviewed Xcode
+        run: |
+          set -euo pipefail
+          test -x "$DEVELOPER_DIR/usr/bin/actool"
+          test "$(xcodebuild -version | sed -n '1p')" = "Xcode $CAUL_XCODE_VERSION"
+          test "$(xcrun --find actool)" = "$DEVELOPER_DIR/usr/bin/actool"
 
       - name: Install dependencies
         run: npm ci
@@ -212,6 +227,9 @@ jobs:
 
           npm run dist:win:${{ matrix.arch }}
           node scripts/verify-native-package.mjs --platform windows --arch ${{ matrix.arch }} --channel $env:CAUL_RELEASE_CHANNEL
+          $unpacked = if ("${{ matrix.arch }}" -eq "x64") { "win-unpacked" } else { "win-${{ matrix.arch }}-unpacked" }
+          New-Item -ItemType Directory -Force "release/updater-audit/$env:CAUL_RELEASE_CHANNEL" | Out-Null
+          Copy-Item "release/$unpacked/resources/app.asar" "release/updater-audit/$env:CAUL_RELEASE_CHANNEL/app.asar"
 
           if ($env:CAUL_RELEASE_CHANNEL -eq "stable") {
             $env:FORCE_BETA_BUILD = "true"
@@ -219,10 +237,13 @@ jobs:
             $env:CAUL_PACKAGE_ARCH = "${{ matrix.arch }}"
             npx --no-install electron-builder --config electron-builder.config.cjs --win nsis --${{ matrix.arch }} --publish=never
             node scripts/verify-native-package.mjs --platform windows --arch ${{ matrix.arch }} --channel beta
+            New-Item -ItemType Directory -Force "release/updater-audit/beta" | Out-Null
+            Copy-Item "release/$unpacked/resources/app.asar" "release/updater-audit/beta/app.asar"
           }
         timeout-minutes: 75
         env:
           CAUL_RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
+          CAUL_REQUIRE_TUF_ROOT: "true"
 
       - name: Upload Windows artefacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -231,6 +252,9 @@ jobs:
           path: |
             release/*windows-${{ matrix.arch }}-setup.exe
             release/*windows-${{ matrix.arch }}-setup.exe.blockmap
+            release/latest.yml
+            release/beta.yml
+            release/updater-audit/*/app.asar
           if-no-files-found: error
 
       - name: Install, launch and uninstall published NSIS packages
@@ -321,7 +345,7 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
       - name: Install Linux build dependencies
-        run: sudo apt-get update && sudo apt-get install -y cpio libasound2-dev rpm xvfb
+        run: sudo apt-get update && sudo apt-get install -y binutils cpio libasound2-dev rpm xvfb
 
       - name: Install dependencies
         run: npm ci
@@ -333,6 +357,12 @@ jobs:
 
           npm run dist:linux:${{ matrix.arch }}
           node scripts/verify-native-package.mjs --platform linux --arch ${{ matrix.arch }} --channel "$CAUL_RELEASE_CHANNEL"
+          unpacked="linux-${{ matrix.arch }}-unpacked"
+          if [[ "${{ matrix.arch }}" == x64 ]]; then
+            unpacked=linux-unpacked
+          fi
+          mkdir -p "release/updater-audit/$CAUL_RELEASE_CHANNEL"
+          cp "release/$unpacked/resources/app.asar" "release/updater-audit/$CAUL_RELEASE_CHANNEL/app.asar"
 
           if [[ "$CAUL_RELEASE_CHANNEL" == stable ]]; then
             linux_targets=(AppImage rpm)
@@ -342,10 +372,13 @@ jobs:
             FORCE_BETA_BUILD=true CAUL_PACKAGE_PLATFORM=linux CAUL_PACKAGE_ARCH=${{ matrix.arch }} npx --no-install electron-builder --config electron-builder.config.cjs --linux "${linux_targets[@]}" --${{ matrix.arch }} --publish=never
             FORCE_BETA_BUILD=true node scripts/build-linux-deb.mjs ${{ matrix.arch }}
             node scripts/verify-native-package.mjs --platform linux --arch ${{ matrix.arch }} --channel beta
+            mkdir -p release/updater-audit/beta
+            cp "release/$unpacked/resources/app.asar" release/updater-audit/beta/app.asar
           fi
         timeout-minutes: 75
         env:
           CAUL_RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
+          CAUL_REQUIRE_TUF_ROOT: "true"
 
       - name: Upload Linux artefacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -355,6 +388,9 @@ jobs:
             release/*-${{ matrix.arch }}.AppImage
             release/*-${{ matrix.arch }}.deb
             release/*-${{ matrix.arch }}.rpm
+            release/latest-linux*.yml
+            release/beta-linux*.yml
+            release/updater-audit/*/app.asar
           if-no-files-found: error
 
   test-macos-updater:
@@ -618,7 +654,7 @@ jobs:
       - name: Install verification dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cpio libasound2-dev rpm xvfb
+          sudo apt-get install -y binutils cpio libasound2-dev rpm xvfb
           npm ci
 
       - name: Download candidate packages
@@ -706,6 +742,301 @@ jobs:
           trap - EXIT
           cleanup
 
+  test-linux-rpm-upgrade:
+    name: Fedora x64 RPM N-1 upgrade
+    needs: [prepare, build-linux]
+    runs-on: ubuntu-24.04
+    container:
+      image: fedora:42@sha256:99e203b80b1c3d8f7e161ec10a68fd02b081ef83a3963553e513c82846b97814
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Install Fedora verification tools
+        run: dnf install -y curl git gzip jq tar which xorg-x11-server-Xvfb
+
+      - name: Checkout release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          persist-credentials: false
+
+      - name: Download candidate RPM packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-linux-x64
+          path: candidate
+
+      - name: Download and authenticate previous public RPM packages
+        env:
+          CAUL_RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir prior
+          curl --fail --location --silent --show-error \
+            --retry 10 --retry-all-errors --retry-delay 2 \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/latest" \
+            -o prior-release.json
+          prior_tag="$(jq -r .tag_name prior-release.json)"
+          test -n "$prior_tag"
+          test "$prior_tag" != "$RELEASE_TAG"
+          package_names=(caul-beta-x64.rpm)
+          if [[ "$CAUL_RELEASE_CHANNEL" == stable ]]; then
+            package_names=(caul-x64.rpm "${package_names[@]}")
+          fi
+          for package_name in "${package_names[@]}"; do
+            url="$(jq -r --arg name "$package_name" \
+              '.assets[] | select(.name == $name) | .browser_download_url' \
+              prior-release.json)"
+            expected="$(jq -r --arg name "$package_name" \
+              '.assets[] | select(.name == $name) | .digest' \
+              prior-release.json)"
+            test -n "$url"
+            [[ "$expected" == sha256:* ]]
+            curl --fail --location --silent --show-error \
+              --retry 10 --retry-all-errors --retry-delay 2 \
+              "$url" -o "prior/$package_name"
+            actual="$(sha256sum "prior/$package_name" | cut -d' ' -f1)"
+            test "$actual" = "${expected#sha256:}"
+          done
+          printf 'PRIOR_TAG=%s\n' "$prior_tag" >> "$GITHUB_ENV"
+
+      - name: Upgrade RPM packages while preserving integration and user data
+        env:
+          CAUL_DISABLE_MODEL_AUTO_DOWNLOAD: "1"
+          CAUL_DISABLE_UPDATE_CHECKS: "1"
+          CAUL_PACKAGED_LAUNCH_SMOKE_MS: "250"
+          CAUL_RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          packages=(caul-beta)
+          prior_packages=("$PWD/prior/caul-beta-x64.rpm")
+          candidate_packages=("$PWD/candidate/caul-beta-x64.rpm")
+          if [[ "$CAUL_RELEASE_CHANNEL" == stable ]]; then
+            packages=(caul caul-beta)
+            prior_packages=("$PWD/prior/caul-x64.rpm" "${prior_packages[@]}")
+            candidate_packages=("$PWD/candidate/caul-x64.rpm" "${candidate_packages[@]}")
+          fi
+          cleanup() {
+            dnf remove -y "${packages[@]}" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          dnf install -y "${prior_packages[@]}"
+          stable_data="$RUNNER_TEMP/fedora-caul-stable-user-data"
+          beta_data="$RUNNER_TEMP/fedora-caul-beta-user-data"
+          mkdir -p "$stable_data" "$beta_data"
+          if [[ "$CAUL_RELEASE_CHANNEL" == stable ]]; then
+            CAUL_USER_DATA_DIR="$stable_data" xvfb-run -a caul --no-sandbox
+            printf 'stable-%s\n' "$PRIOR_TAG" > "$stable_data/rpm-upgrade-marker.txt"
+          fi
+          CAUL_USER_DATA_DIR="$beta_data" xvfb-run -a caul-beta --no-sandbox
+          printf 'beta-%s\n' "$PRIOR_TAG" > "$beta_data/rpm-upgrade-marker.txt"
+
+          dnf install -y "${candidate_packages[@]}"
+          for package_name in "${packages[@]}"; do
+            test "$(rpm -q --queryformat '%{VERSION}' "$package_name")" = "$RELEASE_VERSION"
+            test "$(rpm -q --queryformat '%{ARCH}' "$package_name")" = x86_64
+            rpm -q --requires "$package_name"
+            rpm -ql "$package_name" | grep -qx "/usr/share/applications/$package_name.desktop"
+            rpm -ql "$package_name" | grep -Eq "/usr/share/icons/.*/$package_name\\.png$"
+            grep -qx 'Type=Application' "/usr/share/applications/$package_name.desktop"
+            grep -qx 'Terminal=false' "/usr/share/applications/$package_name.desktop"
+            grep -qx "Icon=$package_name" "/usr/share/applications/$package_name.desktop"
+            grep -q '^Categories=.*Utility' "/usr/share/applications/$package_name.desktop"
+            command -v "$package_name"
+          done
+          if [[ "$CAUL_RELEASE_CHANNEL" == stable ]]; then
+            CAUL_USER_DATA_DIR="$stable_data" xvfb-run -a caul --no-sandbox
+            test "$(cat "$stable_data/rpm-upgrade-marker.txt")" = "stable-$PRIOR_TAG"
+          fi
+          CAUL_USER_DATA_DIR="$beta_data" xvfb-run -a caul-beta --no-sandbox
+          test "$(cat "$beta_data/rpm-upgrade-marker.txt")" = "beta-$PRIOR_TAG"
+
+          trap - EXIT
+          cleanup
+          for package_name in "${packages[@]}"; do
+            if rpm -q "$package_name"; then
+              echo "$package_name remains installed after uninstall." >&2
+              exit 1
+            fi
+            if command -v "$package_name"; then
+              echo "$package_name remains on PATH after uninstall." >&2
+              exit 1
+            fi
+          done
+          if [[ "$CAUL_RELEASE_CHANNEL" == stable ]]; then
+            test "$(cat "$stable_data/rpm-upgrade-marker.txt")" = "stable-$PRIOR_TAG"
+          fi
+          test "$(cat "$beta_data/rpm-upgrade-marker.txt")" = "beta-$PRIOR_TAG"
+
+  seal-tuf:
+    name: Seal authenticated update feeds
+    needs: [prepare, build-windows, build-linux]
+    runs-on: ubuntu-24.04
+    environment: update-signing
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          persist-credentials: false
+          path: source
+
+      - name: Resolve prior updater metadata
+        id: prior-feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          url="https://api.github.com/repos/$GITHUB_REPOSITORY/git/ref/heads/updates"
+          status=
+          for attempt in {1..5}; do
+            status="$(curl --location --silent --show-error \
+              -H 'Accept: application/vnd.github+json' \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              --output "$RUNNER_TEMP/updater-ref.json" \
+              --write-out '%{http_code}' \
+              "$url")"
+            if [[ "$status" == 200 || "$status" == 404 ]]; then
+              break
+            fi
+            if [[ "$attempt" == 5 ]]; then
+              echo "Could not resolve the prior updater branch: HTTP $status." >&2
+              exit 1
+            fi
+            sleep 2
+          done
+          if [[ "$status" == 200 ]]; then
+            echo 'exists=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'exists=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout prior updater metadata
+        if: steps.prior-feed.outputs.exists == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: previous-feed
+          ref: updates
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: source/package-lock.json
+
+      - name: Install signing dependencies
+        working-directory: source
+        run: npm ci
+        timeout-minutes: 10
+
+      - name: Download native release artefacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: downloaded-artifacts
+          pattern: release-*
+
+      - name: Assemble immutable metadata and sign exact Windows and AppImage feeds
+        env:
+          CAUL_RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
+          CAUL_RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          CAUL_TUF_SNAPSHOT_PRIVATE_KEY_PEM: ${{ secrets.CAUL_TUF_SNAPSHOT_PRIVATE_KEY_PEM }}
+          CAUL_TUF_TARGETS_PRIVATE_KEY_PEM: ${{ secrets.CAUL_TUF_TARGETS_PRIVATE_KEY_PEM }}
+          CAUL_TUF_TIMESTAMP_PRIVATE_KEY_PEM: ${{ secrets.CAUL_TUF_TIMESTAMP_PRIVATE_KEY_PEM }}
+        run: |
+          set -euo pipefail
+          export CAUL_TUF_METADATA_NOW
+          CAUL_TUF_METADATA_NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          ROOT="$GITHUB_WORKSPACE/source/build/update-trust/root.json"
+          test -f "$ROOT"
+          channels=(beta)
+          if [[ "$CAUL_RELEASE_CHANNEL" == stable ]]; then
+            channels=(stable beta)
+          fi
+          for CHANNEL in "${channels[@]}"; do
+            for PLATFORM in win32 linux; do
+              arches=(arm64 x64)
+              for ARCH in "${arches[@]}"; do
+                case "$PLATFORM" in
+                  win32) ARTIFACT_DIR="$GITHUB_WORKSPACE/downloaded-artifacts/release-windows-$ARCH" ;;
+                  linux) ARTIFACT_DIR="$GITHUB_WORKSPACE/downloaded-artifacts/release-linux-$ARCH" ;;
+                esac
+                TARGET_NAME="$(node -p \
+                  "require('$GITHUB_WORKSPACE/source/electron/updateContract.cjs').updateMetadataFileName('$PLATFORM', '$ARCH', '$CHANNEL')")"
+                FEED="$GITHUB_WORKSPACE/feed/$CHANNEL/$PLATFORM/$ARCH"
+                node "$GITHUB_WORKSPACE/source/scripts/assemble-update-metadata.mjs" \
+                  --input "$ARTIFACT_DIR/$TARGET_NAME" \
+                  --artifact-dir "$ARTIFACT_DIR" \
+                  --output-root "$GITHUB_WORKSPACE/feed" \
+                  --audit-output "$GITHUB_WORKSPACE/feed-audit/update-$CHANNEL-$PLATFORM-$ARCH.yml" \
+                  --channel "$CHANNEL" \
+                  --platform "$PLATFORM" \
+                  --arch "$ARCH" \
+                  --tag "$CAUL_RELEASE_TAG" \
+                  --repository "$GITHUB_REPOSITORY"
+                PREVIOUS="$GITHUB_WORKSPACE/previous-feed/$CHANNEL/$PLATFORM/$ARCH/tuf/metadata"
+                PREVIOUS_ARGS=()
+                if [[ -d "$PREVIOUS" ]]; then
+                  PREVIOUS_ARGS=(--previous-metadata "$PREVIOUS")
+                fi
+                node "$GITHUB_WORKSPACE/source/scripts/sign-tuf-update-repository.cjs" \
+                  --root "$ROOT" \
+                  --target "$FEED/$TARGET_NAME" \
+                  --target-name "$TARGET_NAME" \
+                  --output "$FEED/tuf" \
+                  "${PREVIOUS_ARGS[@]}"
+                (cd "$FEED/tuf" && sha256sum --check --strict SHA256SUMS)
+              done
+            done
+          done
+          touch feed/.nojekyll
+          {
+            echo 'Caul updater-feed publication bundle'
+            echo "Tag: $CAUL_RELEASE_TAG"
+            echo "Commit: $GITHUB_SHA"
+            echo "Channels: ${channels[*]}"
+            echo 'Publication: tag workflow after explicit final-publication approval'
+          } > feed/PUBLICATION.txt
+          (
+            cd feed
+            checksum_file="$(mktemp)"
+            trap 'rm -f "$checksum_file"' EXIT
+            find . -type f ! -name SHA256SUMS -print0 \
+              | LC_ALL=C sort -z \
+              | xargs -0 sha256sum > "$checksum_file"
+            mv "$checksum_file" SHA256SUMS
+            trap - EXIT
+            sha256sum --check --strict SHA256SUMS
+          )
+
+      - name: Upload sealed updater-feed bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: caul-update-feed-${{ needs.prepare.outputs.tag }}
+          path: feed
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+
+  test-native-tuf-updater:
+    name: Native TUF updater lifecycle
+    needs: [prepare, build-windows, build-linux]
+    uses: ./.github/workflows/native-updater-audit.yml
+    with:
+      ref: ${{ needs.prepare.outputs.tag }}
+      release-channel: ${{ needs.prepare.outputs.channel }}
+      version: ${{ needs.prepare.outputs.version }}
+
   publish-release:
     name: Publish GitHub release
     needs:
@@ -713,9 +1044,12 @@ jobs:
       - build-macos
       - build-windows
       - build-linux
+      - seal-tuf
       - test-macos-updater
+      - test-native-tuf-updater
       - test-windows-upgrade
       - test-linux-upgrade
+      - test-linux-rpm-upgrade
     runs-on: ubuntu-24.04
     environment:
       name: ${{ needs.prepare.outputs.release_environment }}
@@ -735,6 +1069,12 @@ jobs:
         with:
           path: downloaded-artifacts
           pattern: release-*
+
+      - name: Download sealed updater-feed bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: caul-update-feed-${{ needs.prepare.outputs.tag }}
+          path: feed-publication
 
       - name: Assemble exact release asset set
         env:
@@ -796,6 +1136,98 @@ jobs:
             gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease=false --latest
           fi
 
+      - name: Verify public release before updater-feed publication
+        env:
+          RELEASE_PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          unset GH_TOKEN GITHUB_TOKEN
+          API_URL="https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG"
+          RELEASE_BASE="https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG"
+          for attempt in {1..12}; do
+            if curl --fail --location --silent --show-error \
+              --retry 10 --retry-all-errors --retry-delay 2 \
+              "$API_URL" -o public-release.json \
+              && [[ "$(jq -r .draft public-release.json)" == false ]] \
+              && [[ "$(jq -r .prerelease public-release.json)" == "$RELEASE_PRERELEASE" ]]; then
+              jq -r '.assets[].name' public-release.json | LC_ALL=C sort > public-assets.txt
+              if diff --unified expected-assets.txt public-assets.txt; then
+                break
+              fi
+            fi
+            if [[ "$attempt" == 12 ]]; then
+              echo 'Public release did not converge to the exact asset contract.' >&2
+              exit 1
+            fi
+            sleep 5
+          done
+          curl --fail --location --silent --show-error \
+            --retry 10 --retry-all-errors --retry-delay 2 \
+            "$RELEASE_BASE/SHA256SUMS" -o public-SHA256SUMS
+          while read -r checksum filename; do
+            test -n "$checksum"
+            test -n "$filename"
+            curl --fail --location --silent --show-error \
+              --retry 10 --retry-all-errors --retry-delay 2 \
+              "$RELEASE_BASE/$filename" -o "public-$filename"
+            printf '%s  %s\n' "$checksum" "public-$filename" | sha256sum --check --strict -
+          done < public-SHA256SUMS
+          (cd feed-publication && sha256sum --check --strict SHA256SUMS)
+
+      - name: Checkout updater-feed publication branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          path: update-site
+          persist-credentials: true
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - name: Publish sealed channel projections atomically
+        env:
+          CAUL_RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd update-site
+          if git show-ref --verify --quiet refs/remotes/origin/updates; then
+            git checkout -B updates refs/remotes/origin/updates
+          else
+            git checkout --orphan updates
+            git rm -rf .
+          fi
+          channels=(beta)
+          if [[ "$CAUL_RELEASE_CHANNEL" == stable ]]; then
+            channels=(stable beta)
+          fi
+          for CHANNEL in "${channels[@]}"; do
+            rm -rf "$CHANNEL"
+            mkdir -p "$CHANNEL"
+            cp -R "../feed-publication/$CHANNEL/." "$CHANNEL/"
+          done
+          cp \
+            ../feed-publication/.nojekyll \
+            ../feed-publication/PUBLICATION.txt \
+            ../feed-publication/SHA256SUMS \
+            .
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -- .nojekyll PUBLICATION.txt SHA256SUMS "${channels[@]}"
+          while IFS= read -r changed; do
+            case "$changed" in
+              .nojekyll|PUBLICATION.txt|SHA256SUMS|stable/*|beta/*) ;;
+              *)
+                echo "Unexpected updater-feed change: $changed" >&2
+                exit 1
+                ;;
+            esac
+          done < <(git diff --cached --name-only)
+          if ! git diff --cached --quiet; then
+            git commit -m "Publish Caul $RELEASE_VERSION update feeds"
+            git push origin HEAD:updates
+          fi
+
   verify-public-release:
     name: Verify public release provenance
     needs: [prepare, publish-release]
@@ -809,6 +1241,22 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.tag }}
           persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install verification dependencies
+        run: npm ci
+        timeout-minutes: 10
+
+      - name: Download sealed updater-feed evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: caul-update-feed-${{ needs.prepare.outputs.tag }}
+          path: expected-feed
 
       - name: Re-download and verify every public asset
         env:
@@ -850,6 +1298,18 @@ jobs:
           while IFS= read -r url; do
             env -u GH_TOKEN curl --fail --location --silent --show-error --head "$url" >/dev/null
           done < <(jq -r '.assets[].browser_download_url' <<<"$release_json")
+
+      - name: Verify unauthenticated public updater feeds through TUF
+        env:
+          CAUL_RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          unset GH_TOKEN GITHUB_TOKEN
+          (cd expected-feed && sha256sum --check --strict SHA256SUMS)
+          node scripts/verify-public-tuf-feed.mjs \
+            --expected expected-feed \
+            --embedded-root build/update-trust/root.json \
+            --base-url "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/updates"
 
   verify-public-windows:
     name: Verify public Windows packages (${{ matrix.arch }})
@@ -943,7 +1403,7 @@ jobs:
       - name: Install verification dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cpio libasound2-dev rpm xvfb
+          sudo apt-get install -y binutils cpio libasound2-dev rpm xvfb
           npm ci
 
       - name: Download and authenticate public Linux packages
@@ -1055,11 +1515,13 @@ jobs:
             Caul-macos-arm64.zip.sha256 \
             latest-mac.yml \
             notarization-stable-macos-arm64.json \
+            notarization-stable-macos-arm64-distributable.json \
             Caul-Beta-macos-arm64.zip \
             Caul-Beta-macos-arm64.zip.blockmap \
             Caul-Beta-macos-arm64.zip.sha256 \
             beta-mac.yml \
-            notarization-beta-macos-arm64.json; do
+            notarization-beta-macos-arm64.json \
+            notarization-beta-macos-arm64-distributable.json; do
             curl -fL "${BASE_URL}/${name}" -o "public-release/${name}"
           done
           STABLE_SHA256="$(shasum -a 256 public-release/Caul-macos-arm64.zip | cut -d' ' -f1)"

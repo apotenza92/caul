@@ -23,6 +23,59 @@ const braceExpansionPackage = JSON.parse(
   fs.readFileSync(braceExpansionPackageJson, 'utf8')
 );
 
+function resolvePackageJson(name, searchPaths) {
+  try {
+    return require.resolve(`${name}/package.json`, { paths: searchPaths });
+  } catch (error) {
+    if (error?.code !== 'ERR_PACKAGE_PATH_NOT_EXPORTED') throw error;
+    let directory = path.dirname(require.resolve(name, { paths: searchPaths }));
+    while (directory !== path.dirname(directory)) {
+      const candidate = path.join(directory, 'package.json');
+      if (fs.existsSync(candidate)) {
+        const metadata = JSON.parse(fs.readFileSync(candidate, 'utf8'));
+        if (metadata.name === name) return candidate;
+      }
+      directory = path.dirname(directory);
+    }
+    throw error;
+  }
+}
+
+const tufPackageJson = require.resolve('tuf-js/package.json', { paths: [rootDir] });
+const tufPackage = JSON.parse(fs.readFileSync(tufPackageJson, 'utf8'));
+const tufRuntimePackages = [
+  ['tuf-js', tufPackageJson, '5.0.1', 'MIT'],
+  [
+    '@tufjs/models',
+    require.resolve('@tufjs/models/package.json', { paths: [path.dirname(tufPackageJson)] }),
+    '4.1.1',
+    'MIT'
+  ],
+  [
+    '@tufjs/canonical-json',
+    require.resolve('@tufjs/canonical-json/package.json', { paths: [path.dirname(tufPackageJson)] }),
+    '2.0.0',
+    'MIT'
+  ],
+  [
+    '@gar/promise-retry',
+    resolvePackageJson('@gar/promise-retry', [path.dirname(tufPackageJson)]),
+    '1.0.3',
+    'MIT'
+  ],
+  [
+    'minimatch',
+    require.resolve('minimatch/package.json', { paths: [path.dirname(tufPackageJson)] }),
+    '10.2.5',
+    'BlueOak-1.0.0'
+  ]
+].map(([name, packagePath, version, expectedLicence]) => ({
+  expectedLicence,
+  name,
+  package: JSON.parse(fs.readFileSync(packagePath, 'utf8')),
+  version
+}));
+
 if (pinnedVersion !== piPackage.version) {
   console.error(`Pi must be pinned to the installed exact version. Expected ${piPackage.version}, found ${pinnedVersion || 'missing'}.`);
   process.exit(1);
@@ -42,7 +95,38 @@ if (
   process.exit(1);
 }
 
+if (appPackage.dependencies?.['tuf-js'] !== tufPackage.version) {
+  console.error(
+    `tuf-js must be pinned to the installed exact version. `
+    + `Expected ${tufPackage.version}, found ${appPackage.dependencies?.['tuf-js'] || 'missing'}.`
+  );
+  process.exit(1);
+}
+
+if (appPackage.devDependencies?.['@tufjs/canonical-json'] !== '2.0.0') {
+  console.error('The TUF signing canonical JSON implementation must be pinned to 2.0.0.');
+  process.exit(1);
+}
+
+for (const reviewed of tufRuntimePackages) {
+  if (
+    reviewed.package.name !== reviewed.name
+    || reviewed.package.version !== reviewed.version
+    || reviewed.package.license !== reviewed.expectedLicence
+  ) {
+    console.error(
+      `Reviewed updater dependency mismatch for ${reviewed.name}. `
+      + `Expected ${reviewed.version} (${reviewed.expectedLicence}), found `
+      + `${reviewed.package.version || 'unknown'} (${reviewed.package.license || 'unknown'}).`
+    );
+    process.exit(1);
+  }
+}
+
 console.log(
-  `Pi licences verified: ${piPackage.name}@${piPackage.version} (${licence}), `
-  + `brace-expansion@${braceExpansionPackage.version} (${braceExpansionPackage.license})`
+  `Bundled dependency licences verified: ${piPackage.name}@${piPackage.version} (${licence}), `
+  + `brace-expansion@${braceExpansionPackage.version} (${braceExpansionPackage.license}), `
+  + `${tufRuntimePackages.map((entry) => (
+    `${entry.name}@${entry.version} (${entry.expectedLicence})`
+  )).join(', ')}`
 );
