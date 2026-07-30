@@ -171,10 +171,13 @@ function serveFile(request, response, filePath) {
   serveBytes(request, response, fs.readFileSync(filePath));
 }
 
-function corruptedPayload(filePath) {
+function corruptedPayload(filePath, maxBytes = 1024 * 1024) {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
+    throw new Error('Corrupt updater payload limit must be a positive integer.');
+  }
   const bytes = Buffer.from(fs.readFileSync(filePath));
   if (bytes.length < 2) throw new Error(`Cannot truncate updater payload: ${filePath}`);
-  return Buffer.from(bytes.subarray(0, Math.min(bytes.length - 1, 1024 * 1024)));
+  return Buffer.from(bytes.subarray(0, Math.min(bytes.length - 1, maxBytes)));
 }
 
 function updaterEventTimeoutMs(platform) {

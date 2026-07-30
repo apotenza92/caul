@@ -121,12 +121,13 @@ describe('native TUF updater audit helpers', () => {
     const directory = mkdtempSync(path.join(tmpdir(), 'caul-corrupt-payload-'));
     try {
       const packagePath = path.join(directory, 'Caul.AppImage');
-      const original = Buffer.alloc(2 * 1024 * 1024, 0x43);
+      const original = Buffer.from('native package bytes');
       writeFileSync(packagePath, original);
-      const corrupted = corruptedPayload(packagePath);
+      const corrupted = corruptedPayload(packagePath, 8);
       expect(corrupted).not.toEqual(original);
-      expect(corrupted).toHaveLength(1024 * 1024);
+      expect(corrupted).toHaveLength(8);
       expect(readFileSync(packagePath)).toEqual(original);
+      expect(() => corruptedPayload(packagePath, 0)).toThrow(/positive integer/);
 
       const emptyPath = path.join(directory, 'empty');
       writeFileSync(emptyPath, '');
