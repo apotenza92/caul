@@ -327,6 +327,7 @@ describe('macOS release contract', () => {
   it('prepares a checksum-sealed public site bundle without deploy credentials', () => {
     const pages = loadWorkflow('pages.yml');
     const preparation = JSON.stringify(pages.jobs.prepare);
+    expect(pages.jobs.prepare['runs-on']).toBe('ubuntu-24.04');
     expect(preparation).toContain('caul-pages-publication-');
     expect(preparation).toContain('SHA256SUMS');
     expect(preparation).toContain('Apply these exact reviewed bytes manually');
