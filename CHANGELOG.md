@@ -2,7 +2,12 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.46]
+## [0.1.47]
+
+- Made Fedora desktop-integration verification inspect the complete installed RPM file list without a `pipefail` false failure when `grep` closes a large pipeline early.
+- Carries forward corrected stable and beta RPM co-installation, the static AppImage runtime and TUF-authenticated cross-platform updates from the unpublished 0.1.44 through 0.1.46 candidates.
+
+## [0.1.46] (unpublished release candidate)
 
 - Removed RPM's global build-ID symlinks from stable and beta packages so both product variants can coexist without identical-file conflicts.
 - Made the Fedora N-1 gate migrate historically conflicting packages one channel at a time before proving both corrected candidates coexist, launch, preserve their separate user data and uninstall cleanly.

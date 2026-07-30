@@ -859,8 +859,9 @@ jobs:
             test "$(rpm -q --queryformat '%{VERSION}' "$package_name")" = "$RELEASE_VERSION"
             test "$(rpm -q --queryformat '%{ARCH}' "$package_name")" = x86_64
             rpm -q --requires "$package_name"
-            rpm -ql "$package_name" | grep -qx "/usr/share/applications/$package_name.desktop"
-            rpm -ql "$package_name" | grep -Eq "/usr/share/icons/.*/$package_name\\.png$"
+            installed_paths="$(rpm -ql "$package_name")"
+            grep -qx "/usr/share/applications/$package_name.desktop" <<<"$installed_paths"
+            grep -Eq "/usr/share/icons/.*/$package_name\\.png$" <<<"$installed_paths"
             grep -qx 'Type=Application' "/usr/share/applications/$package_name.desktop"
             grep -qx 'Terminal=false' "/usr/share/applications/$package_name.desktop"
             grep -qx "Icon=$package_name" "/usr/share/applications/$package_name.desktop"

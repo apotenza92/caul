@@ -493,6 +493,14 @@ describe('macOS release contract', () => {
       .toBeLessThan(source.indexOf('dnf install -y "$prior_beta"'));
     expect(source.indexOf('dnf install -y "$prior_beta"'))
       .toBeLessThan(source.indexOf('dnf install -y "$candidate_beta"'));
+    expect(source).toContain('installed_paths="$(rpm -ql "$package_name")"');
+    expect(source).toContain(
+      'grep -qx "/usr/share/applications/$package_name.desktop" <<<"$installed_paths"'
+    );
+    expect(source).toContain(
+      'grep -Eq "/usr/share/icons/.*/$package_name\\\\.png$" <<<"$installed_paths"'
+    );
+    expect(source).not.toContain('rpm -ql "$package_name" | grep');
     expect(source).toContain('for PLATFORM in win32 linux; do');
     expect(source).not.toContain('for PLATFORM in darwin win32 linux; do');
     expect(source).toContain('release/updater-audit/*/app.asar');
