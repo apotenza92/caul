@@ -664,6 +664,8 @@ describe('macOS release contract', () => {
     );
     expect(nativeUpdaterHarness).toContain('CAUL_USER_DATA_DIR: userData');
     expect(nativeUpdaterHarness).not.toContain('path.join(process.env.APPDATA, productName)');
+    expect(nativeUpdaterHarness).toContain("requestedName.endsWith('.blockmap')");
+    expect(nativeUpdaterHarness).toContain("updaterEventTimeoutMs(process.platform)");
 
     const signedBuild = readFileSync(path.join(repositoryRoot, 'scripts', 'build-signed-macos.mjs'), 'utf8');
     expect(signedBuild).toContain("'--skip-launch'");

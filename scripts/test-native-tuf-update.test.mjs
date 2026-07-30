@@ -18,6 +18,7 @@ const {
   corruptedPayload,
   prepareSignedTarget,
   requireAuditScenario,
+  updaterEventTimeoutMs,
   waitForPathRemoval,
   windowsSilentInstallArguments
 } = require('./test-native-tuf-update.cjs');
@@ -75,6 +76,11 @@ describe('native TUF updater audit helpers', () => {
     expect(requireAuditScenario('corrupt-payload')).toBe('corrupt-payload');
     expect(requireAuditScenario('wrong-signature')).toBe('wrong-signature');
     expect(() => requireAuditScenario('checksum-only')).toThrow(/must be one of/);
+  });
+
+  it('allows bounded native package lifecycles without weakening Linux feedback', () => {
+    expect(updaterEventTimeoutMs('win32')).toBe(15 * 60_000);
+    expect(updaterEventTimeoutMs('linux')).toBe(5 * 60_000);
   });
 
   it('corrupts package bytes without changing their size or source file', () => {
