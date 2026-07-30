@@ -506,6 +506,7 @@ describe('macOS release contract', () => {
     expect(source).toContain('release/updater-audit/*/app.asar');
     expect(source).toContain('stable_assets="$RUNNER_TEMP/caul-stable-linux-${{ matrix.arch }}"');
     expect(source).toContain('cmp "$stable_asset" "release/$(basename "$stable_asset")"');
+    expect(source).toContain('node scripts/build-linux-deb.mjs ${{ matrix.arch }}');
     expect(source).toContain('../feed-publication/SHA256SUMS');
     expect(source).toContain('git add -- .nojekyll PUBLICATION.txt SHA256SUMS');
     expect(source).toContain('./scripts/test-windows-upgrade.ps1');
@@ -622,6 +623,12 @@ describe('macOS release contract', () => {
     expect(windowsLaunchVerifier).toContain("validatePackagedLaunchProcessResult('windows'");
     expect(windowsLaunchVerifier).toContain("CAUL_SMOKE_OUTPUT_FILE: smokeOutputPath");
     expect(windowsLaunchVerifier).toContain('timeout: 30_000');
+    const linuxDebBuilder = readFileSync(
+      path.join(repositoryRoot, 'scripts', 'build-linux-deb.mjs'),
+      'utf8'
+    );
+    expect(linuxDebBuilder).toContain('normaliseLinuxAppImageMetadata');
+    expect(linuxDebBuilder).toContain("updateMetadataFileName('linux', arch");
     expect(release.jobs['test-windows-upgrade']['timeout-minutes']).toBe(65);
     expect(source).toContain(
       'WINDOWS_ARM64_LEGACY_PUBLIC_BOOTSTRAP_TAG: ${{ vars.WINDOWS_ARM64_LEGACY_PUBLIC_BOOTSTRAP_TAG }}'
