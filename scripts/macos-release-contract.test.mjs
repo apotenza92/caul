@@ -543,7 +543,26 @@ describe('macOS release contract', () => {
       'utf8'
     );
     expect(builderConfig).toContain("appimage: '1.0.3'");
+    expect(builderConfig).toContain("afterRemove: 'build/rpm-after-remove.tpl'");
     expect(builderConfig).toContain("'--rpm-rpmbuild-define=_build_id_links none'");
+    expect(builderConfig).toContain("'--rpm-posttrans=build/rpm-posttrans.sh'");
+    const rpmAfterRemove = readFileSync(
+      path.join(repositoryRoot, 'build', 'rpm-after-remove.tpl'),
+      'utf8'
+    );
+    expect(rpmAfterRemove).toContain('if [[ "${1:-0}" -gt 0 ]]');
+    expect(rpmAfterRemove).toContain("update-alternatives --remove '${executable}'");
+    expect(rpmAfterRemove).toContain("rm -f '/usr/bin/${executable}'");
+    expect(rpmAfterRemove).toContain("APPARMOR_PROFILE_DEST='/etc/apparmor.d/${executable}'");
+    const rpmPosttrans = readFileSync(
+      path.join(repositoryRoot, 'build', 'rpm-posttrans.sh'),
+      'utf8'
+    );
+    expect(rpmPosttrans).toContain('rpm -q "$executable"');
+    expect(rpmPosttrans).toContain('ln -sf "$application_path" "/usr/bin/$executable"');
+    expect(rpmPosttrans).toContain('cp -f "$profile_source" "$profile_target"');
+    expect(rpmPosttrans).toContain('restore_product_integration caul Caul');
+    expect(rpmPosttrans).toContain("restore_product_integration caul-beta 'Caul Beta'");
     const defenderEvidence = readFileSync(
       path.join(repositoryRoot, 'scripts', 'write-windows-defender-evidence.ps1'),
       'utf8'

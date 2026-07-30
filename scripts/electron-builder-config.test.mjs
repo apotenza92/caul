@@ -49,6 +49,10 @@ describe('electron-builder Windows archive compatibility', () => {
 describe('electron-builder RPM coexistence', () => {
   it('suppresses global build-ID links that collide between stable and beta', () => {
     const config = loadConfig('linux', 'x64');
-    expect(config.rpm.fpm).toEqual(['--rpm-rpmbuild-define=_build_id_links none']);
+    expect(config.rpm.afterRemove).toBe('build/rpm-after-remove.tpl');
+    expect(config.rpm.fpm).toEqual([
+      '--rpm-rpmbuild-define=_build_id_links none',
+      '--rpm-posttrans=build/rpm-posttrans.sh'
+    ]);
   });
 });
