@@ -2,7 +2,13 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.45]
+## [0.1.46]
+
+- Removed RPM's global build-ID symlinks from stable and beta packages so both product variants can coexist without identical-file conflicts.
+- Made the Fedora N-1 gate migrate historically conflicting packages one channel at a time before proving both corrected candidates coexist, launch, preserve their separate user data and uninstall cleanly.
+- Carries forward the TUF-authenticated cross-platform updater and corrected static AppImage runtime introduced by the unpublished 0.1.44 and 0.1.45 candidates.
+
+## [0.1.45] (unpublished release candidate)
 
 - Replaced the legacy FUSE2 AppImage toolset with Electron Builder's checksum-pinned static runtime and corrected Linux dependency inspection to follow the actual packaged runtime graph under the launcher environment.
 - Carries forward the TUF-authenticated cross-platform updater, native package gates and protected release publication introduced by the unpublished 0.1.44 candidate.

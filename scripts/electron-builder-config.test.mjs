@@ -45,3 +45,10 @@ describe('electron-builder Windows archive compatibility', () => {
     expect(process.env.ELECTRON_BUILDER_7Z_FILTER).toBeUndefined();
   });
 });
+
+describe('electron-builder RPM coexistence', () => {
+  it('suppresses global build-ID links that collide between stable and beta', () => {
+    const config = loadConfig('linux', 'x64');
+    expect(config.rpm.fpm).toEqual(['--rpm-rpmbuild-define=_build_id_links none']);
+  });
+});

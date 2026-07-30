@@ -815,30 +815,46 @@ jobs:
         run: |
           set -euo pipefail
           packages=(caul-beta)
-          prior_packages=("$PWD/prior/caul-beta-x64.rpm")
-          candidate_packages=("$PWD/candidate/caul-beta-x64.rpm")
+          prior_beta="$PWD/prior/caul-beta-x64.rpm"
+          candidate_beta="$PWD/candidate/caul-beta-x64.rpm"
+          candidate_packages=("$candidate_beta")
           if [[ "$CAUL_RELEASE_CHANNEL" == stable ]]; then
             packages=(caul caul-beta)
-            prior_packages=("$PWD/prior/caul-x64.rpm" "${prior_packages[@]}")
-            candidate_packages=("$PWD/candidate/caul-x64.rpm" "${candidate_packages[@]}")
+            prior_stable="$PWD/prior/caul-x64.rpm"
+            candidate_stable="$PWD/candidate/caul-x64.rpm"
+            candidate_packages=("$candidate_stable" "${candidate_packages[@]}")
           fi
           cleanup() {
             dnf remove -y "${packages[@]}" >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
 
-          dnf install -y "${prior_packages[@]}"
           stable_data="$RUNNER_TEMP/fedora-caul-stable-user-data"
           beta_data="$RUNNER_TEMP/fedora-caul-beta-user-data"
           mkdir -p "$stable_data" "$beta_data"
+
+          for candidate_package in "${candidate_packages[@]}"; do
+            candidate_paths="$(rpm -qlp "$candidate_package")"
+            if grep -q '^/usr/lib/\.build-id/' <<<"$candidate_paths"; then
+              echo "$(basename "$candidate_package") contains global RPM build-ID links." >&2
+              exit 1
+            fi
+          done
+
           if [[ "$CAUL_RELEASE_CHANNEL" == stable ]]; then
+            dnf install -y "$prior_stable"
             CAUL_USER_DATA_DIR="$stable_data" xvfb-run -a caul --no-sandbox
             printf 'stable-%s\n' "$PRIOR_TAG" > "$stable_data/rpm-upgrade-marker.txt"
+            dnf install -y "$candidate_stable"
           fi
+
+          # Public 0.1.43 stable and beta RPMs own identical automatic build-ID
+          # links and cannot coexist. Upgrade stable to the corrected candidate
+          # first, then migrate beta and prove both corrected packages coexist.
+          dnf install -y "$prior_beta"
           CAUL_USER_DATA_DIR="$beta_data" xvfb-run -a caul-beta --no-sandbox
           printf 'beta-%s\n' "$PRIOR_TAG" > "$beta_data/rpm-upgrade-marker.txt"
-
-          dnf install -y "${candidate_packages[@]}"
+          dnf install -y "$candidate_beta"
           for package_name in "${packages[@]}"; do
             test "$(rpm -q --queryformat '%{VERSION}' "$package_name")" = "$RELEASE_VERSION"
             test "$(rpm -q --queryformat '%{ARCH}' "$package_name")" = x86_64

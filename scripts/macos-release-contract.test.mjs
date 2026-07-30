@@ -481,6 +481,18 @@ describe('macOS release contract', () => {
     expect(source).toContain('Windows N-1 upgrade');
     expect(source).toContain('Linux N-1 upgrade');
     expect(source).toContain('Fedora x64 RPM N-1 upgrade');
+    expect(source).toContain('candidate_paths="$(rpm -qlp "$candidate_package")"');
+    expect(source).toContain("grep -q '^/usr/lib/\\.build-id/' <<<\"$candidate_paths\"");
+    expect(source).toContain('dnf install -y "$prior_stable"');
+    expect(source).toContain('dnf install -y "$candidate_stable"');
+    expect(source).toContain('dnf install -y "$prior_beta"');
+    expect(source).toContain('dnf install -y "$candidate_beta"');
+    expect(source.indexOf('dnf install -y "$prior_stable"'))
+      .toBeLessThan(source.indexOf('dnf install -y "$candidate_stable"'));
+    expect(source.indexOf('dnf install -y "$candidate_stable"'))
+      .toBeLessThan(source.indexOf('dnf install -y "$prior_beta"'));
+    expect(source.indexOf('dnf install -y "$prior_beta"'))
+      .toBeLessThan(source.indexOf('dnf install -y "$candidate_beta"'));
     expect(source).toContain('for PLATFORM in win32 linux; do');
     expect(source).not.toContain('for PLATFORM in darwin win32 linux; do');
     expect(source).toContain('release/updater-audit/*/app.asar');
@@ -523,6 +535,7 @@ describe('macOS release contract', () => {
       'utf8'
     );
     expect(builderConfig).toContain("appimage: '1.0.3'");
+    expect(builderConfig).toContain("'--rpm-rpmbuild-define=_build_id_links none'");
     const defenderEvidence = readFileSync(
       path.join(repositoryRoot, 'scripts', 'write-windows-defender-evidence.ps1'),
       'utf8'
