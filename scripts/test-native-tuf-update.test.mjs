@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 const require = createRequire(import.meta.url);
 const {
   artifactName,
+  candidatePackageRequestPaths,
   corruptedPayload,
   prepareSignedTarget,
   requireAuditScenario,
@@ -69,6 +70,14 @@ describe('native TUF updater audit helpers', () => {
     expect(() => artifactName('')).toThrow(/invalid artifact URL/);
     expect(() => artifactName('%2F')).toThrow(/Unsafe/);
     expect(() => artifactName('nested%5Cevil.exe')).toThrow(/Unsafe/);
+  });
+
+  it('distinguishes package requests from optional blockmap requests', () => {
+    const packagePaths = candidatePackageRequestPaths(new Set([
+      'Caul windows x64 setup.exe'
+    ]));
+    expect(packagePaths.has('/assets/Caul%20windows%20x64%20setup.exe')).toBe(true);
+    expect(packagePaths.has('/assets/Caul%20windows%20x64%20setup.exe.blockmap')).toBe(false);
   });
 
   it('uses only the explicit native audit scenarios', () => {
