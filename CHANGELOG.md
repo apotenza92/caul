@@ -2,7 +2,12 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.51]
+## [0.1.52]
+
+- Accepted a bounded native package smoke timeout after the packaged app has already emitted its successful packaged-launch evidence.
+- Carries forward the native updater lifecycle verifier corrections from the unpublished 0.1.51 candidate.
+
+## [0.1.51] (unpublished release candidate)
 
 - Served NSIS blockmaps from the native updater audit server and gave large hosted Windows update lifecycles a bounded 15-minute completion window.
 - Prepared corrupt package bytes before launching the previous app so the audit timeout measures native update behaviour rather than fixture construction.

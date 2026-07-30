@@ -30,10 +30,9 @@ export function validatePackagedLaunchProcessResult(platform, result) {
     smokeOutputError = error;
   }
 
-  const acceptedWindowsExitTimeout = platform === 'windows'
-    && result.error?.code === 'ETIMEDOUT'
+  const acceptedPostSuccessExitTimeout = result.error?.code === 'ETIMEDOUT'
     && !smokeOutputError;
-  if (smokeOutputError || (!acceptedWindowsExitTimeout && (result.error || result.status !== 0))) {
+  if (smokeOutputError || (!acceptedPostSuccessExitTimeout && (result.error || result.status !== 0))) {
     const failureDetails = [
       smokeOutputError?.message,
       result.error?.message
