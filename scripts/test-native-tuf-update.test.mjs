@@ -22,6 +22,7 @@ const {
   resolveAuditAssetPath,
   updaterEventTimeoutMs,
   waitForPathRemoval,
+  windowsAuditProfileDirectories,
   windowsSilentInstallArguments
 } = require('./test-native-tuf-update.cjs');
 
@@ -158,5 +159,12 @@ describe('native TUF updater audit helpers', () => {
     expect(windowsSilentInstallArguments('C:\\audit\\Caul Beta'))
       .toEqual(['/S', '/D=C:\\audit\\Caul Beta']);
     expect(() => windowsSilentInstallArguments('')).toThrow(/requires a destination/);
+  });
+
+  it('isolates Windows updater caches inside each disposable audit profile', () => {
+    expect(windowsAuditProfileDirectories('C:\\audit\\scenario')).toEqual({
+      appData: path.join('C:\\audit\\scenario', 'windows-profile', 'roaming'),
+      localAppData: path.join('C:\\audit\\scenario', 'windows-profile', 'local')
+    });
   });
 });
