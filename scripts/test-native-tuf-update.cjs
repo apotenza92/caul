@@ -148,6 +148,10 @@ function corruptedPayload(filePath) {
   return bytes;
 }
 
+function updaterEventTimeoutMs(platform) {
+  return platform === 'win32' ? 15 * 60_000 : 5 * 60_000;
+}
+
 function invalidateTimestampSignature(repositoryDirectory) {
   const timestampPath = path.join(repositoryDirectory, 'metadata', 'timestamp.json');
   const timestamp = JSON.parse(fs.readFileSync(timestampPath, 'utf8'));
@@ -170,6 +174,7 @@ async function createUpdateServer({
   const requests = [];
   let repositoryDirectory;
   let signedTarget;
+  const corruptedAssets = new Map();
   const server = http.createServer((request, response) => {
     const pathname = decodeURIComponent(new URL(request.url, 'http://127.0.0.1').pathname);
     requests.push(pathname);
@@ -192,14 +197,24 @@ async function createUpdateServer({
       return;
     }
     const assetMatch = pathname.match(/^\/assets\/([^/]+)$/);
-    if (assetMatch && signedTarget.artifactNames.has(assetMatch[1])) {
-      const assetPath = path.join(candidateDirectory, assetMatch[1]);
-      if (scenario === 'corrupt-payload') {
-        serveBytes(request, response, corruptedPayload(assetPath));
-      } else {
-        serveFile(request, response, assetPath);
+    if (assetMatch) {
+      const requestedName = assetMatch[1];
+      const packageName = requestedName.endsWith('.blockmap')
+        ? requestedName.slice(0, -'.blockmap'.length)
+        : requestedName;
+      const assetPath = path.join(candidateDirectory, requestedName);
+      if (
+        signedTarget.artifactNames.has(packageName)
+        && fs.statSync(assetPath, { throwIfNoEntry: false })?.isFile()
+      ) {
+        const corrupted = corruptedAssets.get(requestedName);
+        if (corrupted) {
+          serveBytes(request, response, corrupted);
+        } else {
+          serveFile(request, response, assetPath);
+        }
+        return;
       }
-      return;
     }
     response.writeHead(404).end();
   });
@@ -209,6 +224,11 @@ async function createUpdateServer({
   });
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
   signedTarget = prepareSignedTarget({ baseUrl, candidateDirectory, candidateMetadata });
+  if (scenario === 'corrupt-payload') {
+    for (const name of signedTarget.artifactNames) {
+      corruptedAssets.set(name, corruptedPayload(path.join(candidateDirectory, name)));
+    }
+  }
   const targetPath = path.join(temporaryRoot, targetName);
   fs.writeFileSync(targetPath, signedTarget.bytes);
   const privateBundle = JSON.parse(fs.readFileSync(privateKeyBundlePath, 'utf8'));
@@ -620,7 +640,11 @@ async function main(argv = process.argv.slice(2)) {
       env: environment,
       stdio: 'inherit'
     });
-    const outcome = await waitForEvent(eventPath, new Set(['updated-runtime-launched', 'error']));
+    const outcome = await waitForEvent(
+      eventPath,
+      new Set(['updated-runtime-launched', 'error']),
+      updaterEventTimeoutMs(process.platform)
+    );
     if (scenario === 'valid') {
       if (outcome.name === 'error') {
         throw new Error(`Native updater failed: ${outcome.message || '<missing error>'}`);
@@ -821,6 +845,7 @@ module.exports = {
   installedPackageVersion,
   prepareSignedTarget,
   requireAuditScenario,
+  updaterEventTimeoutMs,
   waitForInstalledCandidate,
   waitForPathRemoval,
   windowsSilentInstallArguments
