@@ -146,7 +146,11 @@ jobs:
             if [[ "$CAUL_AUDIT_CHANNEL" == beta ]]; then
               prefix=caul-beta
             fi
-            previous="$PWD/release/$prefix-$CAUL_AUDIT_ARCH.AppImage"
+            electron_builder_arch="$CAUL_AUDIT_ARCH"
+            if [[ "$CAUL_AUDIT_ARCH" == x64 ]]; then
+              electron_builder_arch=x86_64
+            fi
+            previous="$PWD/release/$prefix-$electron_builder_arch.AppImage"
           fi
           test -f "$previous"
           {

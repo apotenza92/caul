@@ -34,6 +34,11 @@ function run(command, args, { env = process.env } = {}) {
   if (result.status !== 0) throw new Error(`${command} failed with status ${result.status}.`);
 }
 
+function windowsSilentInstallArguments(installDirectory) {
+  if (!installDirectory) throw new Error('Windows silent installation requires a destination.');
+  return ['/S', `/D=${installDirectory}`];
+}
+
 function digest(filePath, algorithm = 'sha256', encoding = 'hex') {
   return createHash(algorithm).update(fs.readFileSync(filePath)).digest(encoding);
 }
@@ -573,11 +578,11 @@ async function main(argv = process.argv.slice(2)) {
   let server;
   try {
     if (process.platform === 'win32') {
-      const installDirectory = path.join(process.env.LOCALAPPDATA, 'Programs', productName);
+      const installDirectory = path.join(temporaryRoot, 'install');
       if (fs.existsSync(installDirectory)) {
         throw new Error(`Native updater audit requires an unused install directory: ${installDirectory}`);
       }
-      run(previousArtifact, ['/S']);
+      run(previousArtifact, windowsSilentInstallArguments(installDirectory));
       installedExecutable = path.join(installDirectory, `${productName}.exe`);
       if (!fs.existsSync(installedExecutable)) {
         throw new Error(`The previous Windows package did not install ${productName}.`);
@@ -819,5 +824,6 @@ module.exports = {
   prepareSignedTarget,
   requireAuditScenario,
   waitForInstalledCandidate,
-  waitForPathRemoval
+  waitForPathRemoval,
+  windowsSilentInstallArguments
 };

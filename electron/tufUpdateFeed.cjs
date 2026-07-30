@@ -138,13 +138,16 @@ async function createTufVerifiedUpdateFeed({
       if (!targetInfo) {
         throw new Error(`The signed Caul update repository has no ${normalisedTargetName} target.`);
       }
-      const temporaryTargetPath = `${targetPath}.${process.pid}.tmp`;
-      try {
-        await updater.downloadTarget(targetInfo, temporaryTargetPath);
-        fs.rmSync(targetPath, { force: true });
-        fs.renameSync(temporaryTargetPath, targetPath);
-      } finally {
-        fs.rmSync(temporaryTargetPath, { force: true });
+      const cachedTargetPath = await updater.findCachedTarget(targetInfo, targetPath);
+      if (!cachedTargetPath) {
+        const temporaryTargetPath = `${targetPath}.${process.pid}.tmp`;
+        try {
+          await updater.downloadTarget(targetInfo, temporaryTargetPath);
+          fs.rmSync(targetPath, { force: true });
+          fs.renameSync(temporaryTargetPath, targetPath);
+        } finally {
+          fs.rmSync(temporaryTargetPath, { force: true });
+        }
       }
       targetBytes = fs.readFileSync(targetPath);
       return targetPath;

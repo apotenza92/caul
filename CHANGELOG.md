@@ -2,7 +2,14 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.48]
+## [0.1.49]
+
+- Preserved the already-verified stable Linux package and update-metadata set while building the beta channel in the same release job.
+- Reused an unchanged, checksum-verified TUF target across repeated refreshes so Windows update downloads do not stall while replacing the same trusted metadata file.
+- Made native updater audits use Electron Builder's actual x64 AppImage name and an explicit isolated NSIS installation directory.
+- Carries forward the corrected RPM upgrade integration, static AppImage runtime and TUF-authenticated cross-platform updates from the unpublished 0.1.44 through 0.1.48 candidates.
+
+## [0.1.48] (unpublished release candidate)
 
 - Restored each installed RPM product's command link and AppArmor profile after an older package version is removed during an upgrade, while skipping replacement cleanup and retaining complete cleanup for a genuine final uninstall.
 - Carries forward corrected stable and beta RPM co-installation, the static AppImage runtime and TUF-authenticated cross-platform updates from the unpublished 0.1.44 through 0.1.47 candidates.
