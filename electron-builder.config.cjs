@@ -246,6 +246,7 @@ module.exports = {
   },
   rpm: {
     packageName: `caul${isBeta ? '-beta' : ''}`,
-    artifactName: `caul${isBeta ? '-beta' : ''}-${linuxArtifactArch}.\${ext}`
+    artifactName: `caul${isBeta ? '-beta' : ''}-${linuxArtifactArch}.\${ext}`,
+    fpm: ['--rpm-rpmbuild-define=_build_id_links none']
   }
 };
