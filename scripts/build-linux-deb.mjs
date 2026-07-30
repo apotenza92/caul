@@ -3,9 +3,11 @@ import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, rmSync, symlinkS
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import process from 'node:process';
+import { normaliseLinuxAppImageMetadata } from './normalise-linux-appimage-metadata.mjs';
 
 const require = createRequire(import.meta.url);
 const packageJson = require('../package.json');
+const { updateMetadataFileName } = require('../electron/updateContract.cjs');
 
 const root = process.cwd();
 const releaseDir = path.join(root, 'release');
@@ -51,6 +53,14 @@ if (appImageSourcePath !== appImageOutputPath && existsSync(appImageSourcePath))
   cpSync(appImageSourcePath, appImageOutputPath);
   rmSync(appImageSourcePath, { force: true });
 }
+normaliseLinuxAppImageMetadata({
+  metadataPath: path.join(
+    releaseDir,
+    updateMetadataFileName('linux', arch, isBeta ? 'beta' : 'stable')
+  ),
+  sourceArtifactName: path.basename(appImageSourcePath),
+  targetArtifactName: path.basename(appImageOutputPath)
+});
 
 rmSync(packageDir, { recursive: true, force: true });
 mkdirSync(installDir, { recursive: true });
