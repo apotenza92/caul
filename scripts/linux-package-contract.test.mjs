@@ -4,7 +4,8 @@ import {
   assertDesktopEntryContract,
   assertGlibcVersionsWithinContract,
   parseDesktopEntry,
-  parseGlibcVersions
+  parseGlibcVersions,
+  shouldInspectRuntimeDependencies
 } from './linux-package-contract.mjs';
 
 const stableDesktopEntry = `[Desktop Entry]
@@ -61,5 +62,25 @@ Name=Ignored
       stableDesktopEntry.replace('Categories=Utility;', 'Categories=Office;'),
       { channel: 'stable', format: 'deb' }
     )).toThrow('Utility category');
+  });
+
+  it('checks AppImage runtime roots without treating toolset shims as entry points', () => {
+    const root = '/tmp/caul-appimage';
+    expect(shouldInspectRuntimeDependencies(root, `${root}/caul`, 'appimage')).toBe(true);
+    expect(shouldInspectRuntimeDependencies(
+      root,
+      `${root}/resources/app.asar.unpacked/native-addon.node`,
+      'appimage'
+    )).toBe(true);
+    expect(shouldInspectRuntimeDependencies(
+      root,
+      `${root}/usr/lib/libappindicator3.so.1.0.0`,
+      'appimage'
+    )).toBe(false);
+    expect(shouldInspectRuntimeDependencies(
+      root,
+      `${root}/usr/lib/libappindicator3.so.1.0.0`,
+      'deb'
+    )).toBe(true);
   });
 });

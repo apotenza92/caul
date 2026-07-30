@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, delimiter, join, relative, sep } from 'node:path';
 
 export const MAX_SUPPORTED_GLIBC_VERSION = '2.39';
 
@@ -102,9 +102,10 @@ function elfArchitecture(filePath) {
   return machine === 183 ? 'arm64' : machine === 62 ? 'x64' : `elf-${machine}`;
 }
 
-function runInspection(command, args, filePath) {
+function runInspection(command, args, filePath, { env = process.env } = {}) {
   const result = spawnSync(command, [...args, filePath], {
     encoding: 'utf8',
+    env,
     maxBuffer: 16 * 1024 * 1024
   });
   if (result.error || result.status !== 0) {
@@ -114,6 +115,12 @@ function runInspection(command, args, filePath) {
     );
   }
   return `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+}
+
+export function shouldInspectRuntimeDependencies(root, filePath, format) {
+  if (format !== 'appimage') return true;
+  const pathParts = relative(root, filePath).split(sep);
+  return !(pathParts[0] === 'usr' && pathParts[1] === 'lib');
 }
 
 export function inspectLinuxRuntimeContract(root, { arch, channel, format }) {
@@ -155,6 +162,16 @@ export function inspectLinuxRuntimeContract(root, { arch, channel, format }) {
 
   const glibcVersions = new Set();
   let dynamicFileCount = 0;
+  let dependencyRootCount = 0;
+  const dependencyEnvironment = format === 'appimage'
+    ? {
+        ...process.env,
+        LD_LIBRARY_PATH: [
+          join(root, 'usr', 'lib'),
+          process.env.LD_LIBRARY_PATH
+        ].filter(Boolean).join(delimiter)
+      }
+    : process.env;
   for (const elfFile of elfFiles) {
     const versionInfo = runInspection('readelf', ['--version-info', '--wide'], elfFile);
     for (const version of parseGlibcVersions(versionInfo)) glibcVersions.add(version);
@@ -162,13 +179,22 @@ export function inspectLinuxRuntimeContract(root, { arch, channel, format }) {
     const dynamicInfo = runInspection('readelf', ['--dynamic', '--wide'], elfFile);
     if (!/\(NEEDED\)/.test(dynamicInfo)) continue;
     dynamicFileCount += 1;
-    const dependencies = runInspection('ldd', [], elfFile);
+    if (!shouldInspectRuntimeDependencies(root, elfFile, format)) continue;
+    dependencyRootCount += 1;
+    const dependencies = runInspection('ldd', [], elfFile, {
+      env: dependencyEnvironment
+    });
     if (/=>\s+not found\b/.test(dependencies) || /\bnot found\b/.test(dependencies)) {
-      throw new Error(`${format} package has an unresolved runtime dependency:\n${dependencies}`);
+      throw new Error(
+        `${format} package has an unresolved runtime dependency for ${elfFile}:\n${dependencies}`
+      );
     }
   }
   if (dynamicFileCount === 0) {
     throw new Error(`${format} package contains no dynamically linked runtime files.`);
+  }
+  if (dependencyRootCount === 0) {
+    throw new Error(`${format} package contains no runtime dependency roots.`);
   }
   if (glibcVersions.size === 0) {
     throw new Error(`${format} package exposes no inspectable GLIBC version contract.`);
@@ -177,6 +203,7 @@ export function inspectLinuxRuntimeContract(root, { arch, channel, format }) {
 
   return {
     desktopEntry: desktopEntries[0].path,
+    dependencyRootCount,
     dynamicFileCount,
     elfFileCount: elfFiles.length,
     glibcMaximum: [...glibcVersions].sort(compareVersions).at(-1),
