@@ -50,6 +50,7 @@ function createUpdaterService({
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.allowPrerelease = appChannel === 'beta';
+  configureUpdaterTestDownloadMode(autoUpdater, env);
 
   autoUpdater.on('download-progress', (progress) => {
     downloading = true;
@@ -728,6 +729,17 @@ function resolveTufTestRepository(env = process.env) {
     : '';
 }
 
+function configureUpdaterTestDownloadMode(autoUpdater, env = process.env) {
+  if (
+    env.CAUL_UPDATE_TEST_MODE === '1'
+    && env.CAUL_UPDATER_DISABLE_DIFFERENTIAL_DOWNLOAD === '1'
+  ) {
+    autoUpdater.disableDifferentialDownload = true;
+    return true;
+  }
+  return false;
+}
+
 function isVersionNewer(candidate, current) {
   return compareVersions(candidate, current) > 0;
 }
@@ -771,6 +783,7 @@ module.exports = {
   automaticInstallSupported,
   compareVersions,
   configureUpdaterFeed,
+  configureUpdaterTestDownloadMode,
   createUpdaterService,
   findTargetRelease,
   isUpdateSmokeDisabled,

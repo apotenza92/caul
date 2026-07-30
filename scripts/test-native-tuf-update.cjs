@@ -78,6 +78,12 @@ function artifactName(value) {
   return decoded;
 }
 
+function candidatePackageRequestPaths(artifactNames) {
+  return new Set([...artifactNames].map(
+    (name) => `/assets/${encodeURIComponent(artifactName(name))}`
+  ));
+}
+
 function prepareSignedTarget({ baseUrl, candidateDirectory, candidateMetadata }) {
   const metadata = yaml.load(fs.readFileSync(candidateMetadata, 'utf8'));
   if (!metadata?.version || !Array.isArray(metadata.files) || metadata.files.length === 0) {
@@ -249,6 +255,7 @@ async function createUpdateServer({
     invalidateTimestampSignature(repositoryDirectory);
   }
   return {
+    artifactNames: new Set(signedTarget.artifactNames),
     baseUrl,
     close: () => new Promise((resolve, reject) => {
       server.close((error) => error ? reject(error) : resolve());
@@ -633,6 +640,8 @@ async function main(argv = process.argv.slice(2)) {
       CAUL_E2E_INSTALL_UPDATE: '1',
       CAUL_TUF_TEST_REPOSITORY_URL: `${server.baseUrl}/tuf`,
       CAUL_UPDATE_TEST_MODE: '1',
+      CAUL_UPDATER_DISABLE_DIFFERENTIAL_DOWNLOAD:
+        process.platform === 'win32' && scenario === 'corrupt-payload' ? '1' : undefined,
       CAUL_UPDATER_EVENT_PATH: eventPath,
       CAUL_USER_DATA_DIR: userData
     });
@@ -705,6 +714,8 @@ async function main(argv = process.argv.slice(2)) {
       `/tuf/targets/${encodeURIComponent(targetName)}`
     );
     const assetRequested = server.requests.some((request) => request.startsWith('/assets/'));
+    const packageRequestPaths = candidatePackageRequestPaths(server.artifactNames);
+    const packageRequested = server.requests.some((request) => packageRequestPaths.has(request));
     if (scenario === 'wrong-signature') {
       if (targetRequested || assetRequested || eventNames.includes('update-available')) {
         throw new Error('Wrong-signature metadata progressed past TUF authentication.');
@@ -713,7 +724,7 @@ async function main(argv = process.argv.slice(2)) {
       if (!targetRequested) {
         throw new Error('Updater did not request the TUF-authenticated update metadata.');
       }
-      if (!assetRequested) {
+      if (!packageRequested) {
         throw new Error('Updater did not request a candidate package.');
       }
     }
@@ -858,6 +869,7 @@ if (require.main === module) {
 
 module.exports = {
   artifactName,
+  candidatePackageRequestPaths,
   corruptedPayload,
   installedPackageDigest,
   installedPackageVersion,

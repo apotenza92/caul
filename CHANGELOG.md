@@ -6,6 +6,7 @@ All notable Caul changes are recorded here.
 
 - Required a valid packaged-launch marker for the native updater audit's final ordinary relaunch, while accepting a bounded post-success process timeout on Linux or Windows.
 - Captured the final smoke result through an explicit file so GUI-process output remains deterministic across native runners.
+- Forced the Windows corrupt-payload audit to download the deliberately damaged installer and required evidence of the package request rather than accepting a blockmap request.
 - Carries forward the native package smoke correction from the unpublished 0.1.52 candidate.
 
 ## [0.1.52] (unpublished release candidate)
