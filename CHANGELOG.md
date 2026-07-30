@@ -2,7 +2,12 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.54]
+## [0.1.55]
+
+- Isolated every Windows native updater scenario's roaming profile and updater cache inside its disposable audit directory so pending installers cannot leak between scenarios.
+- Carries forward the Windows updater audit corrections from the unpublished 0.1.54 candidate.
+
+## [0.1.54] (unpublished release candidate)
 
 - Gave synthetic Windows updater packages versioned audit URLs so valid differential updates receive distinct previous and candidate blockmaps.
 - Made the corrupt-payload audit serve a small truncated package so checksum rejection completes deterministically without streaming an entire damaged installer.

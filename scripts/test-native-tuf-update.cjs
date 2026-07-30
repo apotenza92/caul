@@ -462,6 +462,13 @@ function restrictedEnvironment(overrides) {
   ]);
 }
 
+function windowsAuditProfileDirectories(temporaryRoot) {
+  return {
+    appData: path.join(temporaryRoot, 'windows-profile', 'roaming'),
+    localAppData: path.join(temporaryRoot, 'windows-profile', 'local')
+  };
+}
+
 async function waitForInstalledCandidate({
   candidateAsar,
   eventPath,
@@ -614,6 +621,9 @@ async function main(argv = process.argv.slice(2)) {
 
   const productName = channel === 'beta' ? 'Caul Beta' : 'Caul';
   const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'caul-native-updater-'));
+  const windowsProfile = process.platform === 'win32'
+    ? windowsAuditProfileDirectories(temporaryRoot)
+    : null;
   const userData = path.join(temporaryRoot, 'user-data');
   if (fs.existsSync(userData)) {
     throw new Error(`Native updater audit requires an unused user-data directory: ${userData}`);
@@ -649,7 +659,14 @@ async function main(argv = process.argv.slice(2)) {
       if (fs.existsSync(installDirectory)) {
         throw new Error(`Native updater audit requires an unused install directory: ${installDirectory}`);
       }
-      run(previousArtifact, windowsSilentInstallArguments(installDirectory));
+      fs.mkdirSync(windowsProfile.appData, { recursive: true });
+      fs.mkdirSync(windowsProfile.localAppData, { recursive: true });
+      run(previousArtifact, windowsSilentInstallArguments(installDirectory), {
+        env: restrictedEnvironment({
+          APPDATA: windowsProfile.appData,
+          LOCALAPPDATA: windowsProfile.localAppData
+        })
+      });
       installedExecutable = path.join(installDirectory, `${productName}.exe`);
       if (!fs.existsSync(installedExecutable)) {
         throw new Error(`The previous Windows package did not install ${productName}.`);
@@ -686,7 +703,11 @@ async function main(argv = process.argv.slice(2)) {
       CAUL_UPDATER_DISABLE_DIFFERENTIAL_DOWNLOAD:
         process.platform === 'win32' && scenario === 'corrupt-payload' ? '1' : undefined,
       CAUL_UPDATER_EVENT_PATH: eventPath,
-      CAUL_USER_DATA_DIR: userData
+      CAUL_USER_DATA_DIR: userData,
+      ...(windowsProfile ? {
+        APPDATA: windowsProfile.appData,
+        LOCALAPPDATA: windowsProfile.localAppData
+      } : {})
     });
     child = spawn(installedExecutable, process.platform === 'linux' ? ['--no-sandbox'] : [], {
       env: environment,
@@ -887,20 +908,6 @@ async function main(argv = process.argv.slice(2)) {
       maxRetries: 20,
       retryDelay: 250
     });
-    if (process.platform === 'win32') {
-      fs.rmSync(userData, {
-        recursive: true,
-        force: true,
-        maxRetries: 20,
-        retryDelay: 250
-      });
-      fs.rmSync(path.join(process.env.LOCALAPPDATA, `${productName}-updater`), {
-        recursive: true,
-        force: true,
-        maxRetries: 20,
-        retryDelay: 250
-      });
-    }
     fs.rmSync(documentsMarkerPath, { force: true });
     if (!failure && cleanupFailure) throw cleanupFailure;
   }
@@ -925,5 +932,6 @@ module.exports = {
   updaterEventTimeoutMs,
   waitForInstalledCandidate,
   waitForPathRemoval,
+  windowsAuditProfileDirectories,
   windowsSilentInstallArguments
 };
