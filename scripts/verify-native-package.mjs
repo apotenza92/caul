@@ -188,6 +188,7 @@ function inspectExtractedLinuxPackage(packagePath, format) {
     console.log(
       `${format} runtime contract: ${runtimeEvidence.elfFileCount} ELF files, `
       + `${runtimeEvidence.dynamicFileCount} dynamic files, `
+      + `${runtimeEvidence.dependencyRootCount} dependency roots, `
       + `maximum GLIBC_${runtimeEvidence.glibcMaximum}, `
       + `${runtimeEvidence.iconCount} desktop icons.`
     );

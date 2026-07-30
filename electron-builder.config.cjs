@@ -206,6 +206,9 @@ module.exports = {
       ...(isBeta ? { channel: 'beta' } : {})
     }
   ],
+  toolsets: {
+    appimage: '1.0.3'
+  },
   mac: macConfig,
   win: {
     artifactName: `${artifactPrefix}-windows-\${arch}-setup.\${ext}`,

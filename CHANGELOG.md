@@ -2,7 +2,12 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.44]
+## [0.1.45]
+
+- Replaced the legacy FUSE2 AppImage toolset with Electron Builder's checksum-pinned static runtime and corrected Linux dependency inspection to follow the actual packaged runtime graph under the launcher environment.
+- Carries forward the TUF-authenticated cross-platform updater, native package gates and protected release publication introduced by the unpublished 0.1.44 candidate.
+
+## [0.1.44] (unpublished release candidate)
 
 - Added TUF-authenticated automatic updates for Windows NSIS and Linux AppImage packages while keeping Debian and RPM upgrades with the system package manager.
 - Added native Windows and Linux release gates for authenticated update, restart, corrupt-payload and wrong-signature rejection, retained settings, credential state, project data, updater trust and Windows uninstall across ARM64 and x64.

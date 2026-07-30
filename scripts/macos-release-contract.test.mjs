@@ -515,7 +515,14 @@ describe('macOS release contract', () => {
     expect(linuxContract).toContain("MAX_SUPPORTED_GLIBC_VERSION = '2.39'");
     expect(linuxContract).toContain("runInspection('readelf'");
     expect(linuxContract).toContain("runInspection('ldd'");
+    expect(linuxContract).toContain('shouldInspectRuntimeDependencies');
+    expect(linuxContract).toContain("join(root, 'usr', 'lib')");
     expect(linuxContract).toContain('assertDesktopEntryContract');
+    const builderConfig = readFileSync(
+      path.join(repositoryRoot, 'electron-builder.config.cjs'),
+      'utf8'
+    );
+    expect(builderConfig).toContain("appimage: '1.0.3'");
     const defenderEvidence = readFileSync(
       path.join(repositoryRoot, 'scripts', 'write-windows-defender-evidence.ps1'),
       'utf8'
