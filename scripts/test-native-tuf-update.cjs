@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { createHash } = require('node:crypto');
+const { createHash, randomBytes } = require('node:crypto');
 const { spawn, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const http = require('node:http');
@@ -153,26 +153,79 @@ function prepareSignedTarget({ baseUrl, candidateDirectory, candidateMetadata })
   };
 }
 
+function parseByteRanges(header, length) {
+  if (header === undefined) return null;
+  if (typeof header !== 'string' || !header.startsWith('bytes=')) return [];
+  const values = header.slice('bytes='.length).split(',');
+  if (values.length === 0) return [];
+  const ranges = [];
+  for (const value of values) {
+    const match = value.trim().match(/^(\d+)-(\d*)$/);
+    if (!match) return [];
+    const start = Number(match[1]);
+    const end = match[2] ? Math.min(Number(match[2]), length - 1) : length - 1;
+    if (
+      !Number.isSafeInteger(start)
+      || !Number.isSafeInteger(end)
+      || start < 0
+      || start > end
+      || start >= length
+    ) {
+      return [];
+    }
+    ranges.push({ start, end });
+  }
+  return ranges;
+}
+
+function multipartByteRanges(bytes, ranges, boundary) {
+  const parts = [];
+  for (const { start, end } of ranges) {
+    parts.push(Buffer.from(
+      `--${boundary}\r\n`
+      + 'Content-Type: application/octet-stream\r\n'
+      + `Content-Range: bytes ${start}-${end}/${bytes.length}\r\n`
+      + '\r\n'
+    ));
+    parts.push(bytes.subarray(start, end + 1));
+    parts.push(Buffer.from('\r\n'));
+  }
+  parts.push(Buffer.from(`--${boundary}--\r\n`));
+  return Buffer.concat(parts);
+}
+
 function serveBytes(request, response, bytes) {
-  const range = request.headers.range?.match(/^bytes=(\d+)-(\d*)$/);
-  if (!range) {
+  const ranges = parseByteRanges(request.headers.range, bytes.length);
+  if (ranges === null) {
     response.writeHead(200, {
       'Accept-Ranges': 'bytes',
-      'Content-Length': bytes.length
+      'Content-Length': bytes.length,
+      'Content-Type': 'application/octet-stream'
     });
     response.end(request.method === 'HEAD' ? undefined : bytes);
     return;
   }
-  const start = Number(range[1]);
-  const end = range[2] ? Math.min(Number(range[2]), bytes.length - 1) : bytes.length - 1;
-  if (!Number.isSafeInteger(start) || start < 0 || start > end || start >= bytes.length) {
+  if (ranges.length === 0) {
     response.writeHead(416, { 'Content-Range': `bytes */${bytes.length}` }).end();
     return;
   }
+  if (ranges.length > 1) {
+    const boundary = `caul-${randomBytes(12).toString('hex')}`;
+    const body = multipartByteRanges(bytes, ranges, boundary);
+    response.writeHead(206, {
+      'Accept-Ranges': 'bytes',
+      'Content-Length': body.length,
+      'Content-Type': `multipart/byteranges; boundary=${boundary}`
+    });
+    response.end(request.method === 'HEAD' ? undefined : body);
+    return;
+  }
+  const [{ start, end }] = ranges;
   response.writeHead(206, {
     'Accept-Ranges': 'bytes',
     'Content-Length': end - start + 1,
-    'Content-Range': `bytes ${start}-${end}/${bytes.length}`
+    'Content-Range': `bytes ${start}-${end}/${bytes.length}`,
+    'Content-Type': 'application/octet-stream'
   });
   response.end(request.method === 'HEAD' ? undefined : bytes.subarray(start, end + 1));
 }
@@ -972,6 +1025,7 @@ module.exports = {
   prepareSignedTarget,
   requireAuditScenario,
   resolveAuditAssetPath,
+  serveBytes,
   updaterEventTimeoutMs,
   waitForInstalledCandidate,
   waitForPathRemoval,

@@ -2,7 +2,12 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.58]
+## [0.1.59]
+
+- Served standards-compliant multipart byte ranges from the native Windows updater audit so Electron's differential downloader is exercised directly without a stalled full-package fallback.
+- Carries forward the update-restart process cleanup from the unpublished 0.1.58 candidate and authenticated metadata timeout correction from the unpublished 0.1.57 candidate.
+
+## [0.1.58] (unpublished release candidate)
 
 - Dispose persistent Pi subprocesses before installing a downloaded update so Windows package replacement cannot be blocked by executable locks.
 - Carries forward the authenticated metadata timeout correction from the unpublished 0.1.57 candidate.

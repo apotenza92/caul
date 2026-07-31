@@ -9,6 +9,7 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { createServer, request as httpRequest } from 'node:http';
 import yaml from 'js-yaml';
 import { describe, expect, it } from 'vitest';
 
@@ -20,6 +21,7 @@ const {
   prepareSignedTarget,
   requireAuditScenario,
   resolveAuditAssetPath,
+  serveBytes,
   stageWindowsDifferentialBase,
   updaterEventTimeoutMs,
   waitForPathRemoval,
@@ -28,7 +30,75 @@ const {
   windowsSilentInstallArguments
 } = require('./test-native-tuf-update.cjs');
 
+function requestBytes(server, { method = 'GET', range } = {}) {
+  const address = server.address();
+  return new Promise((resolve, reject) => {
+    const request = httpRequest({
+      host: '127.0.0.1',
+      method,
+      path: '/',
+      port: address.port,
+      headers: range ? { Range: range } : undefined
+    }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => resolve({
+        body: Buffer.concat(chunks),
+        headers: response.headers,
+        statusCode: response.statusCode
+      }));
+    });
+    request.on('error', reject);
+    request.end();
+  });
+}
+
 describe('native TUF updater audit helpers', () => {
+  it('serves Electron differential downloads as standard multipart byte ranges', async () => {
+    const bytes = Buffer.from('abcdefghij');
+    const server = createServer((request, response) => serveBytes(request, response, bytes));
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    try {
+      const response = await requestBytes(server, { range: 'bytes=0-2, 6-8' });
+      expect(response.statusCode).toBe(206);
+      const contentType = response.headers['content-type'];
+      const boundary = contentType?.match(
+        /^multipart\/byteranges; boundary=(caul-[a-f0-9]+)$/
+      )?.[1];
+      expect(boundary).toBeTruthy();
+      expect(response.body).toEqual(Buffer.from(
+        `--${boundary}\r\n`
+        + 'Content-Type: application/octet-stream\r\n'
+        + 'Content-Range: bytes 0-2/10\r\n'
+        + '\r\n'
+        + 'abc\r\n'
+        + `--${boundary}\r\n`
+        + 'Content-Type: application/octet-stream\r\n'
+        + 'Content-Range: bytes 6-8/10\r\n'
+        + '\r\n'
+        + 'ghi\r\n'
+        + `--${boundary}--\r\n`
+      ));
+      expect(Number(response.headers['content-length'])).toBe(response.body.length);
+
+      const single = await requestBytes(server, { range: 'bytes=2-4' });
+      expect(single.statusCode).toBe(206);
+      expect(single.headers['content-range']).toBe('bytes 2-4/10');
+      expect(single.body).toEqual(Buffer.from('cde'));
+
+      const invalid = await requestBytes(server, { range: 'bytes=20-30' });
+      expect(invalid.statusCode).toBe(416);
+      expect(invalid.headers['content-range']).toBe('bytes */10');
+    } finally {
+      await new Promise((resolve, reject) => server.close((error) => (
+        error ? reject(error) : resolve()
+      )));
+    }
+  });
+
   it('rewrites only checksum-verified package URLs to the loopback server', () => {
     const directory = mkdtempSync(path.join(tmpdir(), 'caul-native-target-'));
     try {
