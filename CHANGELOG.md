@@ -2,7 +2,12 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.57]
+## [0.1.58]
+
+- Dispose persistent Pi subprocesses before installing a downloaded update so Windows package replacement cannot be blocked by executable locks.
+- Carries forward the authenticated metadata timeout correction from the unpublished 0.1.57 candidate.
+
+## [0.1.57] (unpublished release candidate)
 
 - Increased each authenticated update metadata fetch's bounded timeout from 15 to 60 seconds so refreshes remain reliable on slower native Windows ARM systems without weakening signature or hash verification.
 - Carries forward the verified Windows differential-updater correction from the unpublished 0.1.56 candidate.

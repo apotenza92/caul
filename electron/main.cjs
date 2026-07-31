@@ -24,6 +24,7 @@ const {
 } = require('./onboardingLaunch.cjs');
 const { createStopFlushController } = require('./transcriptionStopFlush.cjs');
 const { createUpdaterService, normaliseUpdateFrequency, shouldCheckForUpdates } = require('./updater.cjs');
+const { prepareUpdateInstall } = require('./updateInstallPreparation.cjs');
 const { createHistoryService } = require('./history.cjs');
 const { getUsableSelectedLocalAiModelId } = require('./localAiSelection.cjs');
 const { createLocalLlmService } = require('./localLlm.cjs');
@@ -175,7 +176,6 @@ let piChatGptLoginPromise = null;
 let piModelRuntimeImportPromise = null;
 let providerCredentialStore = null;
 let isQuitting = false;
-let isInstallingDownloadedUpdate = false;
 let lastAiRecommendationDebugSignature = null;
 let packagedLaunchSmokeStarted = false;
 const packagedPrivacySmokeState = {
@@ -751,12 +751,10 @@ function getUpdaterService() {
 }
 
 function prepareForDownloadedUpdateInstall() {
-  isInstallingDownloadedUpdate = true;
   isQuitting = true;
-  BrowserWindow.getAllWindows().forEach((window) => {
-    if (!window.isDestroyed()) {
-      window.close();
-    }
+  prepareUpdateInstall({
+    disposePiBridges,
+    windows: BrowserWindow.getAllWindows()
   });
 }
 
@@ -9255,14 +9253,7 @@ function performAppShutdownCleanup() {
   getLocalLlmService().cancelDownload();
   getLocalLlmService().stop();
 
-  if (isInstallingDownloadedUpdate) {
-    return;
-  }
-
-  persistentPiRpcBridge?.dispose();
-  persistentPiRpcBridge = null;
-  backupPersistentPiRpcBridge?.dispose();
-  backupPersistentPiRpcBridge = null;
+  disposePiBridges();
 }
 
 app.on('before-quit', () => {
