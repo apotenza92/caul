@@ -884,12 +884,12 @@ async function main(argv = process.argv.slice(2)) {
     }
     if (scenario === 'valid') {
       if (process.platform === 'win32') {
-        const missingBlockmap = windowsDifferentialRequestPaths(
+        const unexpectedBlockmap = windowsDifferentialRequestPaths(
           server.artifactNames,
           server.version
-        ).find((requestPath) => !server.requests.includes(requestPath));
-        if (missingBlockmap) {
-          throw new Error(`Windows updater did not request differential base ${missingBlockmap}.`);
+        ).find((requestPath) => server.requests.includes(requestPath));
+        if (unexpectedBlockmap) {
+          throw new Error(`Windows updater unexpectedly requested differential data ${unexpectedBlockmap}.`);
         }
       }
       const expectedEvents = [
