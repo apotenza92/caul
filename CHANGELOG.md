@@ -2,7 +2,13 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.61]
+## [0.1.62]
+
+- Give the Windows native updater audit a bounded 35-minute lifecycle window for full-installer download, Defender scanning, silent installation and verified relaunch on hosted x64 and ARM64 runners.
+- Preserve the primary updater failure when disposable Windows audit cleanup also encounters a locked installation directory.
+- Carries forward reliable full-package Windows updates from the unpublished 0.1.61 candidate.
+
+## [0.1.61] (unpublished release candidate)
 
 - Use checksum-verified full installer downloads for Windows updates, avoiding Electron's unreliable differential range path while retaining authenticated TUF metadata, package hashes and post-download signature checks.
 - Carries forward the updater transport findings from the unpublished 0.1.60 candidate.
