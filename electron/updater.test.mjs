@@ -76,8 +76,18 @@ describe('updater helpers', () => {
     configureUpdaterFeed(autoUpdater, { appChannel: 'beta', testFeedUrl: 'http://127.0.0.1:1234/' });
 
     expect(configurations).toEqual([
-      { provider: 'generic', url: 'http://127.0.0.1:1234/', channel: 'latest' },
-      { provider: 'generic', url: 'http://127.0.0.1:1234/', channel: 'beta' }
+      {
+        provider: 'generic',
+        url: 'http://127.0.0.1:1234/',
+        channel: 'latest',
+        useMultipleRangeRequest: false
+      },
+      {
+        provider: 'generic',
+        url: 'http://127.0.0.1:1234/',
+        channel: 'beta',
+        useMultipleRangeRequest: false
+      }
     ]);
   });
 
