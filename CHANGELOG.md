@@ -2,7 +2,12 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.59]
+## [0.1.60]
+
+- Kept authenticated updater downloads on individual byte-range requests, matching Electron's GitHub provider and preventing the local TUF feed from re-enabling a multi-range mode that GitHub's S3-backed release assets do not support.
+- Carries forward the updater audit transport correction from the unpublished 0.1.59 candidate and update-restart process cleanup from the unpublished 0.1.58 candidate.
+
+## [0.1.59] (unpublished release candidate)
 
 - Served standards-compliant multipart byte ranges from the native Windows updater audit so Electron's differential downloader is exercised directly without a stalled full-package fallback.
 - Carries forward the update-restart process cleanup from the unpublished 0.1.58 candidate and authenticated metadata timeout correction from the unpublished 0.1.57 candidate.

@@ -556,7 +556,14 @@ function shouldCheckForUpdates(frequency, lastCheckedAt, nowMs = Date.now()) {
 function configureUpdaterFeed(autoUpdater, { appChannel, testFeedUrl }) {
   const channel = appChannel === 'beta' ? 'beta' : 'latest';
   if (testFeedUrl) {
-    autoUpdater.setFeedURL({ provider: 'generic', url: testFeedUrl, channel });
+    // The authenticated local feed still points at GitHub's S3-backed release assets.
+    // Match Electron's GitHub provider and retain differential downloads as single ranges.
+    autoUpdater.setFeedURL({
+      provider: 'generic',
+      url: testFeedUrl,
+      channel,
+      useMultipleRangeRequest: false
+    });
     return;
   }
   autoUpdater.setFeedURL({
