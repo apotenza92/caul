@@ -55,7 +55,7 @@ function initializeTrustedRoot({ embeddedRootPath, metadataDir }) {
 }
 
 class NoRedirectFetcher extends BaseFetcher {
-  constructor({ timeoutMs = 15_000, userAgent = 'Caul desktop updater' } = {}) {
+  constructor({ timeoutMs = 60_000, userAgent = 'Caul desktop updater' } = {}) {
     super();
     this.timeoutMs = timeoutMs;
     this.userAgent = userAgent;

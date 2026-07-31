@@ -11,6 +11,7 @@ const require = createRequire(import.meta.url);
 const {
   createTufVerifiedUpdateFeed,
   initializeTrustedRoot,
+  NoRedirectFetcher,
   validateRepositoryUrl,
   validateTargetName
 } = require('./tufUpdateFeed.cjs');
@@ -184,6 +185,11 @@ async function fixtureServer(fixture, { redirectTimestamp = false, requests = []
 }
 
 describe('TUF update feed', () => {
+  it('uses a bounded metadata timeout suitable for slower native runners', () => {
+    expect(new NoRedirectFetcher().timeoutMs).toBe(60_000);
+    expect(new NoRedirectFetcher({ timeoutMs: 1_234 }).timeoutMs).toBe(1_234);
+  });
+
   it('permits production HTTPS and explicit loopback tests only', () => {
     expect(validateRepositoryUrl('https://updates.example/caul/'))
       .toBe('https://updates.example/caul');

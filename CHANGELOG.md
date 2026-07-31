@@ -2,7 +2,12 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.56]
+## [0.1.57]
+
+- Increased each authenticated update metadata fetch's bounded timeout from 15 to 60 seconds so refreshes remain reliable on slower native Windows ARM systems without weakening signature or hash verification.
+- Carries forward the verified Windows differential-updater correction from the unpublished 0.1.56 candidate.
+
+## [0.1.56] (unpublished release candidate)
 
 - Seeded the Windows native updater audit with the exact verified prior installer and now require both previous and candidate blockmap requests before accepting a valid differential update.
 - Carries forward the isolated Windows updater profile correction from the unpublished 0.1.55 candidate.
