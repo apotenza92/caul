@@ -50,7 +50,7 @@ function createUpdaterService({
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.allowPrerelease = appChannel === 'beta';
-  configureUpdaterTestDownloadMode(autoUpdater, env);
+  configureUpdaterDownloadMode(autoUpdater, { env, platform });
 
   autoUpdater.on('download-progress', (progress) => {
     downloading = true;
@@ -736,10 +736,16 @@ function resolveTufTestRepository(env = process.env) {
     : '';
 }
 
-function configureUpdaterTestDownloadMode(autoUpdater, env = process.env) {
+function configureUpdaterDownloadMode(
+  autoUpdater,
+  { env = process.env, platform = process.platform } = {}
+) {
   if (
-    env.CAUL_UPDATE_TEST_MODE === '1'
-    && env.CAUL_UPDATER_DISABLE_DIFFERENTIAL_DOWNLOAD === '1'
+    platform === 'win32'
+    || (
+      env.CAUL_UPDATE_TEST_MODE === '1'
+      && env.CAUL_UPDATER_DISABLE_DIFFERENTIAL_DOWNLOAD === '1'
+    )
   ) {
     autoUpdater.disableDifferentialDownload = true;
     return true;
@@ -789,8 +795,8 @@ function parseVersion(version) {
 module.exports = {
   automaticInstallSupported,
   compareVersions,
+  configureUpdaterDownloadMode,
   configureUpdaterFeed,
-  configureUpdaterTestDownloadMode,
   createUpdaterService,
   findTargetRelease,
   isUpdateSmokeDisabled,

@@ -2,7 +2,12 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.60]
+## [0.1.61]
+
+- Use checksum-verified full installer downloads for Windows updates, avoiding Electron's unreliable differential range path while retaining authenticated TUF metadata, package hashes and post-download signature checks.
+- Carries forward the updater transport findings from the unpublished 0.1.60 candidate.
+
+## [0.1.60] (unpublished release candidate)
 
 - Kept authenticated updater downloads on individual byte-range requests, matching Electron's GitHub provider and preventing the local TUF feed from re-enabling a multi-range mode that GitHub's S3-backed release assets do not support.
 - Carries forward the updater audit transport correction from the unpublished 0.1.59 candidate and update-restart process cleanup from the unpublished 0.1.58 candidate.

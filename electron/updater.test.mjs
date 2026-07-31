@@ -8,8 +8,8 @@ const require = createRequire(import.meta.url);
 const {
   automaticInstallSupported,
   compareVersions,
+  configureUpdaterDownloadMode,
   configureUpdaterFeed,
-  configureUpdaterTestDownloadMode,
   findTargetRelease,
   isUpdateSmokeDisabled,
   isLocalDevChannel,
@@ -54,18 +54,32 @@ describe('updater helpers', () => {
     })).toBe('http://127.0.0.1:1234/tuf');
   });
 
-  it('can force a full download only inside explicit updater test mode', () => {
-    const autoUpdater = {};
-    expect(configureUpdaterTestDownloadMode(autoUpdater, {
-      CAUL_UPDATER_DISABLE_DIFFERENTIAL_DOWNLOAD: '1'
-    })).toBe(false);
-    expect(autoUpdater).not.toHaveProperty('disableDifferentialDownload');
-
-    expect(configureUpdaterTestDownloadMode(autoUpdater, {
-      CAUL_UPDATE_TEST_MODE: '1',
-      CAUL_UPDATER_DISABLE_DIFFERENTIAL_DOWNLOAD: '1'
+  it('uses reliable full-package downloads on Windows', () => {
+    const windowsUpdater = {};
+    expect(configureUpdaterDownloadMode(windowsUpdater, {
+      env: {},
+      platform: 'win32'
     })).toBe(true);
-    expect(autoUpdater.disableDifferentialDownload).toBe(true);
+    expect(windowsUpdater.disableDifferentialDownload).toBe(true);
+  });
+
+  it('allows a full download test override only inside explicit updater test mode', () => {
+    const normalUpdater = {};
+    expect(configureUpdaterDownloadMode(normalUpdater, {
+      env: { CAUL_UPDATER_DISABLE_DIFFERENTIAL_DOWNLOAD: '1' },
+      platform: 'linux'
+    })).toBe(false);
+    expect(normalUpdater).not.toHaveProperty('disableDifferentialDownload');
+
+    const testUpdater = {};
+    expect(configureUpdaterDownloadMode(testUpdater, {
+      env: {
+        CAUL_UPDATE_TEST_MODE: '1',
+        CAUL_UPDATER_DISABLE_DIFFERENTIAL_DOWNLOAD: '1'
+      },
+      platform: 'linux'
+    })).toBe(true);
+    expect(testUpdater.disableDifferentialDownload).toBe(true);
   });
 
   it('selects the stable or beta metadata file explicitly for generic updater feeds', () => {
