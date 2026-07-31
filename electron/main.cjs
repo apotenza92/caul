@@ -753,8 +753,7 @@ function getUpdaterService() {
 function prepareForDownloadedUpdateInstall() {
   isQuitting = true;
   prepareUpdateInstall({
-    disposePiBridges,
-    windows: BrowserWindow.getAllWindows()
+    disposePiBridges
   });
 }
 

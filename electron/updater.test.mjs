@@ -298,4 +298,17 @@ describe('updater helpers', () => {
     expect(source).toContain('autoUpdater.autoDownload = false');
     expect(source).toContain('autoUpdater.autoInstallOnAppQuit = false');
   });
+
+  it('closes the authenticated feed before handing process shutdown to Electron Updater', () => {
+    const source = readFileSync(require.resolve('./updater.cjs'), 'utf8');
+    const installStart = source.indexOf('async function installDownloadedUpdate()');
+    const closeFeed = source.indexOf('await closeVerifiedFeed()', installStart);
+    const prepareRuntime = source.indexOf('onBeforeInstallDownloadedUpdate?.()', installStart);
+    const quitAndInstall = source.indexOf('autoUpdater.quitAndInstall(', installStart);
+
+    expect(installStart).toBeGreaterThanOrEqual(0);
+    expect(closeFeed).toBeGreaterThan(installStart);
+    expect(prepareRuntime).toBeGreaterThan(closeFeed);
+    expect(quitAndInstall).toBeGreaterThan(prepareRuntime);
+  });
 });
