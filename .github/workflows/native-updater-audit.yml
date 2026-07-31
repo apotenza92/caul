@@ -27,7 +27,7 @@ jobs:
   audit:
     name: ${{ matrix.channel }} ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:

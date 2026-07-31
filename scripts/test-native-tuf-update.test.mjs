@@ -191,7 +191,7 @@ describe('native TUF updater audit helpers', () => {
   });
 
   it('allows bounded native package lifecycles without weakening Linux feedback', () => {
-    expect(updaterEventTimeoutMs('win32')).toBe(35 * 60_000);
+    expect(updaterEventTimeoutMs('win32')).toBe(60 * 60_000);
     expect(updaterEventTimeoutMs('linux')).toBe(5 * 60_000);
   });
 

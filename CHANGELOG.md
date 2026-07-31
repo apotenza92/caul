@@ -2,7 +2,13 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.62]
+## [0.1.63]
+
+- Bound prior and candidate Linux package launches, accepting a successful packaged-launch result even when an old Electron process remains alive after reporting it.
+- Allow hosted Windows x64 and ARM64 audits up to 60 minutes for full-package download, Defender scanning, silent installation and verified relaunch, with a finite 120-minute job limit.
+- Carries forward reliable full-package Windows updates from the unpublished 0.1.62 candidate.
+
+## [0.1.62] (unpublished release candidate)
 
 - Give the Windows native updater audit a bounded 35-minute lifecycle window for full-installer download, Defender scanning, silent installation and verified relaunch on hosted x64 and ARM64 runners.
 - Preserve the primary updater failure when disposable Windows audit cleanup also encounters a locked installation directory.

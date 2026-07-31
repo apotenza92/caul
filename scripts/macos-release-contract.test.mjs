@@ -630,6 +630,14 @@ describe('macOS release contract', () => {
     expect(linuxDebBuilder).toContain('normaliseLinuxAppImageMetadata');
     expect(linuxDebBuilder).toContain("updateMetadataFileName('linux', arch");
     expect(release.jobs['test-windows-upgrade']['timeout-minutes']).toBe(65);
+    expect(release.jobs['test-linux-upgrade']['timeout-minutes']).toBe(20);
+    expect(source).toContain('verify-linux-packaged-launch.mjs');
+    const linuxLaunchVerifier = readFileSync(
+      path.join(repositoryRoot, 'scripts', 'verify-linux-packaged-launch.mjs'),
+      'utf8'
+    );
+    expect(linuxLaunchVerifier).toContain("validatePackagedLaunchProcessResult('linux'");
+    expect(linuxLaunchVerifier).toContain('timeout: 30_000');
     expect(source).toContain(
       'WINDOWS_ARM64_LEGACY_PUBLIC_BOOTSTRAP_TAG: ${{ vars.WINDOWS_ARM64_LEGACY_PUBLIC_BOOTSTRAP_TAG }}'
     );
@@ -645,6 +653,7 @@ describe('macOS release contract', () => {
       path.join(repositoryRoot, '.github', 'workflows', 'native-updater-audit.yml'),
       'utf8'
     );
+    const nativeUpdater = loadWorkflow('native-updater-audit.yml');
     expect(nativeUpdaterWorkflow).toContain('windows-11-arm');
     expect(nativeUpdaterWorkflow).toContain('ubuntu-24.04-arm');
     expect(nativeUpdaterWorkflow).toContain('create-tuf-production-trust.cjs');
@@ -655,6 +664,7 @@ describe('macOS release contract', () => {
     expect(nativeUpdaterWorkflow).toContain('candidate/updater-audit/$CAUL_AUDIT_CHANNEL/app.asar');
     expect(nativeUpdaterWorkflow).toContain('electron_builder_arch=x86_64');
     expect(nativeUpdaterWorkflow).toContain('Remove ephemeral signing material and build outputs');
+    expect(nativeUpdater.jobs.audit['timeout-minutes']).toBe(120);
     const nativeUpdaterHarness = readFileSync(
       path.join(repositoryRoot, 'scripts', 'test-native-tuf-update.cjs'),
       'utf8'
