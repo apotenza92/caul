@@ -244,7 +244,7 @@ function corruptedPayload(filePath, maxBytes = 1024 * 1024) {
 }
 
 function updaterEventTimeoutMs(platform) {
-  return platform === 'win32' ? 15 * 60_000 : 5 * 60_000;
+  return platform === 'win32' ? 35 * 60_000 : 5 * 60_000;
 }
 
 function invalidateTimestampSignature(repositoryDirectory) {
@@ -998,13 +998,23 @@ async function main(argv = process.argv.slice(2)) {
       settingsBytes,
       settingsPath
     });
-    fs.rmSync(temporaryRoot, {
-      recursive: true,
-      force: true,
-      maxRetries: 20,
-      retryDelay: 250
-    });
-    fs.rmSync(documentsMarkerPath, { force: true });
+    try {
+      fs.rmSync(temporaryRoot, {
+        recursive: true,
+        force: true,
+        maxRetries: 20,
+        retryDelay: 250
+      });
+    } catch (error) {
+      cleanupFailure ||= error;
+      process.stderr.write(`Native updater disposable cleanup failed: ${error.stack || error}\n`);
+    }
+    try {
+      fs.rmSync(documentsMarkerPath, { force: true });
+    } catch (error) {
+      cleanupFailure ||= error;
+      process.stderr.write(`Native updater project marker cleanup failed: ${error.stack || error}\n`);
+    }
     if (!failure && cleanupFailure) throw cleanupFailure;
   }
 }
