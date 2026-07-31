@@ -645,6 +645,7 @@ jobs:
     name: Linux N-1 upgrade (${{ matrix.arch }})
     needs: [prepare, build-linux]
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
     permissions:
       contents: read
     strategy:
@@ -727,10 +728,14 @@ jobs:
           beta_data="$RUNNER_TEMP/caul-beta-user-data"
           mkdir -p "$stable_data" "$beta_data"
           if [[ "$CAUL_RELEASE_CHANNEL" == stable ]]; then
-            CAUL_USER_DATA_DIR="$stable_data" xvfb-run -a caul --no-sandbox
+            node scripts/verify-linux-packaged-launch.mjs \
+              --executable "$(command -v caul)" \
+              --user-data "$stable_data"
             printf 'stable-%s\n' "$PRIOR_TAG" > "$stable_data/upgrade-preservation-marker.txt"
           fi
-          CAUL_USER_DATA_DIR="$beta_data" xvfb-run -a caul-beta --no-sandbox
+          node scripts/verify-linux-packaged-launch.mjs \
+            --executable "$(command -v caul-beta)" \
+            --user-data "$beta_data"
           printf 'beta-%s\n' "$PRIOR_TAG" > "$beta_data/upgrade-preservation-marker.txt"
 
           sudo apt-get install -y "${candidate_packages[@]}"
@@ -742,7 +747,9 @@ jobs:
               --channel stable \
               --release-dir candidate \
               --public-only true
-            CAUL_USER_DATA_DIR="$stable_data" xvfb-run -a caul --no-sandbox
+            node scripts/verify-linux-packaged-launch.mjs \
+              --executable "$(command -v caul)" \
+              --user-data "$stable_data"
             test "$(cat "$stable_data/upgrade-preservation-marker.txt")" = "stable-$PRIOR_TAG"
             command -v caul
           fi
@@ -753,7 +760,9 @@ jobs:
             --channel beta \
             --release-dir candidate \
             --public-only true
-          CAUL_USER_DATA_DIR="$beta_data" xvfb-run -a caul-beta --no-sandbox
+          node scripts/verify-linux-packaged-launch.mjs \
+            --executable "$(command -v caul-beta)" \
+            --user-data "$beta_data"
           test "$(cat "$beta_data/upgrade-preservation-marker.txt")" = "beta-$PRIOR_TAG"
           command -v caul-beta
           trap - EXIT
