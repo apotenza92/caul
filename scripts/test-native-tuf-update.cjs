@@ -473,8 +473,8 @@ function runWindowsProcessInspection(directory, command) {
     .sort((left, right) => left.pid - right.pid);
 }
 
-function windowsProcessesWithin(directory) {
-  return runWindowsProcessInspection(directory, [
+function windowsProcessInspectionCommand() {
+  return [
     '$root = $env:CAUL_AUDIT_DIRECTORY;',
     '$processes = @(Get-Process -ErrorAction SilentlyContinue | ForEach-Object {',
     '$processPath = $null;',
@@ -490,7 +490,56 @@ function windowsProcessesWithin(directory) {
     '}',
     '});',
     'ConvertTo-Json -Compress -InputObject $processes'
-  ].join(' '));
+  ].join(' ');
+}
+
+function inspectWindowsProcessesWithin(directory) {
+  return new Promise((resolve, reject) => {
+    const inspection = spawn(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        windowsProcessInspectionCommand()
+      ],
+      {
+        env: {
+          ...process.env,
+          CAUL_AUDIT_DIRECTORY: `${path.resolve(directory)}${path.sep}`
+        },
+        windowsHide: true
+      }
+    );
+    const stdout = [];
+    const stderr = [];
+    inspection.stdout.on('data', (chunk) => stdout.push(chunk));
+    inspection.stderr.on('data', (chunk) => stderr.push(chunk));
+    inspection.once('error', reject);
+    inspection.once('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(
+          `Could not inspect Windows updater processes: ${Buffer.concat(stderr).toString().trim()}`
+        ));
+        return;
+      }
+      try {
+        const parsed = JSON.parse(Buffer.concat(stdout).toString().trim() || '[]');
+        resolve((Array.isArray(parsed) ? parsed : [parsed])
+          .map((processInfo) => ({
+            commandLine: null,
+            executablePath: processInfo.ExecutablePath || null,
+            name: processInfo.Name || null,
+            parentPid: null,
+            pid: Number(processInfo.ProcessId)
+          }))
+          .filter((processInfo) => Number.isInteger(processInfo.pid) && processInfo.pid > 0)
+          .sort((left, right) => left.pid - right.pid));
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
 }
 
 function windowsDetailedProcessesRelatedTo(directory) {
@@ -504,8 +553,8 @@ function windowsDetailedProcessesRelatedTo(directory) {
   ].join(' '));
 }
 
-function windowsProcessIdsWithin(directory) {
-  return windowsProcessesWithin(directory).map((processInfo) => processInfo.pid);
+async function windowsProcessIdsWithin(directory) {
+  return (await inspectWindowsProcessesWithin(directory)).map((processInfo) => processInfo.pid);
 }
 
 function createWindowsProcessObserver({
@@ -521,9 +570,11 @@ function createWindowsProcessObserver({
   let timer = null;
   let stopped = false;
 
-  const capture = (name = 'process-set-changed') => {
+  let captureChain = Promise.resolve();
+
+  const recordCapture = async (name) => {
     try {
-      const processes = windowsProcessesWithin(directory);
+      const processes = await inspectWindowsProcessesWithin(directory);
       const signature = JSON.stringify(processes);
       if (name === 'process-set-changed' && signature === lastSignature) {
         return;
@@ -543,14 +594,20 @@ function createWindowsProcessObserver({
     }
   };
 
-  const poll = () => {
-    if (stopped) return;
-    capture();
-    timer = setTimeout(poll, intervalMs);
+  const capture = (name = 'process-set-changed') => {
+    captureChain = captureChain.then(() => recordCapture(name));
+    return captureChain;
   };
 
-  capture('process-observer-started');
-  timer = setTimeout(poll, intervalMs);
+  const poll = async () => {
+    if (stopped) return;
+    await capture();
+    if (!stopped) timer = setTimeout(poll, intervalMs);
+  };
+
+  capture('process-observer-started').then(() => {
+    if (!stopped) timer = setTimeout(poll, intervalMs);
+  });
 
   return {
     capture,
@@ -569,11 +626,11 @@ function createWindowsProcessObserver({
         });
       }
     },
-    stop() {
-      if (stopped) return;
+    async stop() {
+      if (stopped) return captureChain;
       stopped = true;
       clearTimeout(timer);
-      capture('process-observer-stopped');
+      await capture('process-observer-stopped');
     }
   };
 }
@@ -982,7 +1039,7 @@ async function main(argv = process.argv.slice(2)) {
       eventAt: outcome.at || null,
       name: 'updater-terminal-event'
     });
-    processObserver?.capture('updater-terminal-processes');
+    await processObserver?.capture('updater-terminal-processes');
     if (scenario === 'valid') {
       if (outcome.name === 'error') {
         throw new Error(`Native updater failed: ${outcome.message || '<missing error>'}`);
@@ -1159,11 +1216,11 @@ async function main(argv = process.argv.slice(2)) {
         pid: originalPid
       });
       if (server) await server.close();
-      processObserver?.capture('pre-uninstall-processes');
+      await processObserver?.capture('pre-uninstall-processes');
       if (process.platform === 'win32' && installedExecutable) {
         const installDirectory = path.dirname(installedExecutable);
         if (fs.existsSync(installDirectory)) {
-          for (const pid of windowsProcessIdsWithin(installDirectory)) await stopPid(pid);
+          for (const pid of await windowsProcessIdsWithin(installDirectory)) await stopPid(pid);
           const uninstaller = findExactlyOne(
             installDirectory,
             (candidate) => /^uninstall.*\.exe$/i.test(path.basename(candidate)),
@@ -1183,7 +1240,7 @@ async function main(argv = process.argv.slice(2)) {
       processObserver?.captureDetailed('cleanup-failure-related-processes');
       process.stderr.write(`Native updater cleanup failed: ${error.stack || error}\n`);
     }
-    processObserver?.stop();
+    await processObserver?.stop();
     writeEvidence({
       arch,
       candidateDirectory,
