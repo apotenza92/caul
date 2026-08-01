@@ -692,6 +692,9 @@ describe('macOS release contract', () => {
     expect(updaterHarness).toContain("candidate.startsWith('/private/var/')");
     expect(updaterHarness).toContain('realpathSync(executablePath)');
     expect(updaterHarness).toContain("option('--trusted-candidate-zip')");
+    expect(updaterHarness).toContain("optionalOption('--prior-app')");
+    expect(updaterHarness).toContain('Provide exactly one of --prior-zip or --prior-app');
+    expect(updaterHarness).toContain('const installedApp = priorApp ??');
     expect(updaterHarness).toContain("option('--candidate-tag')");
     expect(updaterHarness).toContain("channel === 'beta' ? '/beta-mac.yml' : '/latest-mac.yml'");
     expect(updaterHarness).toContain('prerelease: false');
@@ -701,11 +704,21 @@ describe('macOS release contract', () => {
     expect(updaterHarness).toContain('upgrade-preservation-marker.json');
     expect(updaterHarness).toContain('did not preserve existing user data');
     expect(updaterHarness).toContain("scenario === 'valid' && priorVersion === expectedVersion");
+    expect(updaterHarness).toContain(
+      'Wrong-signature update closed its renderer without exiting the application'
+    );
+    expect(updaterHarness).not.toContain(
+      'Wrong-signature update did not close its renderer during installation validation'
+    );
     expect(source).toContain('MACOS_UPDATER_LEGACY_PUBLIC_BOOTSTRAP_TAG');
     expect(source).toContain('deferred-public-n-1');
     expect(source).toContain('APPLE_PRIOR_SIGNING_CERTIFICATE_SHA256: ${{ vars.APPLE_PRIOR_SIGNING_CERTIFICATE_SHA256 }}');
     expect(source).toContain('name: ${{ matrix.variant }}-updater-verification');
     expect(source).not.toContain('name: ${{ matrix.variant }}-release');
+    expect(source).toContain('source: [archive, homebrew]');
+    expect(source).toContain("matrix.source == 'homebrew'");
+    expect(source).toContain("PRIOR_ARGUMENT=(--prior-app \"$PRIOR_APP\")");
+    expect(source).toContain('brew install --cask "$cask"');
     const releaseGuide = readFileSync(path.join(repositoryRoot, 'docs', 'release-validation.md'), 'utf8');
     expect(releaseGuide).toContain('stable-updater-verification');
     expect(releaseGuide).toContain('beta-updater-verification');

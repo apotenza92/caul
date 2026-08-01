@@ -23,6 +23,11 @@ function option(name) {
   return process.argv[index + 1];
 }
 
+function optionalOption(name) {
+  const index = process.argv.indexOf(name);
+  return index < 0 ? null : process.argv[index + 1] ?? null;
+}
+
 function run(command, args) {
   const result = spawnSync(command, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   if (result.error || result.status !== 0) {
@@ -132,7 +137,13 @@ async function waitForStatus(page, predicate, timeoutMs = 180_000) {
   throw new Error('Timed out waiting for updater status');
 }
 
-const priorZip = resolve(option('--prior-zip'));
+const priorZipOption = optionalOption('--prior-zip');
+const priorAppOption = optionalOption('--prior-app');
+if ((priorZipOption == null) === (priorAppOption == null)) {
+  throw new Error('Provide exactly one of --prior-zip or --prior-app');
+}
+const priorZip = priorZipOption == null ? null : resolve(priorZipOption);
+const priorApp = priorAppOption == null ? null : resolve(priorAppOption);
 const candidateZip = resolve(option('--candidate-zip'));
 const trustedCandidateZip = resolve(option('--trusted-candidate-zip'));
 const channel = option('--channel');
@@ -179,10 +190,12 @@ try {
   const userData = join(workspace, 'user-data');
   const home = join(workspace, 'home');
   for (const directory of [installed, candidate, trustedCandidate, userData, home]) mkdirSync(directory);
-  run('ditto', ['-x', '-k', priorZip, installed]);
+  if (priorZip) {
+    run('ditto', ['-x', '-k', priorZip, installed]);
+  }
   run('ditto', ['-x', '-k', candidateZip, candidate]);
   run('ditto', ['-x', '-k', trustedCandidateZip, trustedCandidate]);
-  const installedApp = join(installed, `${product}.app`);
+  const installedApp = priorApp ?? join(installed, `${product}.app`);
   const candidateApp = join(candidate, `${product}.app`);
   const trustedCandidateApp = join(trustedCandidate, `${product}.app`);
   verifyTrustedApp(installedApp, bundleId, priorFingerprints, signatureExpectations);
@@ -282,8 +295,8 @@ try {
     await page.evaluate(() => window.caul.settings.updates.installDownloaded()).catch(() => undefined);
     if (scenario === 'signature') {
       const exited = await waitForProcessExit(appProcess.process(), 30_000);
-      if (!page.isClosed()) {
-        throw new Error('Wrong-signature update did not close its renderer during installation validation');
+      if (!exited && page.isClosed()) {
+        throw new Error('Wrong-signature update closed its renderer without exiting the application');
       }
       verifyTrustedApp(installedApp, bundleId, [currentFingerprint], signatureExpectations);
       if (exited) {

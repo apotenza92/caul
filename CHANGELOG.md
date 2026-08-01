@@ -2,7 +2,14 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.64]
+## [0.1.65]
+
+- Prove that Homebrew-installed macOS apps can update through Caul's independent signed in-app updater while retaining `brew upgrade --cask` as a separate upgrade path.
+- Keep Caul visibly open when macOS rejects a wrong-signature update, while still requiring the installed app to remain trusted and forbidding unexpected replacement processes.
+- Align the adversarial macOS updater gate with Electron Updater owning application shutdown.
+- Carries forward the Windows updater quit-race correction from the unpublished 0.1.64 candidate.
+
+## [0.1.64] (unpublished release candidate)
 
 - Let Electron Updater own the Windows application quit and installer handoff instead of closing every window first, preventing `window-all-closed` from racing `quitAndInstall` on fast x64 systems.
 - Close the temporary authenticated feed before disposing Pi subprocesses and starting the update handoff.
