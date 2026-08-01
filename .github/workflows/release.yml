@@ -411,7 +411,7 @@ jobs:
           if-no-files-found: error
 
   test-macos-updater:
-    name: macOS updater ${{ matrix.scenario }} (${{ matrix.variant }})
+    name: macOS updater ${{ matrix.scenario }} from ${{ matrix.source }} (${{ matrix.variant }})
     needs: [prepare, build-macos]
     runs-on: macos-15
     environment:
@@ -423,7 +423,13 @@ jobs:
       fail-fast: false
       matrix:
         scenario: [corrupt, signature, valid]
+        source: [archive, homebrew]
         variant: ${{ fromJSON(needs.prepare.outputs.channel == 'stable' && '["stable","beta"]' || '["beta"]') }}
+        exclude:
+          - scenario: corrupt
+            source: homebrew
+          - scenario: signature
+            source: homebrew
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -506,6 +512,23 @@ jobs:
               --file "previous/${{ steps.previous.outputs.asset }}"
           fi
 
+      - name: Install previous public package with Homebrew
+        if: steps.previous.outputs.available == 'true' && matrix.source == 'homebrew'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          RELEASE_VARIANT: ${{ matrix.variant }}
+          PREVIOUS_TAG: ${{ steps.previous.outputs.tag }}
+        run: |
+          set -euo pipefail
+          brew tap apotenza92/tap
+          cask='apotenza92/tap/caul'
+          app='/Applications/Caul.app'
+          [[ "$RELEASE_VARIANT" == beta ]] && cask='apotenza92/tap/caul@beta' && app='/Applications/Caul Beta.app'
+          brew install --cask "$cask"
+          test -d "$app"
+          expected_version="${PREVIOUS_TAG#v}"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$expected_version"
+
       - name: Run updater integration scenario
         if: steps.previous.outputs.available == 'true'
         env:
@@ -530,6 +553,12 @@ jobs:
           fi
           INSTALLED="$CANDIDATE"
           [[ "$RELEASE_SCENARIO" == valid ]] && INSTALLED="previous/${{ steps.previous.outputs.asset }}"
+          PRIOR_ARGUMENT=(--prior-zip "$INSTALLED")
+          if [[ "${{ matrix.source }}" == homebrew ]]; then
+            PRIOR_APP='/Applications/Caul.app'
+            [[ "$RELEASE_VARIANT" == beta ]] && PRIOR_APP='/Applications/Caul Beta.app'
+            PRIOR_ARGUMENT=(--prior-app "$PRIOR_APP")
+          fi
           TEST_CANDIDATE="$CANDIDATE"
           if [[ "$RELEASE_SCENARIO" == signature ]]; then
             mkdir adversarial
@@ -543,7 +572,7 @@ jobs:
             ditto -c -k --sequesterRsrc --keepParent "$APP" "$TEST_CANDIDATE"
           fi
           npm run test:macos-updater -- \
-            --prior-zip "$INSTALLED" \
+            "${PRIOR_ARGUMENT[@]}" \
             --candidate-zip "$TEST_CANDIDATE" \
             --trusted-candidate-zip "$CANDIDATE" \
             --channel "$RELEASE_VARIANT" \
@@ -551,14 +580,24 @@ jobs:
             --candidate-tag "$RELEASE_TAG" \
             --expected-version "$RELEASE_VERSION"
           mkdir updater-evidence
-          printf '{"result":"passed","priorTag":"%s","candidateTag":"%s","channel":"%s","scenario":"%s"}\n' \
-            "${{ steps.previous.outputs.tag }}" "$RELEASE_TAG" "$RELEASE_VARIANT" "$RELEASE_SCENARIO" \
-            > "updater-evidence/$RELEASE_SCENARIO-$RELEASE_VARIANT.json"
+          printf '{"result":"passed","priorTag":"%s","candidateTag":"%s","channel":"%s","scenario":"%s","source":"%s"}\n' \
+            "${{ steps.previous.outputs.tag }}" "$RELEASE_TAG" "$RELEASE_VARIANT" "$RELEASE_SCENARIO" "${{ matrix.source }}" \
+            > "updater-evidence/$RELEASE_SCENARIO-$RELEASE_VARIANT-${{ matrix.source }}.json"
+
+      - name: Remove Homebrew test installation
+        if: always() && matrix.source == 'homebrew'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          RELEASE_VARIANT: ${{ matrix.variant }}
+        run: |
+          cask='apotenza92/tap/caul'
+          [[ "$RELEASE_VARIANT" == beta ]] && cask='apotenza92/tap/caul@beta'
+          brew uninstall --cask "$cask" >/dev/null 2>&1 || true
 
       - name: Upload updater evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: updater-macos-arm64-${{ matrix.variant }}-${{ matrix.scenario }}
+          name: updater-macos-arm64-${{ matrix.variant }}-${{ matrix.scenario }}-${{ matrix.source }}
           path: updater-evidence
           if-no-files-found: error
           retention-days: 30
