@@ -14,7 +14,8 @@ const {
 } = require('./sign-tuf-update-repository.cjs');
 
 const windowsProcessInspectionTimeoutMs = 15_000;
-const windowsInstallerTimeoutMs = 90_000;
+const windowsSetupInstallerTimeoutMs = 5 * 60_000;
+const windowsUninstallerTimeoutMs = 90_000;
 
 function option(argv, name) {
   const index = argv.indexOf(name);
@@ -970,7 +971,7 @@ async function main(argv = process.argv.slice(2)) {
           APPDATA: windowsProfile.appData,
           LOCALAPPDATA: windowsProfile.localAppData
         }),
-        timeoutMs: windowsInstallerTimeoutMs
+        timeoutMs: windowsSetupInstallerTimeoutMs
       });
       installedExecutable = path.join(installDirectory, `${productName}.exe`);
       if (!fs.existsSync(installedExecutable)) {
@@ -1247,7 +1248,7 @@ async function main(argv = process.argv.slice(2)) {
             (candidate) => /^uninstall.*\.exe$/i.test(path.basename(candidate)),
             'NSIS uninstaller'
           );
-          run(uninstaller, ['/S'], { timeoutMs: windowsInstallerTimeoutMs });
+          run(uninstaller, ['/S'], { timeoutMs: windowsUninstallerTimeoutMs });
           waitForPathRemoval(installDirectory);
           processObservations.push({
             at: new Date().toISOString(),
