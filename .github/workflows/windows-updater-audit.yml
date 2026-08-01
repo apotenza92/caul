@@ -171,6 +171,7 @@ jobs:
             test -f "$previous"
 
             for scenario in "${scenarios[@]}"; do
+              echo "::group::$channel $scenario updater audit"
               node scripts/test-native-tuf-update.cjs \
                 --arch x64 \
                 --channel "$channel" \
@@ -184,6 +185,7 @@ jobs:
                 --private-key-bundle "$RUNNER_TEMP/caul-tuf-audit/private-keys.json" \
                 --root "$PWD/build/update-trust/root.json" \
                 --target-name "$target_name"
+              echo "::endgroup::"
             done
           done
 

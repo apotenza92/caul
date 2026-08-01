@@ -436,20 +436,14 @@ async function waitForPidExit(pid, { intervalMs = 100, timeoutMs = 30_000 } = {}
   throw new Error(`Original Caul process ${pid} remained alive after the installer handoff.`);
 }
 
-function windowsProcessesWithin(directory) {
+function runWindowsProcessInspection(directory, command) {
   const result = spawnSync(
     'powershell.exe',
     [
       '-NoProfile',
       '-NonInteractive',
       '-Command',
-      [
-        '$root = $env:CAUL_AUDIT_DIRECTORY;',
-        '$processes = @(Get-CimInstance Win32_Process |',
-        'Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase) } |',
-        'Select-Object ProcessId, ParentProcessId, Name, ExecutablePath, CommandLine);',
-        'ConvertTo-Json -Compress -InputObject $processes'
-      ].join(' ')
+      command
     ],
     {
       encoding: 'utf8',
@@ -465,15 +459,49 @@ function windowsProcessesWithin(directory) {
   }
   const parsed = JSON.parse(result.stdout.trim() || '[]');
   return (Array.isArray(parsed) ? parsed : [parsed])
-    .map((processInfo) => ({
-      commandLine: processInfo.CommandLine || null,
-      executablePath: processInfo.ExecutablePath || null,
-      name: processInfo.Name || null,
-      parentPid: Number(processInfo.ParentProcessId),
-      pid: Number(processInfo.ProcessId)
-    }))
+    .map((processInfo) => {
+      const parentPid = Number(processInfo.ParentProcessId);
+      return {
+        commandLine: processInfo.CommandLine || null,
+        executablePath: processInfo.ExecutablePath || null,
+        name: processInfo.Name || null,
+        parentPid: Number.isInteger(parentPid) && parentPid > 0 ? parentPid : null,
+        pid: Number(processInfo.ProcessId)
+      };
+    })
     .filter((processInfo) => Number.isInteger(processInfo.pid) && processInfo.pid > 0)
     .sort((left, right) => left.pid - right.pid);
+}
+
+function windowsProcessesWithin(directory) {
+  return runWindowsProcessInspection(directory, [
+    '$root = $env:CAUL_AUDIT_DIRECTORY;',
+    '$processes = @(Get-Process -ErrorAction SilentlyContinue | ForEach-Object {',
+    '$processPath = $null;',
+    'try { $processPath = $_.Path } catch { };',
+    'if ($processPath -and $processPath.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) {',
+    '[PSCustomObject]@{',
+    'ProcessId = $_.Id;',
+    'ParentProcessId = $null;',
+    'Name = [System.IO.Path]::GetFileName($processPath);',
+    'ExecutablePath = $processPath;',
+    'CommandLine = $null',
+    '}',
+    '}',
+    '});',
+    'ConvertTo-Json -Compress -InputObject $processes'
+  ].join(' '));
+}
+
+function windowsDetailedProcessesRelatedTo(directory) {
+  return runWindowsProcessInspection(directory, [
+    '$root = $env:CAUL_AUDIT_DIRECTORY;',
+    '$processes = @(Get-CimInstance Win32_Process | Where-Object {',
+    '($_.ExecutablePath -and $_.ExecutablePath.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) -or',
+    '($_.CommandLine -and $_.CommandLine.IndexOf($root, [System.StringComparison]::OrdinalIgnoreCase) -ge 0)',
+    '} | Select-Object ProcessId, ParentProcessId, Name, ExecutablePath, CommandLine);',
+    'ConvertTo-Json -Compress -InputObject $processes'
+  ].join(' '));
 }
 
 function windowsProcessIdsWithin(directory) {
@@ -526,6 +554,21 @@ function createWindowsProcessObserver({
 
   return {
     capture,
+    captureDetailed(name) {
+      try {
+        observations.push({
+          at: new Date().toISOString(),
+          name,
+          processes: windowsDetailedProcessesRelatedTo(directory)
+        });
+      } catch (error) {
+        observations.push({
+          at: new Date().toISOString(),
+          message: error.message || String(error),
+          name: 'detailed-process-observer-error'
+        });
+      }
+    },
     stop() {
       if (stopped) return;
       stopped = true;
@@ -1103,7 +1146,7 @@ async function main(argv = process.argv.slice(2)) {
       message: error.message || String(error),
       name: 'audit-failure'
     });
-    processObserver?.capture('audit-failure-processes');
+    processObserver?.captureDetailed('audit-failure-related-processes');
     throw error;
   } finally {
     let cleanupFailure;
@@ -1137,6 +1180,7 @@ async function main(argv = process.argv.slice(2)) {
       }
     } catch (error) {
       cleanupFailure = error;
+      processObserver?.captureDetailed('cleanup-failure-related-processes');
       process.stderr.write(`Native updater cleanup failed: ${error.stack || error}\n`);
     }
     processObserver?.stop();
