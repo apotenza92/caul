@@ -6,6 +6,7 @@ All notable Caul changes are recorded here.
 
 - Keep the Windows installer exit guard referenced until Electron Updater completes its normal quit path or Caul forces the old process to exit after ten seconds.
 - Complete every application shutdown cleanup before handing the downloaded installer to Electron Updater, and cancel the exit guard if installation setup fails.
+- Download an already authenticated TUF update without repeating the same metadata check immediately beforehand.
 - Add timestamped updater lifecycle and Windows process evidence plus a manual, read-only x64 updater audit that cannot publish.
 - Carries forward the updater handoff corrections from the unpublished 0.1.64 through 0.1.66 candidates.
 
