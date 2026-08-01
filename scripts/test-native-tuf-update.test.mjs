@@ -22,6 +22,7 @@ const {
   requireAuditScenario,
   resolveAuditAssetPath,
   serveBytes,
+  serveFile,
   stageWindowsDifferentialBase,
   updaterEventTimeoutMs,
   waitForPathRemoval,
@@ -130,9 +131,36 @@ describe('native TUF updater audit helpers', () => {
       expect(invalid.statusCode).toBe(416);
       expect(invalid.headers['content-range']).toBe('bytes */10');
     } finally {
+      server.closeAllConnections?.();
       await new Promise((resolve, reject) => server.close((error) => (
         error ? reject(error) : resolve()
       )));
+    }
+  });
+
+  it('streams complete updater packages with an explicit content length', async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'caul-updater-stream-'));
+    const packagePath = path.join(directory, 'candidate.exe');
+    const bytes = Buffer.alloc(4 * 1024 * 1024, 0x43);
+    writeFileSync(packagePath, bytes);
+    const server = createServer((request, response) => serveFile(request, response, packagePath));
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    try {
+      const response = await requestBytes(server);
+      expect(response.statusCode).toBe(200);
+      expect(Number(response.headers['content-length'])).toBe(bytes.length);
+      expect(response.body).toHaveLength(bytes.length);
+      expect(createHash('sha256').update(response.body).digest('hex'))
+        .toBe(createHash('sha256').update(bytes).digest('hex'));
+    } finally {
+      server.closeAllConnections?.();
+      await new Promise((resolve, reject) => server.close((error) => (
+        error ? reject(error) : resolve()
+      )));
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 

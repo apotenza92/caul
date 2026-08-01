@@ -236,7 +236,25 @@ function serveBytes(request, response, bytes) {
 }
 
 function serveFile(request, response, filePath) {
-  serveBytes(request, response, fs.readFileSync(filePath));
+  if (request.headers.range) {
+    serveBytes(request, response, fs.readFileSync(filePath));
+    return;
+  }
+
+  const length = fs.statSync(filePath).size;
+  response.writeHead(200, {
+    'Accept-Ranges': 'bytes',
+    'Content-Length': length,
+    'Content-Type': 'application/octet-stream'
+  });
+  if (request.method === 'HEAD') {
+    response.end();
+    return;
+  }
+
+  const stream = fs.createReadStream(filePath);
+  stream.once('error', (error) => response.destroy(error));
+  stream.pipe(response);
 }
 
 function corruptedPayload(filePath, maxBytes = 1024 * 1024) {
@@ -273,12 +291,29 @@ async function createUpdateServer({
   temporaryRoot
 }) {
   const requests = [];
+  const transfers = [];
   let repositoryDirectory;
   let signedTarget;
   const corruptedAssets = new Map();
   const server = http.createServer((request, response) => {
     const pathname = decodeURIComponent(new URL(request.url, 'http://127.0.0.1').pathname);
     requests.push(pathname);
+    const transfer = {
+      method: request.method,
+      pathname,
+      range: request.headers.range || null,
+      requestedAt: new Date().toISOString()
+    };
+    transfers.push(transfer);
+    response.once('finish', () => {
+      transfer.contentLength = Number(response.getHeader('content-length')) || null;
+      transfer.finishedAt = new Date().toISOString();
+      transfer.statusCode = response.statusCode;
+    });
+    response.once('close', () => {
+      transfer.closedAt = new Date().toISOString();
+      transfer.completed = response.writableFinished;
+    });
     if (!['GET', 'HEAD'].includes(request.method)) {
       response.writeHead(405).end();
       return;
@@ -368,6 +403,7 @@ async function createUpdateServer({
     }),
     requests,
     targetBytes: signedTarget.bytes,
+    transfers,
     version: signedTarget.version
   };
 }
@@ -826,6 +862,10 @@ function writeEvidence({
   }
   if (server) {
     fs.writeFileSync(path.join(staging, 'REQUESTS.txt'), `${server.requests.join('\n')}\n`);
+    fs.writeFileSync(
+      path.join(staging, 'HTTP_TRANSFERS.json'),
+      `${JSON.stringify(server.transfers, null, 2)}\n`
+    );
     fs.writeFileSync(path.join(staging, 'signed-update-target.yml'), server.targetBytes);
   }
   fs.writeFileSync(path.join(staging, 'MIGRATION.txt'), [
@@ -1350,6 +1390,7 @@ module.exports = {
   requireAuditScenario,
   resolveAuditAssetPath,
   serveBytes,
+  serveFile,
   updaterEventTimeoutMs,
   waitForInstalledCandidate,
   waitForPidExit,

@@ -85,9 +85,9 @@ function createUpdaterService({
     });
     emitStatus();
     if (testMode && env.CAUL_E2E_INSTALL_UPDATE === '1') {
-      setTimeout(() => {
+      scheduleUpdaterTestAction(() => {
         void installDownloadedUpdate();
-      }, 100).unref?.();
+      });
     }
   });
 
@@ -194,7 +194,7 @@ function createUpdaterService({
         currentVersion: app.getVersion(),
         pid: process.pid
       });
-      setTimeout(() => app.quit(), 100).unref?.();
+      scheduleUpdaterTestAction(() => app.quit());
       return;
     }
 
@@ -311,9 +311,9 @@ function createUpdaterService({
         });
         emitStatus();
         if (testMode && env.CAUL_E2E_INSTALL_UPDATE === '1') {
-          setTimeout(() => {
+          scheduleUpdaterTestAction(() => {
             void downloadAndInstall();
-          }, 100).unref?.();
+          });
         }
         return status();
       }
@@ -690,6 +690,10 @@ function writeUpdaterTestEvent(filePath, name, details = {}) {
   fsSync.renameSync(temporary, target);
 }
 
+function scheduleUpdaterTestAction(action, delayMs = 100) {
+  return setTimeout(action, delayMs);
+}
+
 function fetchGitHubReleases(url = releasesApiUrl) {
   return new Promise((resolve, reject) => {
     const client = url.startsWith('http:') ? require('node:http') : https;
@@ -874,6 +878,7 @@ module.exports = {
   normaliseUpdateFrequency,
   resolveTufTestRepository,
   resolveUpdateTestFeed,
+  scheduleUpdaterTestAction,
   selectUpdateAsset,
   shouldCheckForUpdates,
   usesTufUpdater,

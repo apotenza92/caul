@@ -19,6 +19,7 @@ const {
   normaliseUpdateFrequency,
   resolveTufTestRepository,
   resolveUpdateTestFeed,
+  scheduleUpdaterTestAction,
   selectUpdateAsset,
   shouldCheckForUpdates,
   usesTufUpdater,
@@ -27,6 +28,19 @@ const {
 } = require('./updater.cjs');
 
 describe('updater helpers', () => {
+  it('keeps packaged updater audit actions referenced until they run', async () => {
+    vi.useFakeTimers();
+    try {
+      const action = vi.fn();
+      const timer = scheduleUpdaterTestAction(action);
+      expect(timer.hasRef()).toBe(true);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(action).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('defaults invalid update frequencies to weekly', () => {
     expect(normaliseUpdateFrequency('daily')).toBe('daily');
     expect(normaliseUpdateFrequency('monthly')).toBe('monthly');
