@@ -13,6 +13,8 @@ const {
   signUpdateRepository
 } = require('./sign-tuf-update-repository.cjs');
 
+const windowsProcessInspectionTimeoutMs = 15_000;
+
 function option(argv, name) {
   const index = argv.indexOf(name);
   return index >= 0 ? argv[index + 1] : null;
@@ -450,7 +452,8 @@ function runWindowsProcessInspection(directory, command) {
       env: {
         ...process.env,
         CAUL_AUDIT_DIRECTORY: `${path.resolve(directory)}${path.sep}`
-      }
+      },
+      timeout: windowsProcessInspectionTimeoutMs
     }
   );
   if (result.error) throw result.error;
@@ -513,31 +516,46 @@ function inspectWindowsProcessesWithin(directory) {
     );
     const stdout = [];
     const stderr = [];
+    let settled = false;
+    const settle = (callback) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      callback();
+    };
+    const timeout = setTimeout(() => {
+      inspection.kill();
+      settle(() => reject(new Error(
+        `Windows updater process inspection exceeded ${windowsProcessInspectionTimeoutMs} ms.`
+      )));
+    }, windowsProcessInspectionTimeoutMs);
     inspection.stdout.on('data', (chunk) => stdout.push(chunk));
     inspection.stderr.on('data', (chunk) => stderr.push(chunk));
-    inspection.once('error', reject);
+    inspection.once('error', (error) => settle(() => reject(error)));
     inspection.once('close', (code) => {
-      if (code !== 0) {
-        reject(new Error(
-          `Could not inspect Windows updater processes: ${Buffer.concat(stderr).toString().trim()}`
-        ));
-        return;
-      }
-      try {
-        const parsed = JSON.parse(Buffer.concat(stdout).toString().trim() || '[]');
-        resolve((Array.isArray(parsed) ? parsed : [parsed])
-          .map((processInfo) => ({
-            commandLine: null,
-            executablePath: processInfo.ExecutablePath || null,
-            name: processInfo.Name || null,
-            parentPid: null,
-            pid: Number(processInfo.ProcessId)
-          }))
-          .filter((processInfo) => Number.isInteger(processInfo.pid) && processInfo.pid > 0)
-          .sort((left, right) => left.pid - right.pid));
-      } catch (error) {
-        reject(error);
-      }
+      settle(() => {
+        if (code !== 0) {
+          reject(new Error(
+            `Could not inspect Windows updater processes: ${Buffer.concat(stderr).toString().trim()}`
+          ));
+          return;
+        }
+        try {
+          const parsed = JSON.parse(Buffer.concat(stdout).toString().trim() || '[]');
+          resolve((Array.isArray(parsed) ? parsed : [parsed])
+            .map((processInfo) => ({
+              commandLine: null,
+              executablePath: processInfo.ExecutablePath || null,
+              name: processInfo.Name || null,
+              parentPid: null,
+              pid: Number(processInfo.ProcessId)
+            }))
+            .filter((processInfo) => Number.isInteger(processInfo.pid) && processInfo.pid > 0)
+            .sort((left, right) => left.pid - right.pid));
+        } catch (error) {
+          reject(error);
+        }
+      });
     });
   });
 }
