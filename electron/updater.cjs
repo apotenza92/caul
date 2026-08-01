@@ -430,8 +430,8 @@ function createUpdaterService({
 
     if (automaticInstallSupported(platform, env)) {
       try {
-        onBeforeInstallDownloadedUpdate?.();
         await closeVerifiedFeed();
+        onBeforeInstallDownloadedUpdate?.();
         autoUpdater.quitAndInstall(platform === 'win32', true);
         return status();
       } catch (error) {
