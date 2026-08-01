@@ -244,7 +244,7 @@ function corruptedPayload(filePath, maxBytes = 1024 * 1024) {
 }
 
 function updaterEventTimeoutMs(platform) {
-  return platform === 'win32' ? 60 * 60_000 : 5 * 60_000;
+  return platform === 'win32' ? 15 * 60_000 : 5 * 60_000;
 }
 
 function invalidateTimestampSignature(repositoryDirectory) {
