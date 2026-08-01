@@ -305,10 +305,13 @@ describe('updater helpers', () => {
     const closeFeed = source.indexOf('await closeVerifiedFeed()', installStart);
     const prepareRuntime = source.indexOf('onBeforeInstallDownloadedUpdate?.()', installStart);
     const quitAndInstall = source.indexOf('autoUpdater.quitAndInstall(', installStart);
+    const exitFallback = source.indexOf('onInstallHandoffStarted?.()', quitAndInstall);
 
     expect(installStart).toBeGreaterThanOrEqual(0);
     expect(closeFeed).toBeGreaterThan(installStart);
     expect(prepareRuntime).toBeGreaterThan(closeFeed);
     expect(quitAndInstall).toBeGreaterThan(prepareRuntime);
+    expect(exitFallback).toBeGreaterThan(quitAndInstall);
+    expect(source.slice(quitAndInstall, exitFallback)).toContain("platform === 'win32'");
   });
 });

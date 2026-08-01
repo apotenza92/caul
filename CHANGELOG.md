@@ -2,7 +2,12 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.65]
+## [0.1.66]
+
+- Force a bounded clean app-process exit ten seconds after Electron Updater starts the Windows installer, preventing an old x64 process from indefinitely blocking NSIS replacement and relaunch.
+- Carries forward the independent Homebrew and in-app updater proof from the unpublished 0.1.65 candidate.
+
+## [0.1.65] (unpublished release candidate)
 
 - Prove that Homebrew-installed macOS apps can update through Caul's independent signed in-app updater while retaining `brew upgrade --cask` as a separate upgrade path.
 - Keep Caul visibly open when macOS rejects a wrong-signature update, while still requiring the installed app to remain trusted and forbidding unexpected replacement processes.
