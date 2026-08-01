@@ -71,6 +71,8 @@ describe('native TUF updater audit helpers', () => {
     expect(source).toContain('Get-Process -ErrorAction SilentlyContinue');
     expect(source).toContain('windowsDetailedProcessesRelatedTo(directory)');
     expect(source).toContain("const inspection = spawn(");
+    expect(source).toContain('timeout: windowsProcessInspectionTimeoutMs');
+    expect(source).toContain('Windows updater process inspection exceeded');
     expect(source).not.toContain("const processes = windowsProcessesWithin(directory)");
   });
 
