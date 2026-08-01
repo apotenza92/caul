@@ -25,6 +25,7 @@ const {
   serveFile,
   stageWindowsDifferentialBase,
   updaterEventTimeoutMs,
+  updaterPostDownloadTimeoutMs,
   waitForPathRemoval,
   waitForPidExit,
   windowsAuditProfileDirectories,
@@ -258,6 +259,8 @@ describe('native TUF updater audit helpers', () => {
   it('allows bounded native package lifecycles without weakening Linux feedback', () => {
     expect(updaterEventTimeoutMs('win32')).toBe(15 * 60_000);
     expect(updaterEventTimeoutMs('linux')).toBe(5 * 60_000);
+    expect(updaterPostDownloadTimeoutMs('win32')).toBe(10 * 60_000);
+    expect(updaterPostDownloadTimeoutMs('linux')).toBe(5 * 60_000);
   });
 
   it('truncates corrupt package bytes without changing the source file', () => {

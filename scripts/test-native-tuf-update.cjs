@@ -15,7 +15,7 @@ const {
 
 const windowsProcessInspectionTimeoutMs = 15_000;
 const windowsSetupInstallerTimeoutMs = 5 * 60_000;
-const windowsUninstallerTimeoutMs = 90_000;
+const windowsUninstallerTimeoutMs = 5 * 60_000;
 
 function option(argv, name) {
   const index = argv.indexOf(name);
@@ -268,6 +268,10 @@ function corruptedPayload(filePath, maxBytes = 1024 * 1024) {
 
 function updaterEventTimeoutMs(platform) {
   return platform === 'win32' ? 15 * 60_000 : 5 * 60_000;
+}
+
+function updaterPostDownloadTimeoutMs(platform) {
+  return platform === 'win32' ? 10 * 60_000 : 5 * 60_000;
 }
 
 function invalidateTimestampSignature(repositoryDirectory) {
@@ -1085,7 +1089,6 @@ async function main(argv = process.argv.slice(2)) {
       });
     });
     const eventTimeoutMs = updaterEventTimeoutMs(process.platform);
-    const eventDeadline = Date.now() + eventTimeoutMs;
     let outcome;
     if (process.platform === 'win32' && scenario === 'valid') {
       const downloadOutcome = await waitForEvent(
@@ -1108,7 +1111,7 @@ async function main(argv = process.argv.slice(2)) {
         outcome = await waitForEvent(
           eventPath,
           new Set(['updated-runtime-launched', 'error']),
-          Math.max(1, eventDeadline - Date.now())
+          updaterPostDownloadTimeoutMs(process.platform)
         );
       }
     } else {
@@ -1392,6 +1395,7 @@ module.exports = {
   serveBytes,
   serveFile,
   updaterEventTimeoutMs,
+  updaterPostDownloadTimeoutMs,
   waitForInstalledCandidate,
   waitForPidExit,
   waitForPathRemoval,
