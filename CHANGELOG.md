@@ -2,7 +2,14 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.66]
+## [0.1.67]
+
+- Keep the Windows installer exit guard referenced until Electron Updater completes its normal quit path or Caul forces the old process to exit after ten seconds.
+- Complete every application shutdown cleanup before handing the downloaded installer to Electron Updater, and cancel the exit guard if installation setup fails.
+- Add timestamped updater lifecycle and Windows process evidence plus a manual, read-only x64 updater audit that cannot publish.
+- Carries forward the updater handoff corrections from the unpublished 0.1.64 through 0.1.66 candidates.
+
+## [0.1.66] (unpublished release candidate)
 
 - Force a bounded clean app-process exit ten seconds after Electron Updater starts the Windows installer, preventing an old x64 process from indefinitely blocking NSIS replacement and relaunch.
 - Carries forward the independent Homebrew and in-app updater proof from the unpublished 0.1.65 candidate.

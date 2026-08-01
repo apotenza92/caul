@@ -23,9 +23,14 @@ const {
   shouldLaunchOnboarding
 } = require('./onboardingLaunch.cjs');
 const { createStopFlushController } = require('./transcriptionStopFlush.cjs');
-const { createUpdaterService, normaliseUpdateFrequency, shouldCheckForUpdates } = require('./updater.cjs');
 const {
-  prepareUpdateInstall,
+  createUpdaterService,
+  normaliseUpdateFrequency,
+  shouldCheckForUpdates,
+  writeUpdaterTestEvent
+} = require('./updater.cjs');
+const {
+  createAppShutdownPreparation,
   scheduleUpdateInstallExitFallback
 } = require('./updateInstallPreparation.cjs');
 const { createHistoryService } = require('./history.cjs');
@@ -747,9 +752,26 @@ function getUpdaterService() {
       forceEnabled: process.env.CAUL_FORCE_UPDATE_CHECKS === '1',
       isDev,
       onBeforeInstallDownloadedUpdate: prepareForDownloadedUpdateInstall,
-      onInstallHandoffStarted: () => scheduleUpdateInstallExitFallback({
-        exitApp: (code) => app.exit(code)
-      })
+      onInstallHandoffStarting: () => {
+        const updaterEventPath = process.env.CAUL_UPDATE_TEST_MODE === '1'
+          ? process.env.CAUL_UPDATER_EVENT_PATH
+          : '';
+        writeUpdaterTestEvent(
+          updaterEventPath,
+          'install-exit-guard-started',
+          { currentVersion: app.getVersion() }
+        );
+        return scheduleUpdateInstallExitFallback({
+          exitApp: (code) => {
+            writeUpdaterTestEvent(
+              updaterEventPath,
+              'install-exit-fallback-fired',
+              { currentVersion: app.getVersion() }
+            );
+            app.exit(code);
+          }
+        });
+      }
     });
   }
 
@@ -757,10 +779,7 @@ function getUpdaterService() {
 }
 
 function prepareForDownloadedUpdateInstall() {
-  isQuitting = true;
-  prepareUpdateInstall({
-    disposePiBridges
-  });
+  prepareAppShutdown();
 }
 
 function getBundledExecutablePath(name) {
@@ -9255,19 +9274,30 @@ function performAppShutdownCleanup() {
   stopSystemAudioCapture();
   stopLocalParakeetDaemon({ force: true });
   cancelParakeetDownload();
-  getLocalLlmService().cancelDownload();
-  getLocalLlmService().stop();
+  localLlmService?.cancelDownload();
+  localLlmService?.stop();
 
   disposePiBridges();
 }
 
+const prepareAppShutdown = createAppShutdownPreparation({
+  cleanups: [
+    () => {
+      isQuitting = true;
+    },
+    () => {
+      clearTimeout(privateOverlayDisplayChangeTimer);
+      privateOverlayDisplayChangeTimer = null;
+    },
+    () => globalShortcut.unregisterAll(),
+    () => updaterService?.stopSchedule(),
+    stopModelCatalogueRefreshSchedule,
+    performAppShutdownCleanup
+  ]
+});
+
 app.on('before-quit', () => {
-  isQuitting = true;
-  clearTimeout(privateOverlayDisplayChangeTimer);
-  globalShortcut.unregisterAll();
-  updaterService?.stopSchedule();
-  stopModelCatalogueRefreshSchedule();
-  performAppShutdownCleanup();
+  prepareAppShutdown();
 });
 
 app.on('window-all-closed', () => {

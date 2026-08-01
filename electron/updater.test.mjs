@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 const require = createRequire(import.meta.url);
 const {
@@ -10,6 +10,7 @@ const {
   compareVersions,
   configureUpdaterDownloadMode,
   configureUpdaterFeed,
+  createUpdateInstallHandoffController,
   findTargetRelease,
   isUpdateSmokeDisabled,
   isLocalDevChannel,
@@ -274,14 +275,85 @@ describe('updater helpers', () => {
         currentVersion: '0.1.43',
         version: '0.1.44'
       });
-      expect(JSON.parse(readFileSync(eventPath, 'utf8'))).toEqual({
+      expect(JSON.parse(readFileSync(eventPath, 'utf8'))).toMatchObject({
         name: 'update-downloaded',
         currentVersion: '0.1.43',
         version: '0.1.44'
       });
+      expect(JSON.parse(readFileSync(eventPath, 'utf8'))).toEqual(expect.objectContaining({
+        at: expect.any(String),
+        pid: process.pid
+      }));
       expect(readFileSync(`${eventPath}.jsonl`, 'utf8')).toContain('"update-downloaded"');
     } finally {
       rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('starts and cancels the Windows exit guard around updater handoff', () => {
+    const events = [];
+    const controller = createUpdateInstallHandoffController({
+      platform: 'win32',
+      startExitFallback: () => {
+        events.push('guard-started');
+        return () => events.push('guard-cancelled');
+      }
+    });
+
+    controller.start(() => events.push('quit-and-install'));
+    expect(events).toEqual(['guard-started', 'quit-and-install']);
+    expect(controller.cancel()).toBe(true);
+    expect(controller.cancel()).toBe(false);
+    expect(events).toEqual(['guard-started', 'quit-and-install', 'guard-cancelled']);
+  });
+
+  it('cancels the Windows exit guard when updater handoff throws', () => {
+    const events = [];
+    const controller = createUpdateInstallHandoffController({
+      platform: 'win32',
+      startExitFallback: () => {
+        events.push('guard-started');
+        return () => events.push('guard-cancelled');
+      }
+    });
+
+    expect(() => controller.start(() => {
+      events.push('quit-and-install');
+      throw new Error('installer spawn failed');
+    })).toThrow(/installer spawn failed/);
+    expect(events).toEqual([
+      'guard-started',
+      'quit-and-install',
+      'guard-cancelled'
+    ]);
+  });
+
+  it('cancels the Windows exit guard when an updater error arrives after handoff', () => {
+    const cancelExitGuard = vi.fn();
+    const controller = createUpdateInstallHandoffController({
+      platform: 'win32',
+      startExitFallback: () => cancelExitGuard
+    });
+
+    controller.start(() => {});
+    expect(controller.cancel()).toBe(true);
+    expect(cancelExitGuard).toHaveBeenCalledOnce();
+  });
+
+  it('does not start a Windows exit guard on other platforms', () => {
+    for (const platform of ['darwin', 'linux']) {
+      const events = [];
+      const controller = createUpdateInstallHandoffController({
+        platform,
+        startExitFallback: () => {
+          events.push('guard-started');
+          return () => events.push('guard-cancelled');
+        }
+      });
+
+      controller.start(() => events.push('quit-and-install'));
+      expect(events).toEqual(['quit-and-install']);
+      expect(controller.cancel()).toBe(false);
     }
   });
 
@@ -304,14 +376,16 @@ describe('updater helpers', () => {
     const installStart = source.indexOf('async function installDownloadedUpdate()');
     const closeFeed = source.indexOf('await closeVerifiedFeed()', installStart);
     const prepareRuntime = source.indexOf('onBeforeInstallDownloadedUpdate?.()', installStart);
-    const quitAndInstall = source.indexOf('autoUpdater.quitAndInstall(', installStart);
-    const exitFallback = source.indexOf('onInstallHandoffStarted?.()', quitAndInstall);
+    const handoffEvent = source.indexOf("'install-handoff-started'", installStart);
+    const guardStart = source.indexOf('installHandoff.start(', handoffEvent);
+    const quitAndInstall = source.indexOf('autoUpdater.quitAndInstall(', guardStart);
 
     expect(installStart).toBeGreaterThanOrEqual(0);
     expect(closeFeed).toBeGreaterThan(installStart);
     expect(prepareRuntime).toBeGreaterThan(closeFeed);
-    expect(quitAndInstall).toBeGreaterThan(prepareRuntime);
-    expect(exitFallback).toBeGreaterThan(quitAndInstall);
-    expect(source.slice(quitAndInstall, exitFallback)).toContain("platform === 'win32'");
+    expect(handoffEvent).toBeGreaterThan(prepareRuntime);
+    expect(guardStart).toBeGreaterThan(handoffEvent);
+    expect(quitAndInstall).toBeGreaterThan(guardStart);
+    expect(source).toContain("autoUpdater.on('error', (error) => {\n    installHandoff.cancel();");
   });
 });

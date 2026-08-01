@@ -258,7 +258,12 @@ describe('macOS release contract', () => {
   });
 
   it('pins external actions and limits checkout credential persistence to the Homebrew publisher', () => {
-    for (const name of ['ci.yml', 'native-updater-audit.yml', 'release.yml']) {
+    for (const name of [
+      'ci.yml',
+      'native-updater-audit.yml',
+      'release.yml',
+      'windows-updater-audit.yml'
+    ]) {
       const workflow = loadWorkflow(name);
       const steps = collectWorkflowSteps(workflow);
       const externalActions = steps
@@ -287,7 +292,12 @@ describe('macOS release contract', () => {
   });
 
   it('pins the release language toolchains to exact versions', () => {
-    for (const name of ['ci.yml', 'native-updater-audit.yml', 'release.yml']) {
+    for (const name of [
+      'ci.yml',
+      'native-updater-audit.yml',
+      'release.yml',
+      'windows-updater-audit.yml'
+    ]) {
       const workflow = loadWorkflow(name);
       expect(workflow.env).toMatchObject({
         NODE_VERSION: '22.22.1',
@@ -315,6 +325,11 @@ describe('macOS release contract', () => {
 
     const nativeUpdater = loadWorkflow('native-updater-audit.yml');
     expect(Object.keys(nativeUpdater.on)).toEqual(['workflow_call']);
+
+    const windowsUpdater = loadWorkflow('windows-updater-audit.yml');
+    expect(Object.keys(windowsUpdater.on)).toEqual(['workflow_dispatch']);
+    expect(windowsUpdater.permissions).toEqual({ contents: 'read' });
+    expect(windowsUpdater.jobs.audit['runs-on']).toBe('windows-2025');
 
     const pages = loadWorkflow('pages.yml');
     expect(Object.keys(pages.on)).toEqual(['workflow_dispatch']);
@@ -678,6 +693,27 @@ describe('macOS release contract', () => {
     expect(nativeUpdaterHarness).toContain("updaterEventTimeoutMs(process.platform)");
     expect(nativeUpdaterHarness).toContain('CAUL_SMOKE_OUTPUT_FILE: smokeOutputPath');
     expect(nativeUpdaterHarness).toContain('validatePackagedLaunchProcessResult(');
+    expect(nativeUpdaterHarness).toContain("'PROCESS_OBSERVATIONS.json'");
+    expect(nativeUpdaterHarness).toContain("name: 'original-runtime-exited'");
+    expect(nativeUpdaterHarness).toContain('createWindowsProcessObserver({');
+
+    const windowsUpdaterWorkflow = readFileSync(
+      path.join(repositoryRoot, '.github', 'workflows', 'windows-updater-audit.yml'),
+      'utf8'
+    );
+    const windowsUpdater = loadWorkflow('windows-updater-audit.yml');
+    const checkout = windowsUpdater.jobs.audit.steps.find(
+      (step) => step.name === 'Checkout exact candidate source'
+    );
+    expect(checkout.with).toMatchObject({
+      ref: '${{ inputs.ref }}',
+      'persist-credentials': false
+    });
+    expect(windowsUpdaterWorkflow).toContain('test-native-tuf-update.cjs');
+    expect(windowsUpdaterWorkflow).toContain('--candidate-revision "$CAUL_CANDIDATE_REVISION"');
+    expect(windowsUpdaterWorkflow).toContain('windows-2025');
+    expect(windowsUpdaterWorkflow).toContain('Upload updater evidence');
+    expect(windowsUpdaterWorkflow).not.toMatch(/gh release|git tag|HOMEBREW|pages deploy/i);
 
     const signedBuild = readFileSync(path.join(repositoryRoot, 'scripts', 'build-signed-macos.mjs'), 'utf8');
     expect(signedBuild).toContain("'--skip-launch'");

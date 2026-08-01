@@ -28,7 +28,7 @@ function createUpdaterService({
   isDev,
   onAfterSuccessfulCheck,
   onBeforeInstallDownloadedUpdate,
-  onInstallHandoffStarted,
+  onInstallHandoffStarting,
   packageMetadata = require('../package.json'),
   platform = process.platform,
   resourcesPath = process.resourcesPath,
@@ -47,6 +47,10 @@ function createUpdaterService({
   let availableUpdate = null;
   let verifiedFeed = null;
   let verifiedFeedPromise = null;
+  const installHandoff = createUpdateInstallHandoffController({
+    platform,
+    startExitFallback: onInstallHandoffStarting
+  });
 
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
@@ -88,6 +92,7 @@ function createUpdaterService({
   });
 
   autoUpdater.on('error', (error) => {
+    installHandoff.cancel();
     recordError(error);
   });
 
@@ -433,12 +438,16 @@ function createUpdaterService({
       try {
         await closeVerifiedFeed();
         onBeforeInstallDownloadedUpdate?.();
-        autoUpdater.quitAndInstall(platform === 'win32', true);
-        if (platform === 'win32') {
-          onInstallHandoffStarted?.();
-        }
+        writeUpdaterTestEvent(updaterEventPath, 'install-handoff-started', {
+          currentVersion: app.getVersion(),
+          version: availableUpdate?.version
+        });
+        installHandoff.start(() => {
+          autoUpdater.quitAndInstall(platform === 'win32', true);
+        });
         return status();
       } catch (error) {
+        installHandoff.cancel();
         return recordError(error, 'Update installation could not start.');
       }
     }
@@ -531,6 +540,55 @@ function isLocalDevChannel(channel) {
   return channel === 'dev' || channel === 'dev-private';
 }
 
+function createUpdateInstallHandoffController({
+  platform = process.platform,
+  startExitFallback
+} = {}) {
+  let cancelExitFallback = null;
+
+  function cancel() {
+    if (!cancelExitFallback) {
+      return false;
+    }
+
+    const cancelPending = cancelExitFallback;
+    cancelExitFallback = null;
+    cancelPending();
+    return true;
+  }
+
+  function start(handoff) {
+    if (typeof handoff !== 'function') {
+      throw new Error('Update installation requires a handoff function.');
+    }
+    if (
+      platform === 'win32'
+      && startExitFallback !== undefined
+      && typeof startExitFallback !== 'function'
+    ) {
+      throw new Error('Windows update installation exit guard must be a function.');
+    }
+
+    cancel();
+    if (platform === 'win32' && startExitFallback) {
+      const cancellation = startExitFallback();
+      if (typeof cancellation !== 'function') {
+        throw new Error('Windows update installation exit guard must be cancellable.');
+      }
+      cancelExitFallback = cancellation;
+    }
+
+    try {
+      handoff();
+    } catch (error) {
+      cancel();
+      throw error;
+    }
+  }
+
+  return { cancel, start };
+}
+
 function normaliseUpdateFrequency(value) {
   return updateFrequencies.includes(value) ? value : 'weekly';
 }
@@ -619,7 +677,12 @@ function normaliseUpdaterReleaseNotes(value) {
 function writeUpdaterTestEvent(filePath, name, details = {}) {
   if (!filePath) return;
   const target = path.resolve(filePath);
-  const event = { name, ...details };
+  const event = {
+    at: new Date().toISOString(),
+    name,
+    pid: process.pid,
+    ...details
+  };
   fsSync.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
   fsSync.appendFileSync(`${target}.jsonl`, `${JSON.stringify(event)}\n`, { mode: 0o600 });
   const temporary = `${target}.${process.pid}.tmp`;
@@ -801,6 +864,7 @@ module.exports = {
   compareVersions,
   configureUpdaterDownloadMode,
   configureUpdaterFeed,
+  createUpdateInstallHandoffController,
   createUpdaterService,
   findTargetRelease,
   isUpdateSmokeDisabled,
