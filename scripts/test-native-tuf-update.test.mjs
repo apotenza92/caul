@@ -68,6 +68,8 @@ describe('native TUF updater audit helpers', () => {
     expect(source).toContain('recordEvidenceCleanupFailure(evidenceDirectory, cleanupFailure)');
     expect(source).toContain('at: new Date().toISOString()');
     expect(source).toContain('windowsProcessesWithin(directory)');
+    expect(source).toContain('Get-Process -ErrorAction SilentlyContinue');
+    expect(source).toContain('windowsDetailedProcessesRelatedTo(directory)');
   });
 
   it('requires the original runtime PID to exit naturally', async () => {
