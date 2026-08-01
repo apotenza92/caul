@@ -1044,17 +1044,40 @@ async function main(argv = process.argv.slice(2)) {
         signal
       });
     });
-    if (process.platform === 'win32') {
-      processObserver = createWindowsProcessObserver({
-        directory: temporaryRoot,
-        observations: processObservations
-      });
+    const eventTimeoutMs = updaterEventTimeoutMs(process.platform);
+    const eventDeadline = Date.now() + eventTimeoutMs;
+    let outcome;
+    if (process.platform === 'win32' && scenario === 'valid') {
+      const downloadOutcome = await waitForEvent(
+        eventPath,
+        new Set(['update-downloaded', 'error']),
+        eventTimeoutMs
+      );
+      if (downloadOutcome.name === 'error') {
+        outcome = downloadOutcome;
+      } else {
+        processObservations.push({
+          at: new Date().toISOString(),
+          eventAt: downloadOutcome.at || null,
+          name: 'update-downloaded-observed'
+        });
+        processObserver = createWindowsProcessObserver({
+          directory: temporaryRoot,
+          observations: processObservations
+        });
+        outcome = await waitForEvent(
+          eventPath,
+          new Set(['updated-runtime-launched', 'error']),
+          Math.max(1, eventDeadline - Date.now())
+        );
+      }
+    } else {
+      outcome = await waitForEvent(
+        eventPath,
+        new Set(['updated-runtime-launched', 'error']),
+        eventTimeoutMs
+      );
     }
-    const outcome = await waitForEvent(
-      eventPath,
-      new Set(['updated-runtime-launched', 'error']),
-      updaterEventTimeoutMs(process.platform)
-    );
     processObservations.push({
       at: new Date().toISOString(),
       event: outcome.name,
