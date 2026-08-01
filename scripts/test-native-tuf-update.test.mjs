@@ -76,6 +76,12 @@ describe('native TUF updater audit helpers', () => {
     expect(source).toContain('timeoutMs: windowsSetupInstallerTimeoutMs');
     expect(source).toContain("run(uninstaller, ['/S'], { timeoutMs: windowsUninstallerTimeoutMs })");
     expect(source).not.toContain("const processes = windowsProcessesWithin(directory)");
+
+    const downloadWait = source.indexOf("new Set(['update-downloaded', 'error'])");
+    const observerStart = source.indexOf('processObserver = createWindowsProcessObserver({');
+    expect(downloadWait).toBeGreaterThan(-1);
+    expect(observerStart).toBeGreaterThan(downloadWait);
+    expect(source).toContain("name: 'update-downloaded-observed'");
   });
 
   it('requires the original runtime PID to exit naturally', async () => {
