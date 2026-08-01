@@ -398,14 +398,10 @@ function createUpdaterService({
         };
         emitStatus();
         autoUpdater.allowPrerelease = Boolean(availableUpdate.prerelease);
-        if (usesTufUpdater(platform, env)) {
-          const feed = await ensureVerifiedFeed();
-          await feed.refresh();
-          configureUpdaterFeed(autoUpdater, { appChannel, testFeedUrl: feed.feedUrl });
-        } else {
+        if (!usesTufUpdater(platform, env)) {
           configureUpdaterFeed(autoUpdater, { appChannel, testFeedUrl });
+          await autoUpdater.checkForUpdates();
         }
-        await autoUpdater.checkForUpdates();
         await autoUpdater.downloadUpdate();
         return status();
       } catch (error) {

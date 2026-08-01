@@ -402,4 +402,16 @@ describe('updater helpers', () => {
     expect(quitAndInstall).toBeGreaterThan(guardStart);
     expect(source).toContain("autoUpdater.on('error', (error) => {\n    installHandoff.cancel();");
   });
+
+  it('downloads the TUF-authenticated update without repeating the verified check', () => {
+    const source = readFileSync(require.resolve('./updater.cjs'), 'utf8');
+    const downloadStart = source.indexOf('async function downloadAndInstall()');
+    const downloadCall = source.indexOf('await autoUpdater.downloadUpdate()', downloadStart);
+    const downloadSetup = source.slice(downloadStart, downloadCall);
+
+    expect(downloadStart).toBeGreaterThanOrEqual(0);
+    expect(downloadCall).toBeGreaterThan(downloadStart);
+    expect(downloadSetup).toContain('if (!usesTufUpdater(platform, env))');
+    expect(downloadSetup).not.toContain('await feed.refresh()');
+  });
 });
