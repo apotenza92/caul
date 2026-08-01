@@ -2,7 +2,10 @@ import { createRequire } from 'node:module';
 import { describe, expect, it, vi } from 'vitest';
 
 const require = createRequire(import.meta.url);
-const { prepareUpdateInstall } = require('./updateInstallPreparation.cjs');
+const {
+  prepareUpdateInstall,
+  scheduleUpdateInstallExitFallback
+} = require('./updateInstallPreparation.cjs');
 
 describe('update install preparation', () => {
   it('disposes Pi subprocesses without racing Electron Updater by closing windows', () => {
@@ -25,5 +28,29 @@ describe('update install preparation', () => {
     expect(() => prepareUpdateInstall({
       disposePiBridges: null
     })).toThrow(/disposal function/);
+  });
+
+  it('forces a clean process exit if Electron Updater does not finish quitting', () => {
+    const exitApp = vi.fn();
+    const unref = vi.fn();
+    let fallback;
+    const schedule = vi.fn((callback, delayMs) => {
+      fallback = callback;
+      expect(delayMs).toBe(10_000);
+      return { unref };
+    });
+
+    scheduleUpdateInstallExitFallback({ exitApp, schedule });
+
+    expect(schedule).toHaveBeenCalledOnce();
+    expect(unref).toHaveBeenCalledOnce();
+    expect(exitApp).not.toHaveBeenCalled();
+    fallback();
+    expect(exitApp).toHaveBeenCalledWith(0);
+  });
+
+  it('rejects an incomplete exit fallback', () => {
+    expect(() => scheduleUpdateInstallExitFallback({ exitApp: null }))
+      .toThrow(/exit and scheduling functions/);
   });
 });

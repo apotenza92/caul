@@ -28,6 +28,7 @@ function createUpdaterService({
   isDev,
   onAfterSuccessfulCheck,
   onBeforeInstallDownloadedUpdate,
+  onInstallHandoffStarted,
   packageMetadata = require('../package.json'),
   platform = process.platform,
   resourcesPath = process.resourcesPath,
@@ -433,6 +434,9 @@ function createUpdaterService({
         await closeVerifiedFeed();
         onBeforeInstallDownloadedUpdate?.();
         autoUpdater.quitAndInstall(platform === 'win32', true);
+        if (platform === 'win32') {
+          onInstallHandoffStarted?.();
+        }
         return status();
       } catch (error) {
         return recordError(error, 'Update installation could not start.');

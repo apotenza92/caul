@@ -24,7 +24,10 @@ const {
 } = require('./onboardingLaunch.cjs');
 const { createStopFlushController } = require('./transcriptionStopFlush.cjs');
 const { createUpdaterService, normaliseUpdateFrequency, shouldCheckForUpdates } = require('./updater.cjs');
-const { prepareUpdateInstall } = require('./updateInstallPreparation.cjs');
+const {
+  prepareUpdateInstall,
+  scheduleUpdateInstallExitFallback
+} = require('./updateInstallPreparation.cjs');
 const { createHistoryService } = require('./history.cjs');
 const { getUsableSelectedLocalAiModelId } = require('./localAiSelection.cjs');
 const { createLocalLlmService } = require('./localLlm.cjs');
@@ -743,7 +746,10 @@ function getUpdaterService() {
       appName: getAppDisplayName(),
       forceEnabled: process.env.CAUL_FORCE_UPDATE_CHECKS === '1',
       isDev,
-      onBeforeInstallDownloadedUpdate: prepareForDownloadedUpdateInstall
+      onBeforeInstallDownloadedUpdate: prepareForDownloadedUpdateInstall,
+      onInstallHandoffStarted: () => scheduleUpdateInstallExitFallback({
+        exitApp: (code) => app.exit(code)
+      })
     });
   }
 
