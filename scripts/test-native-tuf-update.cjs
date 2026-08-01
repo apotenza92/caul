@@ -14,6 +14,7 @@ const {
 } = require('./sign-tuf-update-repository.cjs');
 
 const windowsProcessInspectionTimeoutMs = 15_000;
+const windowsInstallerTimeoutMs = 90_000;
 
 function option(argv, name) {
   const index = argv.indexOf(name);
@@ -26,11 +27,12 @@ function requiredOption(argv, name) {
   return value;
 }
 
-function run(command, args, { env = process.env } = {}) {
+function run(command, args, { env = process.env, timeoutMs } = {}) {
   const result = spawnSync(command, args, {
     encoding: 'utf8',
     env,
-    stdio: 'inherit'
+    stdio: 'inherit',
+    timeout: timeoutMs
   });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`${command} failed with status ${result.status}.`);
@@ -967,7 +969,8 @@ async function main(argv = process.argv.slice(2)) {
         env: restrictedEnvironment({
           APPDATA: windowsProfile.appData,
           LOCALAPPDATA: windowsProfile.localAppData
-        })
+        }),
+        timeoutMs: windowsInstallerTimeoutMs
       });
       installedExecutable = path.join(installDirectory, `${productName}.exe`);
       if (!fs.existsSync(installedExecutable)) {
@@ -1244,7 +1247,7 @@ async function main(argv = process.argv.slice(2)) {
             (candidate) => /^uninstall.*\.exe$/i.test(path.basename(candidate)),
             'NSIS uninstaller'
           );
-          run(uninstaller, ['/S']);
+          run(uninstaller, ['/S'], { timeoutMs: windowsInstallerTimeoutMs });
           waitForPathRemoval(installDirectory);
           processObservations.push({
             at: new Date().toISOString(),
