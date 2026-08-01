@@ -427,7 +427,16 @@ async function stopPid(pid) {
   if (isPidAlive(pid)) throw new Error(`Updater process ${pid} did not stop.`);
 }
 
-function windowsProcessIdsWithin(directory) {
+async function waitForPidExit(pid, { intervalMs = 100, timeoutMs = 30_000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isPidAlive(pid)) return;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error(`Original Caul process ${pid} remained alive after the installer handoff.`);
+}
+
+function windowsProcessesWithin(directory) {
   const result = spawnSync(
     'powershell.exe',
     [
@@ -438,7 +447,7 @@ function windowsProcessIdsWithin(directory) {
         '$root = $env:CAUL_AUDIT_DIRECTORY;',
         '$processes = @(Get-CimInstance Win32_Process |',
         'Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase) } |',
-        'Select-Object -ExpandProperty ProcessId);',
+        'Select-Object ProcessId, ParentProcessId, Name, ExecutablePath, CommandLine);',
         'ConvertTo-Json -Compress -InputObject $processes'
       ].join(' ')
     ],
@@ -456,8 +465,74 @@ function windowsProcessIdsWithin(directory) {
   }
   const parsed = JSON.parse(result.stdout.trim() || '[]');
   return (Array.isArray(parsed) ? parsed : [parsed])
-    .map(Number)
-    .filter((pid) => Number.isInteger(pid) && pid > 0);
+    .map((processInfo) => ({
+      commandLine: processInfo.CommandLine || null,
+      executablePath: processInfo.ExecutablePath || null,
+      name: processInfo.Name || null,
+      parentPid: Number(processInfo.ParentProcessId),
+      pid: Number(processInfo.ProcessId)
+    }))
+    .filter((processInfo) => Number.isInteger(processInfo.pid) && processInfo.pid > 0)
+    .sort((left, right) => left.pid - right.pid);
+}
+
+function windowsProcessIdsWithin(directory) {
+  return windowsProcessesWithin(directory).map((processInfo) => processInfo.pid);
+}
+
+function createWindowsProcessObserver({
+  directory,
+  intervalMs = 1_000,
+  observations
+}) {
+  if (!Array.isArray(observations)) {
+    throw new Error('Windows process observer requires an observations array.');
+  }
+
+  let lastSignature = null;
+  let timer = null;
+  let stopped = false;
+
+  const capture = (name = 'process-set-changed') => {
+    try {
+      const processes = windowsProcessesWithin(directory);
+      const signature = JSON.stringify(processes);
+      if (name === 'process-set-changed' && signature === lastSignature) {
+        return;
+      }
+      lastSignature = signature;
+      observations.push({
+        at: new Date().toISOString(),
+        name,
+        processes
+      });
+    } catch (error) {
+      observations.push({
+        at: new Date().toISOString(),
+        message: error.message || String(error),
+        name: 'process-observer-error'
+      });
+    }
+  };
+
+  const poll = () => {
+    if (stopped) return;
+    capture();
+    timer = setTimeout(poll, intervalMs);
+  };
+
+  capture('process-observer-started');
+  timer = setTimeout(poll, intervalMs);
+
+  return {
+    capture,
+    stop() {
+      if (stopped) return;
+      stopped = true;
+      clearTimeout(timer);
+      capture('process-observer-stopped');
+    }
+  };
 }
 
 function findExactlyOne(root, predicate, label) {
@@ -581,6 +656,7 @@ function writeEvidence({
   arch,
   candidateDirectory,
   candidateMetadata,
+  candidateRevision,
   channel,
   credentialBytes,
   credentialPath,
@@ -592,6 +668,7 @@ function writeEvidence({
   installed,
   platform,
   previousArtifact,
+  processObservations,
   rootPath,
   scenario,
   server,
@@ -616,6 +693,7 @@ function writeEvidence({
     `Scenario: ${scenario}`,
     `Previous artifact: ${path.basename(previousArtifact)}`,
     `Candidate metadata: ${path.basename(candidateMetadata)}`,
+    `Candidate revision: ${candidateRevision}`,
     `Candidate version: ${server?.version || '<not reached>'}`,
     'Trust: ephemeral loopback-only TUF test root',
     ''
@@ -640,6 +718,10 @@ function writeEvidence({
     `Documents project after: ${fs.existsSync(documentsMarkerPath) ? digest(documentsMarkerPath) : '<missing>'}`,
     ''
   ].join('\n'));
+  fs.writeFileSync(
+    path.join(staging, 'PROCESS_OBSERVATIONS.json'),
+    `${JSON.stringify(processObservations, null, 2)}\n`
+  );
   const packagePaths = [
     previousArtifact,
     ...fs.readdirSync(candidateDirectory)
@@ -657,6 +739,25 @@ function writeEvidence({
   fs.renameSync(staging, evidenceDirectory);
 }
 
+function recordEvidenceCleanupFailure(evidenceDirectory, error) {
+  const resultPath = path.join(evidenceDirectory, 'RESULT.txt');
+  const failurePath = path.join(evidenceDirectory, 'FAILURE.txt');
+  fs.rmSync(resultPath, { force: true });
+  fs.appendFileSync(
+    failurePath,
+    `Native updater disposable cleanup failed: ${error.message || error}\n`
+  );
+  const evidenceFiles = fs.readdirSync(evidenceDirectory)
+    .filter((name) => name !== 'EVIDENCE_SHA256SUMS')
+    .sort();
+  fs.writeFileSync(
+    path.join(evidenceDirectory, 'EVIDENCE_SHA256SUMS'),
+    `${evidenceFiles
+      .map((name) => `${digest(path.join(evidenceDirectory, name))}  ${name}`)
+      .join('\n')}\n`
+  );
+}
+
 async function main(argv = process.argv.slice(2)) {
   if (!['win32', 'linux'].includes(process.platform)) {
     throw new Error('Caul native updater tests require a matching Windows or Linux runner.');
@@ -670,6 +771,9 @@ async function main(argv = process.argv.slice(2)) {
   if (!['stable', 'beta'].includes(channel)) throw new Error('Updater audit channel must be stable or beta.');
   const candidateAsarArgument = option(argv, '--candidate-asar');
   const candidateAsar = candidateAsarArgument ? path.resolve(candidateAsarArgument) : null;
+  const candidateRevision = option(argv, '--candidate-revision')
+    || process.env.GITHUB_SHA
+    || '<not supplied>';
   const candidateDirectory = path.resolve(requiredOption(argv, '--candidate-directory'));
   const candidateMetadata = path.resolve(requiredOption(argv, '--candidate-metadata'));
   const evidenceDirectory = path.resolve(requiredOption(argv, '--evidence'));
@@ -698,6 +802,8 @@ async function main(argv = process.argv.slice(2)) {
 
   const productName = channel === 'beta' ? 'Caul Beta' : 'Caul';
   const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'caul-native-updater-'));
+  const processObservations = [];
+  let processObserver = null;
   const windowsProfile = process.platform === 'win32'
     ? windowsAuditProfileDirectories(temporaryRoot)
     : null;
@@ -724,6 +830,7 @@ async function main(argv = process.argv.slice(2)) {
   fs.writeFileSync(documentsMarkerPath, documentsMarkerBytes);
 
   let child;
+  let originalPid;
   let failure;
   let installed;
   let installedAppImage;
@@ -800,11 +907,39 @@ async function main(argv = process.argv.slice(2)) {
       env: environment,
       stdio: 'inherit'
     });
+    originalPid = child.pid;
+    processObservations.push({
+      at: new Date().toISOString(),
+      name: 'original-runtime-launched',
+      pid: originalPid
+    });
+    child.once('exit', (code, signal) => {
+      processObservations.push({
+        at: new Date().toISOString(),
+        code,
+        name: 'original-runtime-exited',
+        pid: originalPid,
+        signal
+      });
+    });
+    if (process.platform === 'win32') {
+      processObserver = createWindowsProcessObserver({
+        directory: temporaryRoot,
+        observations: processObservations
+      });
+    }
     const outcome = await waitForEvent(
       eventPath,
       new Set(['updated-runtime-launched', 'error']),
       updaterEventTimeoutMs(process.platform)
     );
+    processObservations.push({
+      at: new Date().toISOString(),
+      event: outcome.name,
+      eventAt: outcome.at || null,
+      name: 'updater-terminal-event'
+    });
+    processObserver?.capture('updater-terminal-processes');
     if (scenario === 'valid') {
       if (outcome.name === 'error') {
         throw new Error(`Native updater failed: ${outcome.message || '<missing error>'}`);
@@ -812,6 +947,13 @@ async function main(argv = process.argv.slice(2)) {
       if (outcome.currentVersion !== server.version) {
         throw new Error(`Updated runtime reported ${outcome.currentVersion}, expected ${server.version}.`);
       }
+      await waitForPidExit(originalPid);
+      processObservations.push({
+        at: new Date().toISOString(),
+        name: 'original-runtime-exit-confirmed',
+        pid: originalPid
+      });
+      child = null;
 
       if (process.platform === 'win32') {
         installed = await waitForInstalledCandidate({
@@ -895,6 +1037,8 @@ async function main(argv = process.argv.slice(2)) {
       const expectedEvents = [
         'update-available',
         'update-downloaded',
+        'install-handoff-started',
+        ...(process.platform === 'win32' ? ['install-exit-guard-started'] : []),
         'updated-runtime-launched'
       ];
       let previousIndex = -1;
@@ -954,12 +1098,25 @@ async function main(argv = process.argv.slice(2)) {
     }
   } catch (error) {
     failure = error;
+    processObservations.push({
+      at: new Date().toISOString(),
+      message: error.message || String(error),
+      name: 'audit-failure'
+    });
+    processObserver?.capture('audit-failure-processes');
     throw error;
   } finally {
     let cleanupFailure;
     try {
       await stopPid(child?.pid);
+      processObservations.push({
+        alive: isPidAlive(originalPid),
+        at: new Date().toISOString(),
+        name: 'original-runtime-stopped',
+        pid: originalPid
+      });
       if (server) await server.close();
+      processObserver?.capture('pre-uninstall-processes');
       if (process.platform === 'win32' && installedExecutable) {
         const installDirectory = path.dirname(installedExecutable);
         if (fs.existsSync(installDirectory)) {
@@ -971,16 +1128,23 @@ async function main(argv = process.argv.slice(2)) {
           );
           run(uninstaller, ['/S']);
           waitForPathRemoval(installDirectory);
+          processObservations.push({
+            at: new Date().toISOString(),
+            name: 'installation-directory-removed',
+            path: installDirectory
+          });
         }
       }
     } catch (error) {
       cleanupFailure = error;
       process.stderr.write(`Native updater cleanup failed: ${error.stack || error}\n`);
     }
+    processObserver?.stop();
     writeEvidence({
       arch,
       candidateDirectory,
       candidateMetadata,
+      candidateRevision,
       channel,
       credentialBytes,
       credentialPath,
@@ -992,6 +1156,7 @@ async function main(argv = process.argv.slice(2)) {
       installed,
       platform: process.platform,
       previousArtifact,
+      processObservations,
       rootPath,
       scenario,
       server,
@@ -1014,6 +1179,9 @@ async function main(argv = process.argv.slice(2)) {
     } catch (error) {
       cleanupFailure ||= error;
       process.stderr.write(`Native updater project marker cleanup failed: ${error.stack || error}\n`);
+    }
+    if (cleanupFailure) {
+      recordEvidenceCleanupFailure(evidenceDirectory, cleanupFailure);
     }
     if (!failure && cleanupFailure) throw cleanupFailure;
   }
@@ -1038,6 +1206,7 @@ module.exports = {
   serveBytes,
   updaterEventTimeoutMs,
   waitForInstalledCandidate,
+  waitForPidExit,
   waitForPathRemoval,
   windowsAuditProfileDirectories,
   windowsDifferentialRequestPaths,

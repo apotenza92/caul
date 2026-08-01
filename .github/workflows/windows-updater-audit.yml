@@ -1,0 +1,208 @@
+name: Windows x64 Updater Audit
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Exact branch, tag or commit to audit
+        required: true
+        default: main
+        type: string
+      channel:
+        description: Product channel to audit
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - stable
+          - beta
+      scenarios:
+        description: Run the valid lifecycle only or every security scenario
+        required: true
+        default: valid
+        type: choice
+        options:
+          - valid
+          - all
+
+env:
+  NODE_VERSION: "22.22.1"
+  RUST_TOOLCHAIN: "1.88.0"
+
+concurrency:
+  group: windows-x64-updater-audit-${{ inputs.ref }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: Windows x64 ${{ inputs.channel }} updater
+    runs-on: windows-2025
+    timeout-minutes: 240
+    steps:
+      - name: Checkout exact candidate source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Install dependencies
+        run: npm ci
+        timeout-minutes: 10
+
+      - name: Build exact candidate packages
+        shell: bash
+        env:
+          CAUL_AUDIT_CHANNEL_INPUT: ${{ inputs.channel }}
+          CAUL_PACKAGE_ARCH: x64
+          CAUL_PACKAGE_PLATFORM: win32
+          CAUL_REQUIRE_TUF_ROOT: "true"
+        run: |
+          set -euo pipefail
+          candidate_version="$(node -p "require('./package.json').version")"
+          candidate_revision="$(git rev-parse HEAD)"
+          [[ "$candidate_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[1-9][0-9]*)?$ ]]
+          [[ "$candidate_revision" =~ ^[0-9a-f]{40}$ ]]
+          mkdir -p candidate/updater-audit
+          npm run package:prepare:win
+
+          if [[ "$CAUL_AUDIT_CHANNEL_INPUT" == all || "$CAUL_AUDIT_CHANNEL_INPUT" == stable ]]; then
+            node scripts/clean-package-output.mjs win x64
+            npx --no-install electron-builder \
+              --config electron-builder.config.cjs \
+              --win nsis \
+              --x64 \
+              --publish=never
+            node scripts/verify-native-package.mjs \
+              --platform windows \
+              --arch x64 \
+              --channel stable
+            mkdir -p candidate/updater-audit/stable
+            cp release/Caul-windows-x64-setup.exe candidate/
+            cp release/Caul-windows-x64-setup.exe.blockmap candidate/
+            cp release/latest.yml candidate/
+            cp release/win-unpacked/resources/app.asar candidate/updater-audit/stable/app.asar
+          fi
+
+          if [[ "$CAUL_AUDIT_CHANNEL_INPUT" == all || "$CAUL_AUDIT_CHANNEL_INPUT" == beta ]]; then
+            node scripts/clean-package-output.mjs win x64
+            FORCE_BETA_BUILD=true npx --no-install electron-builder \
+              --config electron-builder.config.cjs \
+              --win nsis \
+              --x64 \
+              --publish=never
+            node scripts/verify-native-package.mjs \
+              --platform windows \
+              --arch x64 \
+              --channel beta
+            mkdir -p candidate/updater-audit/beta
+            cp release/Caul-Beta-windows-x64-setup.exe candidate/
+            cp release/Caul-Beta-windows-x64-setup.exe.blockmap candidate/
+            cp release/beta.yml candidate/
+            cp release/win-unpacked/resources/app.asar candidate/updater-audit/beta/app.asar
+          fi
+
+          printf 'CAUL_CANDIDATE_VERSION=%s\n' "$candidate_version" >> "$GITHUB_ENV"
+          printf 'CAUL_CANDIDATE_REVISION=%s\n' "$candidate_revision" >> "$GITHUB_ENV"
+
+      - name: Create ephemeral audit trust and synthetic previous runtime
+        shell: bash
+        env:
+          CAUL_PACKAGE_ARCH: x64
+          CAUL_PACKAGE_PLATFORM: win32
+          CAUL_REQUIRE_TUF_ROOT: "true"
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/caul-tuf-audit"
+          mv build/update-trust/root.json "$RUNNER_TEMP/caul-tuf-audit/production-root.json"
+          node scripts/create-tuf-production-trust.cjs \
+            --root build/update-trust/root.json \
+            --private-key-bundle "$RUNNER_TEMP/caul-tuf-audit/private-keys.json"
+          npm version 0.0.1 --no-git-tag-version --allow-same-version
+          npm run package:prepare:win
+
+      - name: Exercise native success and fail-closed scenarios
+        shell: bash
+        env:
+          CAUL_AUDIT_CHANNEL_INPUT: ${{ inputs.channel }}
+          CAUL_AUDIT_SCENARIOS_INPUT: ${{ inputs.scenarios }}
+          CAUL_PACKAGE_ARCH: x64
+          CAUL_PACKAGE_PLATFORM: win32
+          CAUL_REQUIRE_TUF_ROOT: "true"
+        run: |
+          set -euo pipefail
+          channels=(stable beta)
+          [[ "$CAUL_AUDIT_CHANNEL_INPUT" == stable ]] && channels=(stable)
+          [[ "$CAUL_AUDIT_CHANNEL_INPUT" == beta ]] && channels=(beta)
+          scenarios=(valid)
+          [[ "$CAUL_AUDIT_SCENARIOS_INPUT" == all ]] \
+            && scenarios=(wrong-signature corrupt-payload valid)
+
+          for channel in "${channels[@]}"; do
+            node scripts/clean-package-output.mjs win x64
+            build_environment=()
+            prefix=Caul
+            target_name=latest.yml
+            if [[ "$channel" == beta ]]; then
+              build_environment=(env FORCE_BETA_BUILD=true)
+              prefix=Caul-Beta
+              target_name=beta.yml
+            fi
+            "${build_environment[@]}" npx --no-install electron-builder \
+              --config electron-builder.config.cjs \
+              --win nsis \
+              --x64 \
+              --publish=never
+            previous="$PWD/release/$prefix-windows-x64-setup.exe"
+            test -f "$previous"
+
+            for scenario in "${scenarios[@]}"; do
+              node scripts/test-native-tuf-update.cjs \
+                --arch x64 \
+                --channel "$channel" \
+                --scenario "$scenario" \
+                --candidate-directory candidate \
+                --candidate-metadata "candidate/$target_name" \
+                --candidate-revision "$CAUL_CANDIDATE_REVISION" \
+                --candidate-asar "candidate/updater-audit/$channel/app.asar" \
+                --evidence "$RUNNER_TEMP/caul-native-updater-evidence/$channel/$scenario" \
+                --previous-artifact "$previous" \
+                --private-key-bundle "$RUNNER_TEMP/caul-tuf-audit/private-keys.json" \
+                --root "$PWD/build/update-trust/root.json" \
+                --target-name "$target_name"
+            done
+          done
+
+      - name: Upload updater evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-x64-updater-${{ inputs.channel }}-${{ inputs.scenarios }}
+          path: ${{ runner.temp }}/caul-native-updater-evidence
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove ephemeral signing material and build outputs
+        if: always()
+        shell: bash
+        run: |
+          rm -rf \
+            "$RUNNER_TEMP/caul-tuf-audit" \
+            build/update-trust/root.json \
+            candidate \
+            release \
+            target

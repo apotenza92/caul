@@ -25,6 +25,7 @@ const {
   stageWindowsDifferentialBase,
   updaterEventTimeoutMs,
   waitForPathRemoval,
+  waitForPidExit,
   windowsAuditProfileDirectories,
   windowsDifferentialRequestPaths,
   windowsSilentInstallArguments
@@ -54,6 +55,28 @@ function requestBytes(server, { method = 'GET', range } = {}) {
 }
 
 describe('native TUF updater audit helpers', () => {
+  it('records timestamped Windows lifecycle and process evidence', () => {
+    const source = readFileSync(
+      path.join(import.meta.dirname, 'test-native-tuf-update.cjs'),
+      'utf8'
+    );
+
+    expect(source).toContain("name: 'original-runtime-launched'");
+    expect(source).toContain("name: 'original-runtime-exited'");
+    expect(source).toContain("name: 'updater-terminal-event'");
+    expect(source).toContain("'PROCESS_OBSERVATIONS.json'");
+    expect(source).toContain('recordEvidenceCleanupFailure(evidenceDirectory, cleanupFailure)');
+    expect(source).toContain('at: new Date().toISOString()');
+    expect(source).toContain('windowsProcessesWithin(directory)');
+  });
+
+  it('requires the original runtime PID to exit naturally', async () => {
+    await expect(waitForPidExit(process.pid, { intervalMs: 1, timeoutMs: 5 }))
+      .rejects.toThrow(/remained alive/);
+    await expect(waitForPidExit(2_147_483_647, { intervalMs: 1, timeoutMs: 5 }))
+      .resolves.toBeUndefined();
+  });
+
   it('serves Electron differential downloads as standard multipart byte ranges', async () => {
     const bytes = Buffer.from('abcdefghij');
     const server = createServer((request, response) => serveBytes(request, response, bytes));
