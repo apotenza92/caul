@@ -77,6 +77,9 @@ describe('native TUF updater audit helpers', () => {
     expect(source).toContain('Windows updater process inspection exceeded');
     expect(source).toContain('timeoutMs: windowsSetupInstallerTimeoutMs');
     expect(source).toContain("run(uninstaller, ['/S'], { timeoutMs: windowsUninstallerTimeoutMs })");
+    expect(source).toContain(
+      'waitForPathRemoval(installDirectory, { timeoutMs: windowsUninstallerTimeoutMs })',
+    );
     expect(source).not.toContain("const processes = windowsProcessesWithin(directory)");
 
     const downloadWait = source.indexOf("new Set(['update-downloaded', 'error'])");
