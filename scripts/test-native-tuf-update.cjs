@@ -1315,7 +1315,7 @@ async function main(argv = process.argv.slice(2)) {
             'NSIS uninstaller'
           );
           run(uninstaller, ['/S'], { timeoutMs: windowsUninstallerTimeoutMs });
-          waitForPathRemoval(installDirectory);
+          waitForPathRemoval(installDirectory, { timeoutMs: windowsUninstallerTimeoutMs });
           processObservations.push({
             at: new Date().toISOString(),
             name: 'installation-directory-removed',
