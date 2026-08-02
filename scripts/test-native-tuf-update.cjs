@@ -545,7 +545,7 @@ function runWindowsProcessInspection(directory, command) {
       encoding: 'utf8',
       env: {
         ...process.env,
-        CAUL_AUDIT_DIRECTORY: `${path.resolve(directory)}${path.sep}`
+        CAUL_AUDIT_DIRECTORY: `${windowsProcessInspectionDirectory(directory)}${path.sep}`
       },
       timeout: windowsProcessInspectionTimeoutMs
     }
@@ -568,6 +568,15 @@ function runWindowsProcessInspection(directory, command) {
     })
     .filter((processInfo) => Number.isInteger(processInfo.pid) && processInfo.pid > 0)
     .sort((left, right) => left.pid - right.pid);
+}
+
+function windowsProcessInspectionDirectory(directory) {
+  const absolute = path.resolve(directory);
+  try {
+    return fs.realpathSync.native(absolute);
+  } catch {
+    return absolute;
+  }
 }
 
 function windowsProcessInspectionCommand() {
@@ -603,7 +612,7 @@ function inspectWindowsProcessesWithin(directory) {
       {
         env: {
           ...process.env,
-          CAUL_AUDIT_DIRECTORY: `${path.resolve(directory)}${path.sep}`
+          CAUL_AUDIT_DIRECTORY: `${windowsProcessInspectionDirectory(directory)}${path.sep}`
         },
         windowsHide: true
       }
@@ -892,6 +901,58 @@ async function waitForInstalledCandidate({
   );
 }
 
+async function waitForWindowsUpdatedRuntime({
+  candidateAsar,
+  eventPath,
+  executable,
+  getProcesses,
+  readInstalledState = installedPackageState,
+  timeoutMs = 10 * 60_000,
+  version
+}) {
+  if (typeof getProcesses !== 'function') {
+    throw new Error('Windows updated-runtime wait requires process observations.');
+  }
+
+  const installDirectory = windowsProcessInspectionDirectory(path.dirname(executable));
+  const normalisedInstallDirectory = `${path.win32.normalize(installDirectory).toLowerCase()}\\`;
+  const deadline = Date.now() + timeoutMs;
+  let lastState = null;
+  while (Date.now() < deadline) {
+    const events = readEvents(eventPath);
+    const error = events.find((event) => event.name === 'error');
+    if (error) throw new Error(`Native updater failed: ${error.message || '<missing error>'}`);
+    const launched = events.find((event) => event.name === 'updated-runtime-launched');
+    if (launched) {
+      return { ...launched, launchEvidence: 'updater-event' };
+    }
+
+    lastState = readInstalledState(executable, { candidateAsar, expectedVersion: version });
+    const processInfo = getProcesses().find((candidate) => {
+      const executablePath = candidate.executablePath
+        ? path.win32.normalize(candidate.executablePath).toLowerCase()
+        : '';
+      return executablePath.startsWith(normalisedInstallDirectory)
+        && /caul(?: beta)?\.exe$/i.test(candidate.name || '');
+    });
+    if (lastState.matchesCandidate && processInfo) {
+      return {
+        at: new Date().toISOString(),
+        currentVersion: version,
+        launchEvidence: 'installed-package-and-process',
+        name: 'updated-runtime-launched',
+        pid: processInfo.pid
+      };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  throw new Error(
+    `Timed out waiting for the installed Windows candidate to relaunch; `
+    + `last installed state ${JSON.stringify(lastState)}.`
+  );
+}
+
 function writeEvidence({
   arch,
   candidateDirectory,
@@ -1087,6 +1148,7 @@ async function main(argv = process.argv.slice(2)) {
   let installState;
   let installerExitStateRecorded = false;
   let installerProcessObserved = false;
+  let observedWindowsProcesses = [];
   let installedAppImage;
   let installedExecutable;
   let previousInstalledDigest;
@@ -1196,6 +1258,7 @@ async function main(argv = process.argv.slice(2)) {
         processObserver = createWindowsProcessObserver({
           directory: temporaryRoot,
           onChange: (processes) => {
+            observedWindowsProcesses = processes;
             const installerPresent = processes.some((processInfo) => (
               /setup\.exe$/i.test(processInfo.name || '')
               && processInfo.executablePath?.includes(`${path.sep}pending${path.sep}`)
@@ -1227,11 +1290,20 @@ async function main(argv = process.argv.slice(2)) {
           },
           observations: processObservations
         });
-        outcome = await waitForEvent(
+        outcome = await waitForWindowsUpdatedRuntime({
+          candidateAsar,
           eventPath,
-          new Set(['updated-runtime-launched', 'error']),
-          updaterPostDownloadTimeoutMs(process.platform)
-        );
+          executable: installedExecutable,
+          getProcesses: () => observedWindowsProcesses,
+          timeoutMs: updaterPostDownloadTimeoutMs(process.platform),
+          version: server.version
+        });
+        processObservations.push({
+          at: new Date().toISOString(),
+          evidence: outcome.launchEvidence,
+          name: 'updated-runtime-launch-observed',
+          pid: outcome.pid || null
+        });
       }
     } else {
       outcome = await waitForEvent(
@@ -1346,7 +1418,7 @@ async function main(argv = process.argv.slice(2)) {
         'update-downloaded',
         'install-handoff-started',
         ...(process.platform === 'win32' ? ['install-exit-guard-started'] : []),
-        'updated-runtime-launched'
+        ...(process.platform === 'win32' ? [] : ['updated-runtime-launched'])
       ];
       let previousIndex = -1;
       for (const expectedEvent of expectedEvents) {
@@ -1367,6 +1439,10 @@ async function main(argv = process.argv.slice(2)) {
 
     await stopPid(child?.pid);
     child = null;
+    if (process.platform === 'win32') {
+      const installDirectory = path.dirname(installedExecutable);
+      for (const pid of await windowsProcessIdsWithin(installDirectory)) await stopPid(pid);
+    }
     const smokeOutputPath = path.join(temporaryRoot, 'normal-launch-smoke.log');
     fs.rmSync(smokeOutputPath, { force: true });
     const smokeEnvironment = restrictedEnvironment({
@@ -1538,9 +1614,11 @@ module.exports = {
   updaterEventTimeoutMs,
   updaterPostDownloadTimeoutMs,
   waitForInstalledCandidate,
+  waitForWindowsUpdatedRuntime,
   waitForPidExit,
   waitForPathRemoval,
   windowsAuditProfileDirectories,
+  windowsProcessInspectionDirectory,
   windowsDifferentialRequestPaths,
   stageWindowsDifferentialBase,
   windowsSilentInstallArguments
