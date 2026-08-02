@@ -18,6 +18,7 @@ const {
   artifactName,
   candidatePackageRequestPaths,
   corruptedPayload,
+  installedPackageState,
   prepareSignedTarget,
   requireAuditScenario,
   resolveAuditAssetPath,
@@ -87,6 +88,33 @@ describe('native TUF updater audit helpers', () => {
     expect(downloadWait).toBeGreaterThan(-1);
     expect(observerStart).toBeGreaterThan(downloadWait);
     expect(source).toContain("name: 'update-downloaded-observed'");
+    expect(source).toContain("name: 'installer-process-exited-installed-state'");
+    expect(source).toContain("name: 'audit-failure-installed-state'");
+    expect(source).toContain("'INSTALLED_STATE.json'");
+    expect(source).toContain('windowsLikelyUpdaterProcesses(temporaryRoot)');
+  });
+
+  it('records inspectable state when a Windows installation is missing or incomplete', () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'caul-installed-state-'));
+    const executable = path.join(directory, 'Caul.exe');
+    try {
+      writeFileSync(executable, 'placeholder executable');
+      const state = installedPackageState(executable, { expectedVersion: '0.1.67' });
+      expect(state).toMatchObject({
+        archiveExists: false,
+        executableExists: true,
+        expectedVersion: '0.1.67',
+        installDirectoryExists: true,
+        matchesCandidate: false,
+        version: null
+      });
+      expect(state.error).toMatch(/app\.asar|no such file/i);
+      expect(state.topLevelEntries).toEqual([
+        expect.objectContaining({ name: 'Caul.exe', type: 'file' })
+      ]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it('requires the original runtime PID to exit naturally', async () => {
