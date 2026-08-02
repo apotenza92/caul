@@ -442,6 +442,57 @@ function installedPackageDigest(executable) {
   return digest(path.join(path.dirname(executable), 'resources', 'app.asar'));
 }
 
+function installedPackageState(executable, { candidateAsar, expectedVersion } = {}) {
+  const installDirectory = path.dirname(executable);
+  const archivePath = path.join(installDirectory, 'resources', 'app.asar');
+  const expectedDigest = candidateAsar && fs.existsSync(candidateAsar)
+    ? digest(candidateAsar)
+    : null;
+  const state = {
+    archiveExists: fs.existsSync(archivePath),
+    digest: null,
+    error: null,
+    executableExists: fs.existsSync(executable),
+    expectedDigest,
+    expectedVersion: expectedVersion || null,
+    installDirectory,
+    installDirectoryExists: fs.existsSync(installDirectory),
+    matchesCandidate: false,
+    topLevelEntries: [],
+    version: null
+  };
+
+  if (state.installDirectoryExists) {
+    try {
+      state.topLevelEntries = fs.readdirSync(installDirectory, { withFileTypes: true })
+        .map((entry) => {
+          const entryPath = path.join(installDirectory, entry.name);
+          const stats = fs.statSync(entryPath);
+          return {
+            modifiedAt: stats.mtime.toISOString(),
+            name: entry.name,
+            size: entry.isFile() ? stats.size : null,
+            type: entry.isDirectory() ? 'directory' : entry.isFile() ? 'file' : 'other'
+          };
+        })
+        .sort((left, right) => left.name.localeCompare(right.name));
+    } catch (error) {
+      state.error = error.message || String(error);
+    }
+  }
+
+  try {
+    state.version = installedPackageVersion(executable);
+    state.digest = installedPackageDigest(executable);
+    state.matchesCandidate = state.version === expectedVersion
+      && (!expectedDigest || state.digest === expectedDigest);
+  } catch (error) {
+    state.error ||= error.message || String(error);
+  }
+
+  return state;
+}
+
 function isPidAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
@@ -494,7 +545,7 @@ function runWindowsProcessInspection(directory, command) {
       encoding: 'utf8',
       env: {
         ...process.env,
-        CAUL_AUDIT_DIRECTORY: `${path.resolve(directory)}${path.sep}`
+        CAUL_AUDIT_DIRECTORY: `${windowsProcessInspectionDirectory(directory)}${path.sep}`
       },
       timeout: windowsProcessInspectionTimeoutMs
     }
@@ -517,6 +568,15 @@ function runWindowsProcessInspection(directory, command) {
     })
     .filter((processInfo) => Number.isInteger(processInfo.pid) && processInfo.pid > 0)
     .sort((left, right) => left.pid - right.pid);
+}
+
+function windowsProcessInspectionDirectory(directory) {
+  const absolute = path.resolve(directory);
+  try {
+    return fs.realpathSync.native(absolute);
+  } catch {
+    return absolute;
+  }
 }
 
 function windowsProcessInspectionCommand() {
@@ -552,7 +612,7 @@ function inspectWindowsProcessesWithin(directory) {
       {
         env: {
           ...process.env,
-          CAUL_AUDIT_DIRECTORY: `${path.resolve(directory)}${path.sep}`
+          CAUL_AUDIT_DIRECTORY: `${windowsProcessInspectionDirectory(directory)}${path.sep}`
         },
         windowsHide: true
       }
@@ -614,6 +674,32 @@ function windowsDetailedProcessesRelatedTo(directory) {
   ].join(' '));
 }
 
+function windowsLikelyUpdaterProcesses(directory) {
+  return runWindowsProcessInspection(directory, [
+    '$root = $env:CAUL_AUDIT_DIRECTORY;',
+    '$temp = [System.IO.Path]::GetTempPath();',
+    '$processes = @(Get-Process -ErrorAction SilentlyContinue | ForEach-Object {',
+    '$processPath = $null;',
+    'try { $processPath = $_.Path } catch { };',
+    '$isRelatedName = $_.ProcessName -match "^(Caul|Uninstall Caul|Au_|.*setup.*)$";',
+    '$isRelatedPath = $processPath -and (',
+    '$processPath.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase) -or',
+    '$processPath.StartsWith($temp, [System.StringComparison]::OrdinalIgnoreCase)',
+    ');',
+    'if ($isRelatedName -or $isRelatedPath) {',
+    '[PSCustomObject]@{',
+    'ProcessId = $_.Id;',
+    'ParentProcessId = $null;',
+    'Name = if ($processPath) { [System.IO.Path]::GetFileName($processPath) } else { $_.ProcessName };',
+    'ExecutablePath = $processPath;',
+    'CommandLine = $null',
+    '}',
+    '}',
+    '});',
+    'ConvertTo-Json -Compress -InputObject $processes'
+  ].join(' '));
+}
+
 async function windowsProcessIdsWithin(directory) {
   return (await inspectWindowsProcessesWithin(directory)).map((processInfo) => processInfo.pid);
 }
@@ -621,6 +707,7 @@ async function windowsProcessIdsWithin(directory) {
 function createWindowsProcessObserver({
   directory,
   intervalMs = 1_000,
+  onChange,
   observations
 }) {
   if (!Array.isArray(observations)) {
@@ -646,6 +733,7 @@ function createWindowsProcessObserver({
         name,
         processes
       });
+      onChange?.(processes);
     } catch (error) {
       observations.push({
         at: new Date().toISOString(),
@@ -813,6 +901,58 @@ async function waitForInstalledCandidate({
   );
 }
 
+async function waitForWindowsUpdatedRuntime({
+  candidateAsar,
+  eventPath,
+  executable,
+  getProcesses,
+  readInstalledState = installedPackageState,
+  timeoutMs = 10 * 60_000,
+  version
+}) {
+  if (typeof getProcesses !== 'function') {
+    throw new Error('Windows updated-runtime wait requires process observations.');
+  }
+
+  const installDirectory = windowsProcessInspectionDirectory(path.dirname(executable));
+  const normalisedInstallDirectory = `${path.win32.normalize(installDirectory).toLowerCase()}\\`;
+  const deadline = Date.now() + timeoutMs;
+  let lastState = null;
+  while (Date.now() < deadline) {
+    const events = readEvents(eventPath);
+    const error = events.find((event) => event.name === 'error');
+    if (error) throw new Error(`Native updater failed: ${error.message || '<missing error>'}`);
+    const launched = events.find((event) => event.name === 'updated-runtime-launched');
+    if (launched) {
+      return { ...launched, launchEvidence: 'updater-event' };
+    }
+
+    lastState = readInstalledState(executable, { candidateAsar, expectedVersion: version });
+    const processInfo = getProcesses().find((candidate) => {
+      const executablePath = candidate.executablePath
+        ? path.win32.normalize(candidate.executablePath).toLowerCase()
+        : '';
+      return executablePath.startsWith(normalisedInstallDirectory)
+        && /caul(?: beta)?\.exe$/i.test(candidate.name || '');
+    });
+    if (lastState.matchesCandidate && processInfo) {
+      return {
+        at: new Date().toISOString(),
+        currentVersion: version,
+        launchEvidence: 'installed-package-and-process',
+        name: 'updated-runtime-launched',
+        pid: processInfo.pid
+      };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  throw new Error(
+    `Timed out waiting for the installed Windows candidate to relaunch; `
+    + `last installed state ${JSON.stringify(lastState)}.`
+  );
+}
+
 function writeEvidence({
   arch,
   candidateDirectory,
@@ -827,6 +967,7 @@ function writeEvidence({
   evidenceDirectory,
   failure,
   installed,
+  installState,
   platform,
   previousArtifact,
   processObservations,
@@ -871,6 +1012,12 @@ function writeEvidence({
       `${JSON.stringify(server.transfers, null, 2)}\n`
     );
     fs.writeFileSync(path.join(staging, 'signed-update-target.yml'), server.targetBytes);
+  }
+  if (installState) {
+    fs.writeFileSync(
+      path.join(staging, 'INSTALLED_STATE.json'),
+      `${JSON.stringify(installState, null, 2)}\n`
+    );
   }
   fs.writeFileSync(path.join(staging, 'MIGRATION.txt'), [
     `Verified installed version: ${installed?.version || '<not verified>'}`,
@@ -998,6 +1145,10 @@ async function main(argv = process.argv.slice(2)) {
   let originalPid;
   let failure;
   let installed;
+  let installState;
+  let installerExitStateRecorded = false;
+  let installerProcessObserved = false;
+  let observedWindowsProcesses = [];
   let installedAppImage;
   let installedExecutable;
   let previousInstalledDigest;
@@ -1106,13 +1257,53 @@ async function main(argv = process.argv.slice(2)) {
         });
         processObserver = createWindowsProcessObserver({
           directory: temporaryRoot,
+          onChange: (processes) => {
+            observedWindowsProcesses = processes;
+            const installerPresent = processes.some((processInfo) => (
+              /setup\.exe$/i.test(processInfo.name || '')
+              && processInfo.executablePath?.includes(`${path.sep}pending${path.sep}`)
+            ));
+            if (installerPresent) {
+              installerProcessObserved = true;
+              return;
+            }
+            if (!installerProcessObserved || installerExitStateRecorded) {
+              return;
+            }
+            installerExitStateRecorded = true;
+            installState = installedPackageState(installedExecutable, {
+              candidateAsar,
+              expectedVersion: server.version
+            });
+            let likelyUpdaterProcesses = [];
+            try {
+              likelyUpdaterProcesses = windowsLikelyUpdaterProcesses(temporaryRoot);
+            } catch (error) {
+              likelyUpdaterProcesses = [{ error: error.message || String(error) }];
+            }
+            processObservations.push({
+              at: new Date().toISOString(),
+              installState,
+              likelyUpdaterProcesses,
+              name: 'installer-process-exited-installed-state'
+            });
+          },
           observations: processObservations
         });
-        outcome = await waitForEvent(
+        outcome = await waitForWindowsUpdatedRuntime({
+          candidateAsar,
           eventPath,
-          new Set(['updated-runtime-launched', 'error']),
-          updaterPostDownloadTimeoutMs(process.platform)
-        );
+          executable: installedExecutable,
+          getProcesses: () => observedWindowsProcesses,
+          timeoutMs: updaterPostDownloadTimeoutMs(process.platform),
+          version: server.version
+        });
+        processObservations.push({
+          at: new Date().toISOString(),
+          evidence: outcome.launchEvidence,
+          name: 'updated-runtime-launch-observed',
+          pid: outcome.pid || null
+        });
       }
     } else {
       outcome = await waitForEvent(
@@ -1227,7 +1418,7 @@ async function main(argv = process.argv.slice(2)) {
         'update-downloaded',
         'install-handoff-started',
         ...(process.platform === 'win32' ? ['install-exit-guard-started'] : []),
-        'updated-runtime-launched'
+        ...(process.platform === 'win32' ? [] : ['updated-runtime-launched'])
       ];
       let previousIndex = -1;
       for (const expectedEvent of expectedEvents) {
@@ -1248,6 +1439,10 @@ async function main(argv = process.argv.slice(2)) {
 
     await stopPid(child?.pid);
     child = null;
+    if (process.platform === 'win32') {
+      const installDirectory = path.dirname(installedExecutable);
+      for (const pid of await windowsProcessIdsWithin(installDirectory)) await stopPid(pid);
+    }
     const smokeOutputPath = path.join(temporaryRoot, 'normal-launch-smoke.log');
     fs.rmSync(smokeOutputPath, { force: true });
     const smokeEnvironment = restrictedEnvironment({
@@ -1286,6 +1481,26 @@ async function main(argv = process.argv.slice(2)) {
     }
   } catch (error) {
     failure = error;
+    if (process.platform === 'win32' && installedExecutable) {
+      installState = installedPackageState(installedExecutable, {
+        candidateAsar,
+        expectedVersion: server?.version
+      });
+      let likelyUpdaterProcesses = [];
+      try {
+        likelyUpdaterProcesses = windowsLikelyUpdaterProcesses(temporaryRoot);
+      } catch (inspectionError) {
+        likelyUpdaterProcesses = [{
+          error: inspectionError.message || String(inspectionError)
+        }];
+      }
+      processObservations.push({
+        at: new Date().toISOString(),
+        installState,
+        likelyUpdaterProcesses,
+        name: 'audit-failure-installed-state'
+      });
+    }
     processObservations.push({
       at: new Date().toISOString(),
       message: error.message || String(error),
@@ -1343,6 +1558,7 @@ async function main(argv = process.argv.slice(2)) {
       evidenceDirectory,
       failure: failure || cleanupFailure,
       installed,
+      installState,
       platform: process.platform,
       previousArtifact,
       processObservations,
@@ -1388,6 +1604,7 @@ module.exports = {
   candidatePackageRequestPaths,
   corruptedPayload,
   installedPackageDigest,
+  installedPackageState,
   installedPackageVersion,
   prepareSignedTarget,
   requireAuditScenario,
@@ -1397,9 +1614,11 @@ module.exports = {
   updaterEventTimeoutMs,
   updaterPostDownloadTimeoutMs,
   waitForInstalledCandidate,
+  waitForWindowsUpdatedRuntime,
   waitForPidExit,
   waitForPathRemoval,
   windowsAuditProfileDirectories,
+  windowsProcessInspectionDirectory,
   windowsDifferentialRequestPaths,
   stageWindowsDifferentialBase,
   windowsSilentInstallArguments

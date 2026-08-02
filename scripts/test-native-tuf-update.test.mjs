@@ -3,6 +3,7 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync
 } from 'node:fs';
@@ -18,6 +19,7 @@ const {
   artifactName,
   candidatePackageRequestPaths,
   corruptedPayload,
+  installedPackageState,
   prepareSignedTarget,
   requireAuditScenario,
   resolveAuditAssetPath,
@@ -28,8 +30,10 @@ const {
   updaterPostDownloadTimeoutMs,
   waitForPathRemoval,
   waitForPidExit,
+  waitForWindowsUpdatedRuntime,
   windowsAuditProfileDirectories,
   windowsDifferentialRequestPaths,
+  windowsProcessInspectionDirectory,
   windowsSilentInstallArguments
 } = require('./test-native-tuf-update.cjs');
 
@@ -87,6 +91,81 @@ describe('native TUF updater audit helpers', () => {
     expect(downloadWait).toBeGreaterThan(-1);
     expect(observerStart).toBeGreaterThan(downloadWait);
     expect(source).toContain("name: 'update-downloaded-observed'");
+    expect(source).toContain("name: 'installer-process-exited-installed-state'");
+    expect(source).toContain("name: 'audit-failure-installed-state'");
+    expect(source).toContain("'INSTALLED_STATE.json'");
+    expect(source).toContain('windowsLikelyUpdaterProcesses(temporaryRoot)');
+    expect(source).toContain("name: 'updated-runtime-launch-observed'");
+    expect(source).toContain('windowsProcessInspectionDirectory(directory)');
+  });
+
+  it('accepts a verified installed candidate only when its relaunched process is observed', async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'caul-updated-runtime-'));
+    const executable = path.join(directory, 'Caul.exe');
+    const eventPath = path.join(directory, 'events', 'updater');
+    try {
+      const outcome = await waitForWindowsUpdatedRuntime({
+        eventPath,
+        executable,
+        getProcesses: () => [{
+          executablePath: path.join(windowsProcessInspectionDirectory(directory), 'Caul.exe'),
+          name: 'Caul.exe',
+          pid: 4242
+        }],
+        readInstalledState: () => ({ matchesCandidate: true, version: '0.1.67' }),
+        timeoutMs: 50,
+        version: '0.1.67'
+      });
+      expect(outcome).toMatchObject({
+        currentVersion: '0.1.67',
+        launchEvidence: 'installed-package-and-process',
+        name: 'updated-runtime-launched',
+        pid: 4242
+      });
+
+      await expect(waitForWindowsUpdatedRuntime({
+        eventPath,
+        executable,
+        getProcesses: () => [],
+        readInstalledState: () => ({ matchesCandidate: true, version: '0.1.67' }),
+        timeoutMs: 10,
+        version: '0.1.67'
+      })).rejects.toThrow(/candidate to relaunch/);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('resolves process-inspection roots to their canonical filesystem path', () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'caul-process-root-'));
+    try {
+      expect(windowsProcessInspectionDirectory(directory)).toBe(realpathSync.native(directory));
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('records inspectable state when a Windows installation is missing or incomplete', () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'caul-installed-state-'));
+    const executable = path.join(directory, 'Caul.exe');
+    try {
+      writeFileSync(executable, 'placeholder executable');
+      const state = installedPackageState(executable, { expectedVersion: '0.1.67' });
+      expect(state).toMatchObject({
+        archiveExists: false,
+        executableExists: true,
+        expectedVersion: '0.1.67',
+        installDirectoryExists: true,
+        matchesCandidate: false,
+        version: null
+      });
+      expect(state.error).toMatch(/app\.asar|no such file/i);
+      expect(state.topLevelEntries).toEqual([
+        expect.objectContaining({ name: 'Caul.exe', type: 'file' })
+      ]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it('requires the original runtime PID to exit naturally', async () => {
