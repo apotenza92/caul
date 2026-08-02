@@ -1658,20 +1658,36 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Caul Settings' }));
 
     const settingsClose = await screen.findByRole('button', { name: 'Close settings' });
-    expect(settingsClose).toHaveClass('right-3');
+    expect(settingsClose).toHaveClass('right-3', 'top-2');
+    expect(settingsClose).not.toHaveClass('-translate-y-1/2');
     expect(settingsClose).not.toHaveClass('left-3');
     expect(settingsClose.querySelector('svg')).toBeInTheDocument();
 
     await user.click(settingsClose);
+    expect(screen.queryByRole('dialog', { name: 'Settings' })).not.toBeInTheDocument();
     await user.click(await screen.findByRole('button', { name: 'Manage prompt templates' }));
 
     const promptTemplatesClose = await screen.findByRole('button', { name: 'Close prompt templates' });
     expect(screen.getByRole('dialog', { name: 'Prompt templates' })).toHaveClass('caul-settings-dialog', 'caul-large-modal-shell', 'h-[85vh]', 'w-[85vw]');
     expect(screen.getByRole('heading', { name: 'Prompt templates' })).toHaveClass('text-sm', 'text-center');
     expect(screen.getByText('Save reusable instructions that are prepended to transcript requests.')).toHaveClass('sr-only');
-    expect(promptTemplatesClose).toHaveClass('right-3');
+    expect(promptTemplatesClose).toHaveClass('right-3', 'top-2');
+    expect(promptTemplatesClose).not.toHaveClass('-translate-y-1/2');
     expect(promptTemplatesClose).not.toHaveClass('left-3');
     expect(promptTemplatesClose.querySelector('svg')).toBeInTheDocument();
+
+    await user.click(promptTemplatesClose);
+    expect(screen.queryByRole('dialog', { name: 'Prompt templates' })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: 'Instructions' }));
+
+    const instructionsClose = await screen.findByRole('button', { name: 'Close general instructions' });
+    expect(instructionsClose).toHaveClass('right-3', 'top-2');
+    expect(instructionsClose).not.toHaveClass('-translate-y-1/2');
+    expect(instructionsClose).not.toHaveClass('left-3');
+    expect(instructionsClose.querySelector('svg')).toBeInTheDocument();
+
+    await user.click(instructionsClose);
+    expect(screen.queryByRole('dialog', { name: 'Instructions' })).not.toBeInTheDocument();
   });
 
   it('uses macOS modal close dots on the left', async () => {
@@ -1688,7 +1704,8 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Caul Settings' }));
 
     const settingsClose = await screen.findByRole('button', { name: 'Close settings' });
-    expect(settingsClose).toHaveClass('top-6', '-translate-y-1/2', 'left-3', 'size-[14px]', 'rounded-full', 'border-[0.5px]', 'border-[#FB1626]', 'bg-[#FF5C60]', 'shadow-none', 'hover:bg-[#FF5C60]', 'active:bg-[#D94D4F]', 'text-[#802F31]');
+    expect(settingsClose).toHaveClass('top-[17px]', 'left-3', 'size-[14px]', 'rounded-full', 'border-[0.5px]', 'border-[#FB1626]', 'bg-[#FF5C60]', 'shadow-none', 'hover:bg-[#FF5C60]', 'active:bg-[#D94D4F]', 'text-[#802F31]');
+    expect(settingsClose).not.toHaveClass('-translate-y-1/2');
     expect(settingsClose).not.toHaveClass('hover:bg-muted');
     expect(settingsClose).not.toHaveClass('hover:bg-red-400');
     expect(settingsClose.className).not.toContain('shadow-[inset');
@@ -1701,7 +1718,8 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: 'Manage prompt templates' }));
 
     const promptTemplatesClose = await screen.findByRole('button', { name: 'Close prompt templates' });
-    expect(promptTemplatesClose).toHaveClass('top-6', '-translate-y-1/2', 'left-3', 'size-[14px]', 'rounded-full', 'border-[0.5px]', 'border-[#FB1626]', 'bg-[#FF5C60]', 'shadow-none', 'hover:bg-[#FF5C60]', 'active:bg-[#D94D4F]', 'text-[#802F31]');
+    expect(promptTemplatesClose).toHaveClass('top-[17px]', 'left-3', 'size-[14px]', 'rounded-full', 'border-[0.5px]', 'border-[#FB1626]', 'bg-[#FF5C60]', 'shadow-none', 'hover:bg-[#FF5C60]', 'active:bg-[#D94D4F]', 'text-[#802F31]');
+    expect(promptTemplatesClose).not.toHaveClass('-translate-y-1/2');
     expect(promptTemplatesClose).not.toHaveClass('hover:bg-muted');
     expect(promptTemplatesClose).not.toHaveClass('hover:bg-red-400');
     expect(promptTemplatesClose.className).not.toContain('shadow-[inset');
