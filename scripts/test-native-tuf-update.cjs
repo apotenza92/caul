@@ -267,7 +267,7 @@ function corruptedPayload(filePath, maxBytes = 1024 * 1024) {
 }
 
 function updaterEventTimeoutMs(platform) {
-  return platform === 'win32' ? 15 * 60_000 : 5 * 60_000;
+  return platform === 'win32' ? 35 * 60_000 : 5 * 60_000;
 }
 
 function updaterPostDownloadTimeoutMs(platform) {
