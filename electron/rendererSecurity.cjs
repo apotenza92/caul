@@ -1,4 +1,6 @@
-const { pathToFileURL } = require('node:url');
+const { existsSync, realpathSync } = require('node:fs');
+const path = require('node:path');
+const { fileURLToPath, pathToFileURL } = require('node:url');
 
 function parseUrl(value) {
   try {
@@ -8,9 +10,47 @@ function parseUrl(value) {
   }
 }
 
-function createTrustedRendererUrlChecker({ devServerUrl, isDev, rendererFilePath }) {
+function canonicaliseFilePath(filePath, platform = process.platform) {
+  const pathApi = platform === 'win32' ? path.win32 : path.posix;
+  let cursor = pathApi.resolve(filePath);
+  const missingSegments = [];
+
+  if (platform === 'darwin') {
+    for (const alias of ['/etc', '/tmp', '/var']) {
+      if (cursor === alias || cursor.startsWith(`${alias}${pathApi.sep}`)) {
+        cursor = `/private${cursor}`;
+        break;
+      }
+    }
+  }
+
+  const asarBoundary = cursor.toLowerCase().lastIndexOf(`.asar${pathApi.sep}`);
+  if (asarBoundary >= 0) {
+    missingSegments.push(...cursor.slice(asarBoundary + 6).split(pathApi.sep).filter(Boolean));
+    cursor = cursor.slice(0, asarBoundary + 5);
+  }
+
+  while (!existsSync(cursor)) {
+    const parent = pathApi.dirname(cursor);
+    if (parent === cursor) break;
+    missingSegments.unshift(pathApi.basename(cursor));
+    cursor = parent;
+  }
+
+  try {
+    cursor = realpathSync.native(cursor);
+  } catch {
+    // Preserve the normalised absolute path when no ancestor can be resolved.
+  }
+
+  const canonical = pathApi.resolve(cursor, ...missingSegments);
+  return platform === 'win32' ? canonical.toLowerCase() : canonical;
+}
+
+function createTrustedRendererUrlChecker({ devServerUrl, isDev, platform = process.platform, rendererFilePath }) {
   const devUrl = parseUrl(devServerUrl);
   const productionUrl = rendererFilePath ? parseUrl(pathToFileURL(rendererFilePath).toString()) : null;
+  const productionPath = rendererFilePath ? canonicaliseFilePath(rendererFilePath, platform) : null;
 
   if (isDev && (!devUrl || !['http:', 'https:'].includes(devUrl.protocol))) {
     throw new Error('The development renderer URL must use HTTP or HTTPS.');
@@ -20,7 +60,8 @@ function createTrustedRendererUrlChecker({ devServerUrl, isDev, rendererFilePath
     throw new Error('The packaged renderer file path is required.');
   }
 
-  return (candidate) => {
+  const candidateCache = new Map();
+  const checkCandidate = (candidate) => {
     const url = parseUrl(candidate);
     if (!url) return false;
 
@@ -28,9 +69,21 @@ function createTrustedRendererUrlChecker({ devServerUrl, isDev, rendererFilePath
       return url.origin === devUrl.origin;
     }
 
-    return url.protocol === 'file:'
-      && url.origin === productionUrl.origin
-      && url.pathname === productionUrl.pathname;
+    if (url.protocol !== 'file:' || url.origin !== productionUrl.origin) return false;
+
+    try {
+      return canonicaliseFilePath(fileURLToPath(url), platform) === productionPath;
+    } catch {
+      return false;
+    }
+  };
+
+  return (candidate) => {
+    if (candidateCache.has(candidate)) return candidateCache.get(candidate);
+    const trusted = checkCandidate(candidate);
+    if (candidateCache.size >= 16) candidateCache.clear();
+    candidateCache.set(candidate, trusted);
+    return trusted;
   };
 }
 
@@ -96,6 +149,7 @@ function isTrustedIpcEvent(event, { isKnownWebContents, isTrustedRendererUrl }) 
 }
 
 module.exports = {
+  canonicaliseFilePath,
   createTrustedIpcRegistrar,
   createTrustedRendererUrlChecker,
   installRendererNavigationPolicy,

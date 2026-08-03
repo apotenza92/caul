@@ -2,7 +2,12 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.68]
+## [0.1.69]
+
+- Preserve the strict packaged-renderer IPC boundary across macOS `/var` aliases and Windows 8.3 installation paths, while continuing to reject every other renderer file.
+- Carries forward the complete shadcn/ui Nova migration, desktop security hardening, interaction repairs and release guardrails from the unpublished 0.1.68 candidate.
+
+## [0.1.68] (unpublished release candidate)
 
 - Move the renderer to the official shadcn/ui Base UI Nova preset with canonical generated components, reviewed domain adapters and deterministic drift enforcement.
 - Block untrusted renderer navigation, unexpected windows and webviews; open only credential-free HTTPS links externally; validate every IPC sender by trusted URL, application window and allowed surface capability.
