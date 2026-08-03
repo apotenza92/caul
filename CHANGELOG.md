@@ -2,7 +2,12 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.70]
+## [0.1.71]
+
+- Preserve compatibility with the public v0.1.43 updater surface while selecting the strict main application surface for current-package and post-update verification.
+- Carries forward the updater surface selection repair and all changes from the unpublished 0.1.68 through 0.1.70 candidates.
+
+## [0.1.70] (unpublished release candidate)
 
 - Make native updater tests launch and select the main application surface explicitly, instead of accidentally invoking application-only IPC from the onboarding or handle window.
 - Carries forward the packaged-renderer path canonicalisation and all repairs from the unpublished 0.1.68 and 0.1.69 candidates.
