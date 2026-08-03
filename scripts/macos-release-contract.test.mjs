@@ -771,6 +771,7 @@ describe('macOS release contract', () => {
     expect(updaterHarness).toContain('upgrade-preservation-marker.json');
     expect(updaterHarness).toContain('did not preserve existing user data');
     expect(updaterHarness).toContain("scenario === 'valid' && priorVersion === expectedVersion");
+    expect(updaterHarness).toContain('requiresMainUpdaterSurface({ priorVersion, scenario })');
     expect(updaterHarness).toContain(
       'Wrong-signature update closed its renderer without exiting the application'
     );
@@ -786,6 +787,10 @@ describe('macOS release contract', () => {
     expect(source).toContain("matrix.source == 'homebrew'");
     expect(source).toContain("PRIOR_ARGUMENT=(--prior-app \"$PRIOR_APP\")");
     expect(source).toContain('brew install --cask "$cask"');
+    expect(source).toContain('id: homebrew-prior');
+    expect(source).toContain('installed_version="$(/usr/libexec/PlistBuddy');
+    expect(source).toContain('test "$installed_version" != "$CANDIDATE_VERSION"');
+    expect(source).toContain('PRIOR_TAG="v${{ steps.homebrew-prior.outputs.version }}"');
     const releaseGuide = readFileSync(path.join(repositoryRoot, 'docs', 'release-validation.md'), 'utf8');
     expect(releaseGuide).toContain('stable-updater-verification');
     expect(releaseGuide).toContain('beta-updater-verification');

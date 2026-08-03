@@ -2,7 +2,13 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.73]
+## [0.1.74]
+
+- Select the macOS updater test surface from the installed version, retaining first-window compatibility only for the legacy 0.1.43 package while requiring the main surface for current packages and every adversarial case.
+- Verify the Homebrew-origin in-app update from the version actually published by the tap, while keeping the direct archive route pinned to the latest eligible GitHub release.
+- Carries forward authenticated Homebrew audits and the complete release hardening from the unpublished 0.1.73 candidate.
+
+## [0.1.73] (unpublished release candidate)
 
 - Authenticate Homebrew's online cask audit with the release workflow's read-only GitHub token, preventing shared hosted-runner API limits from blocking stable or beta cask publication.
 - Carries forward the bounded Linux release verification and complete desktop-playbook repair set from 0.1.72.

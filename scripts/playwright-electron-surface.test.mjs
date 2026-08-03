@@ -1,11 +1,19 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   isMainElectronSurfaceUrl,
+  requiresMainUpdaterSurface,
   waitForMainElectronSurface,
   waitForUpdaterElectronSurface
 } from './playwright-electron-surface.mjs';
 
 describe('Playwright Electron surface selection', () => {
+  it('selects the updater surface from the installed version and scenario', () => {
+    expect(requiresMainUpdaterSurface({ priorVersion: '0.1.43', scenario: 'valid' })).toBe(false);
+    expect(requiresMainUpdaterSurface({ priorVersion: '0.1.72', scenario: 'valid' })).toBe(true);
+    expect(requiresMainUpdaterSurface({ priorVersion: '0.1.74', scenario: 'corrupt' })).toBe(true);
+    expect(requiresMainUpdaterSurface({ priorVersion: '0.1.43', scenario: 'signature' })).toBe(true);
+  });
+
   it('recognises only the packaged main surface', () => {
     expect(isMainElectronSurfaceUrl('file:///Applications/Caul.app/Contents/Resources/app.asar/dist/index.html')).toBe(true);
     expect(isMainElectronSurfaceUrl('file:///Applications/Caul.app/Contents/Resources/app.asar/dist/index.html?caul-surface=onboarding')).toBe(false);
