@@ -7,6 +7,12 @@ export function isMainElectronSurfaceUrl(candidate) {
   }
 }
 
+const legacyFirstWindowUpdaterVersions = new Set(['0.1.43']);
+
+export function requiresMainUpdaterSurface({ priorVersion, scenario }) {
+  return scenario !== 'valid' || !legacyFirstWindowUpdaterVersions.has(priorVersion);
+}
+
 export async function waitForMainElectronSurface(application, timeoutMs = 60_000) {
   const deadline = Date.now() + timeoutMs;
 

@@ -535,11 +535,12 @@ jobs:
           fi
 
       - name: Install previous public package with Homebrew
+        id: homebrew-prior
         if: steps.previous.outputs.available == 'true' && matrix.source == 'homebrew'
         env:
+          CANDIDATE_VERSION: ${{ needs.prepare.outputs.version }}
           HOMEBREW_NO_AUTO_UPDATE: 1
           RELEASE_VARIANT: ${{ matrix.variant }}
-          PREVIOUS_TAG: ${{ steps.previous.outputs.tag }}
         run: |
           set -euo pipefail
           brew tap apotenza92/tap
@@ -548,8 +549,10 @@ jobs:
           [[ "$RELEASE_VARIANT" == beta ]] && cask='apotenza92/tap/caul@beta' && app='/Applications/Caul Beta.app'
           brew install --cask "$cask"
           test -d "$app"
-          expected_version="${PREVIOUS_TAG#v}"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$expected_version"
+          installed_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")"
+          test -n "$installed_version"
+          test "$installed_version" != "$CANDIDATE_VERSION"
+          printf 'version=%s\n' "$installed_version" >> "$GITHUB_OUTPUT"
 
       - name: Run updater integration scenario
         if: steps.previous.outputs.available == 'true'
@@ -581,6 +584,8 @@ jobs:
             [[ "$RELEASE_VARIANT" == beta ]] && PRIOR_APP='/Applications/Caul Beta.app'
             PRIOR_ARGUMENT=(--prior-app "$PRIOR_APP")
           fi
+          PRIOR_TAG="${{ steps.previous.outputs.tag }}"
+          [[ "${{ matrix.source }}" == homebrew ]] && PRIOR_TAG="v${{ steps.homebrew-prior.outputs.version }}"
           TEST_CANDIDATE="$CANDIDATE"
           if [[ "$RELEASE_SCENARIO" == signature ]]; then
             mkdir adversarial
@@ -603,7 +608,7 @@ jobs:
             --expected-version "$RELEASE_VERSION"
           mkdir updater-evidence
           printf '{"result":"passed","priorTag":"%s","candidateTag":"%s","channel":"%s","scenario":"%s","source":"%s"}\n' \
-            "${{ steps.previous.outputs.tag }}" "$RELEASE_TAG" "$RELEASE_VARIANT" "$RELEASE_SCENARIO" "${{ matrix.source }}" \
+            "$PRIOR_TAG" "$RELEASE_TAG" "$RELEASE_VARIANT" "$RELEASE_SCENARIO" "${{ matrix.source }}" \
             > "updater-evidence/$RELEASE_SCENARIO-$RELEASE_VARIANT-${{ matrix.source }}.json"
 
       - name: Remove Homebrew test installation
