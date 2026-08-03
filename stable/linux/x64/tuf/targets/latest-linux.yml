@@ -1,0 +1,12 @@
+version: 0.1.72
+files:
+  - url: https://github.com/apotenza92/caul/releases/download/v0.1.72/caul-x64.AppImage
+    sha512: 6jpnwv9YqGX9tHou7L6/HzVhtnCCT8bC4t29tvfCgG27XA5c5qATE3gDJLr5e73rhlprr5F06X1eTdnSDc1O7A==
+    size: 134323983
+    blockMapSize: 140563
+  - url: https://github.com/apotenza92/caul/releases/download/v0.1.72/caul-x64.rpm
+    sha512: oO4cy/Re18Lc/J8JGAiCpMJJs7uXWNniQ3YVbZ1PZ7UYWkzNzfQi1B23dFK+o2SQc9hvDpQZYHgBcfRUYBwv6w==
+    size: 98946885
+path: https://github.com/apotenza92/caul/releases/download/v0.1.72/caul-x64.AppImage
+sha512: 6jpnwv9YqGX9tHou7L6/HzVhtnCCT8bC4t29tvfCgG27XA5c5qATE3gDJLr5e73rhlprr5F06X1eTdnSDc1O7A==
+releaseDate: '2026-08-03T18:59:05.593Z'

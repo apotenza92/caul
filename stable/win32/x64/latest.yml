@@ -1,0 +1,8 @@
+version: 0.1.72
+files:
+  - url: https://github.com/apotenza92/caul/releases/download/v0.1.72/Caul-windows-x64-setup.exe
+    sha512: jufjq5AlDMO1LYug8DmarrMdCr3UPhyUcOm5nUOqty1vgwHfVEzvLRyeS4day9Qjer0C//KgjMzL4NqwCyJbqw==
+    size: 113678562
+path: https://github.com/apotenza92/caul/releases/download/v0.1.72/Caul-windows-x64-setup.exe
+sha512: jufjq5AlDMO1LYug8DmarrMdCr3UPhyUcOm5nUOqty1vgwHfVEzvLRyeS4day9Qjer0C//KgjMzL4NqwCyJbqw==
+releaseDate: '2026-08-03T18:59:22.785Z'
