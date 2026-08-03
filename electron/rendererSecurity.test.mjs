@@ -1,10 +1,13 @@
 import { createRequire } from 'node:module';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 
 const require = createRequire(import.meta.url);
 const {
+  canonicaliseFilePath,
   createTrustedIpcRegistrar,
   createTrustedRendererUrlChecker,
   installRendererNavigationPolicy,
@@ -46,6 +49,46 @@ describe('renderer navigation security', () => {
     expect(isTrusted('file:///Applications/Caul.app/Contents/Resources/app.asar/dist/index.html?caul-surface=onboarding')).toBe(true);
     expect(isTrusted('file:///Applications/Caul.app/Contents/Resources/app.asar/dist/other.html')).toBe(false);
     expect(isTrusted('https://attacker.example/')).toBe(false);
+  });
+
+  it('treats the macOS private temporary-directory alias as the same packaged file', () => {
+    const isTrusted = createTrustedRendererUrlChecker({
+      isDev: false,
+      platform: 'darwin',
+      rendererFilePath: '/var/folders/example/Caul.app/Contents/Resources/app.asar/dist/index.html'
+    });
+
+    expect(isTrusted('file:///private/var/folders/example/Caul.app/Contents/Resources/app.asar/dist/index.html')).toBe(true);
+    expect(isTrusted('file:///private/var/folders/example/Caul.app/Contents/Resources/app.asar/dist/other.html')).toBe(false);
+  });
+
+  it('normalises Windows file-path casing without trusting a different file', () => {
+    expect(canonicaliseFilePath('C:\\Caul\\DIST\\index.html', 'win32')).toBe(
+      canonicaliseFilePath('c:\\caul\\dist\\INDEX.HTML', 'win32')
+    );
+    expect(canonicaliseFilePath('C:\\Caul\\dist\\other.html', 'win32')).not.toBe(
+      canonicaliseFilePath('C:\\Caul\\dist\\index.html', 'win32')
+    );
+  });
+
+  it('resolves filesystem aliases while retaining the exact renderer-file boundary', () => {
+    const root = mkdtempSync(join(tmpdir(), 'caul-renderer-trust-'));
+    const realDirectory = join(root, 'real');
+    const aliasDirectory = join(root, 'alias');
+    mkdirSync(realDirectory);
+    symlinkSync(realDirectory, aliasDirectory, 'dir');
+
+    try {
+      const isTrusted = createTrustedRendererUrlChecker({
+        isDev: false,
+        rendererFilePath: join(aliasDirectory, 'app.asar', 'dist', 'index.html')
+      });
+
+      expect(isTrusted(pathToFileURL(join(realDirectory, 'app.asar', 'dist', 'index.html')).toString())).toBe(true);
+      expect(isTrusted(pathToFileURL(join(realDirectory, 'app.asar', 'dist', 'other.html')).toString())).toBe(false);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
   });
 
   it('trusts the configured development origin without trusting lookalike hosts', () => {
