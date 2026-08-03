@@ -1,9 +1,9 @@
-version: 0.1.74
+version: 0.1.75
 files:
-  - url: https://github.com/apotenza92/caul/releases/download/v0.1.74/caul-arm64.AppImage
-    sha512: Lg6a0udo62syF89myD/ngTSfi5BDsRSYpvfm9oEDZ+FXqv7C6Lo04Mr1SIj3RxpUkUZKNSHK7ovlut75BfXrRg==
-    size: 133235821
-    blockMapSize: 137825
-path: https://github.com/apotenza92/caul/releases/download/v0.1.74/caul-arm64.AppImage
-sha512: Lg6a0udo62syF89myD/ngTSfi5BDsRSYpvfm9oEDZ+FXqv7C6Lo04Mr1SIj3RxpUkUZKNSHK7ovlut75BfXrRg==
-releaseDate: '2026-08-03T20:45:24.837Z'
+  - url: https://github.com/apotenza92/caul/releases/download/v0.1.75/caul-arm64.AppImage
+    sha512: McqYfVE32yIeN9YdaugTGm5Vf2YyQ5f0T6pi1+UNCFP1oyeDCE12bKL+JkVSb4G1ciTl9ww/WjG8G9CwNtVLDw==
+    size: 133293206
+    blockMapSize: 137866
+path: https://github.com/apotenza92/caul/releases/download/v0.1.75/caul-arm64.AppImage
+sha512: McqYfVE32yIeN9YdaugTGm5Vf2YyQ5f0T6pi1+UNCFP1oyeDCE12bKL+JkVSb4G1ciTl9ww/WjG8G9CwNtVLDw==
+releaseDate: '2026-08-03T22:18:02.457Z'

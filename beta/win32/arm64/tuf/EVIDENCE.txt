@@ -2,13 +2,13 @@ Caul production TUF repository
 Root version: 1
 Root SHA-256: ce4ba67d4288e1713e27984b8c4ba65c2b3d8f8635fcd3cac600f1d2d19e930b
 Target: beta.yml
-Target SHA-256: 42378a7bc868384ad860c3639c7b8130b8ef422c60e4b96076589fd27f83e90b
-targets version: 2
-targets expires: 2027-08-03T20:58:30.000Z
+Target SHA-256: efc388176dadc70361e976ea7e0d3f2f33a37311dd0d5ea253e9e917fa92237a
+targets version: 3
+targets expires: 2027-08-03T22:34:12.000Z
 targets key ID: 60280d28e77329f39e26e1db204f4c334a2ecb5ccd6e6e90bea9ea5566d44447
-snapshot version: 2
-snapshot expires: 2027-01-30T20:58:30.000Z
+snapshot version: 3
+snapshot expires: 2027-01-30T22:34:12.000Z
 snapshot key ID: 77d6f24f06eba5bc5ff71bdba72d337dda9817741a3a9e506e587348a99f1fbd
-timestamp version: 2
-timestamp expires: 2026-09-17T20:58:30.000Z
+timestamp version: 3
+timestamp expires: 2026-09-17T22:34:12.000Z
 timestamp key ID: 2566dd3ce195ff78162b28e9a5ac7a423d1cef7d50e34b4d106a5f95ed8343cb

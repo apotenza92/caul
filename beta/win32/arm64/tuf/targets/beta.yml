@@ -1,8 +1,8 @@
-version: 0.1.74
+version: 0.1.75
 files:
-  - url: https://github.com/apotenza92/caul/releases/download/v0.1.74/Caul-Beta-windows-arm64-setup.exe
-    sha512: UTnVzJy5ZTXTiRVqBxqjuEUj6DyOzbg9KgUEItQ5VkITioitpaCIQGV64gCfWpMpW72hPT2RbycDQnwBa5Xofg==
-    size: 112901509
-path: https://github.com/apotenza92/caul/releases/download/v0.1.74/Caul-Beta-windows-arm64-setup.exe
-sha512: UTnVzJy5ZTXTiRVqBxqjuEUj6DyOzbg9KgUEItQ5VkITioitpaCIQGV64gCfWpMpW72hPT2RbycDQnwBa5Xofg==
-releaseDate: '2026-08-03T20:55:26.094Z'
+  - url: https://github.com/apotenza92/caul/releases/download/v0.1.75/Caul-Beta-windows-arm64-setup.exe
+    sha512: l4vQpgUdbAQ7WWG4XzeZ+NeigOFyr9cHtdfHW4oDf6qNdR0OuWErabxp5+rjNKiuZNol3j8RUdhtji8yczDcRg==
+    size: 112952264
+path: https://github.com/apotenza92/caul/releases/download/v0.1.75/Caul-Beta-windows-arm64-setup.exe
+sha512: l4vQpgUdbAQ7WWG4XzeZ+NeigOFyr9cHtdfHW4oDf6qNdR0OuWErabxp5+rjNKiuZNol3j8RUdhtji8yczDcRg==
+releaseDate: '2026-08-03T22:31:28.615Z'

@@ -1,8 +1,8 @@
-version: 0.1.74
+version: 0.1.75
 files:
-  - url: https://github.com/apotenza92/caul/releases/download/v0.1.74/Caul-windows-arm64-setup.exe
-    sha512: 7KQOe0rzmmNpKmSvDIEzfM93a2JD/3LiG18opwsx8w2jzgQQU1Vh2qsGvRMpNi57utsGD5eJ/ZzPw84XwKi/Hg==
-    size: 112884095
-path: https://github.com/apotenza92/caul/releases/download/v0.1.74/Caul-windows-arm64-setup.exe
-sha512: 7KQOe0rzmmNpKmSvDIEzfM93a2JD/3LiG18opwsx8w2jzgQQU1Vh2qsGvRMpNi57utsGD5eJ/ZzPw84XwKi/Hg==
-releaseDate: '2026-08-03T20:53:38.922Z'
+  - url: https://github.com/apotenza92/caul/releases/download/v0.1.75/Caul-windows-arm64-setup.exe
+    sha512: AU4+BQiDuCH0Ohx25+y+fxAC92QvJ3Z1If5h6Xh7fE4LGsl3f5iFggJ1xyfCXDFP+Z65kY4qdAxMkRgdOoCOBg==
+    size: 112934812
+path: https://github.com/apotenza92/caul/releases/download/v0.1.75/Caul-windows-arm64-setup.exe
+sha512: AU4+BQiDuCH0Ohx25+y+fxAC92QvJ3Z1If5h6Xh7fE4LGsl3f5iFggJ1xyfCXDFP+Z65kY4qdAxMkRgdOoCOBg==
+releaseDate: '2026-08-03T22:29:45.194Z'
