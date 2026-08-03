@@ -15,7 +15,7 @@ import {
   resolvePriorSigningFingerprints,
   validateSignatureMetadata
 } from './macos-release-contract.mjs';
-import { waitForMainElectronSurface } from './playwright-electron-surface.mjs';
+import { waitForUpdaterElectronSurface } from './playwright-electron-surface.mjs';
 import { createReleaseLaunchEnvironment } from './release-launch-env.mjs';
 
 function option(name) {
@@ -260,7 +260,9 @@ try {
       CAUL_USER_DATA_DIR: userData
     })
   });
-  const page = await waitForMainElectronSurface(appProcess);
+  const page = await waitForUpdaterElectronSurface(appProcess, {
+    mainSurfaceRequired: scenario !== 'valid'
+  });
   const preservedStatePath = join(userData, 'upgrade-preservation-marker.json');
   const preservedState = JSON.stringify({
     channel,
@@ -332,7 +334,7 @@ try {
           CAUL_USER_DATA_DIR: userData
         })
       });
-      await waitForMainElectronSurface(appProcess);
+      await waitForUpdaterElectronSurface(appProcess, { mainSurfaceRequired: true });
     }
   }
   if (readFileSync(preservedStatePath, 'utf8') !== preservedState) {

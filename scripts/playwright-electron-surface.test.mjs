@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   isMainElectronSurfaceUrl,
-  waitForMainElectronSurface
+  waitForMainElectronSurface,
+  waitForUpdaterElectronSurface
 } from './playwright-electron-surface.mjs';
 
 describe('Playwright Electron surface selection', () => {
@@ -25,5 +26,39 @@ describe('Playwright Electron surface selection', () => {
 
     await expect(waitForMainElectronSurface(application, 1_000)).resolves.toBe(main);
     expect(main.waitForFunction).toHaveBeenCalledOnce();
+  });
+
+  it('retains the first-window updater surface for legacy public packages', async () => {
+    const legacy = {
+      waitForFunction: vi.fn().mockResolvedValue(undefined)
+    };
+    const application = {
+      firstWindow: vi.fn().mockResolvedValue(legacy),
+      windows: vi.fn(() => [])
+    };
+
+    await expect(waitForUpdaterElectronSurface(application, {
+      mainSurfaceRequired: false,
+      timeoutMs: 1_000
+    })).resolves.toBe(legacy);
+    expect(application.firstWindow).toHaveBeenCalledWith({ timeout: 1_000 });
+    expect(legacy.waitForFunction).toHaveBeenCalledOnce();
+  });
+
+  it('requires the main updater surface for current packages', async () => {
+    const main = {
+      url: () => 'file:///tmp/Caul.app/Contents/Resources/app.asar/dist/index.html',
+      waitForFunction: vi.fn().mockResolvedValue(undefined)
+    };
+    const application = {
+      firstWindow: vi.fn(),
+      windows: vi.fn(() => [main])
+    };
+
+    await expect(waitForUpdaterElectronSurface(application, {
+      mainSurfaceRequired: true,
+      timeoutMs: 1_000
+    })).resolves.toBe(main);
+    expect(application.firstWindow).not.toHaveBeenCalled();
   });
 });
