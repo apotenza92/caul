@@ -17,7 +17,7 @@ Electron and React own visible application behaviour. Rust owns capture process 
 - Use the repository's shadcn/ui components, CSS variables and Lucide icons for visible controls. Extend local primitives instead of adding a second component system.
 - Support Apple Silicon macOS, Windows ARM64/x64 and Linux ARM64/x64 in the current package matrix. Intel macOS is not supported.
 - Maintain stable and beta as separate products. Their bundle or application IDs, install paths, package names, `userData` directories and updater channels must not converge.
-- Authenticate Windows NSIS and Linux AppImage automatic updates with TUF before handing metadata to Electron Updater. Keep the root key offline, protect the three online role keys separately, and retain advanced root trust in the product's existing `userData` directory. Debian and RPM upgrades remain owned by the system package manager.
+- Authenticate Windows NSIS and Linux AppImage automatic updates with TUF before handing metadata to Electron Updater. Keep the root key offline, protect the three online role keys separately, and retain advanced root trust in the product's existing `userData` directory. Debian and RPM remain verified standalone downloads that users install manually with their distribution package manager; Caul does not publish an apt or RPM repository.
 - Use ScreenCaptureKit for product system-audio capture on macOS. Keep Core Audio Process Tap available only for explicit diagnostics and comparison.
 - Use WASAPI loopback through CPAL on Windows and PipeWire sink capture on Linux.
 - Keep microphone and system audio as independently selected sources.
@@ -28,6 +28,7 @@ Electron and React own visible application behaviour. Rust owns capture process 
 - Do not silently reuse global provider state. Provider setup must be explicit, and cloud requests must respect the chosen provider and privacy boundary.
 - Subscription sign-in remains the preferred cloud setup path. First-party OpenAI, Anthropic, Google and xAI API keys may be configured explicitly when operating-system credential encryption is available. Electron encrypts these keys at rest, never returns them to the renderer, and injects only the selected provider's key into the Pi child process.
 - Keep LLM dispatch out of capture code. Electron owns explicit transcript-to-provider requests.
+- Keep every renderer sandboxed with a restrictive Content Security Policy. Top-level navigation is limited to Caul's packaged file or exact development origin, safe HTTPS links open in the system browser, and privileged IPC requires a trusted sender URL, known application window and surface-appropriate channel.
 - Treat resource use as a measured budget and avoid renderer polling where event-driven state is available.
 
 ## Boundary Rules

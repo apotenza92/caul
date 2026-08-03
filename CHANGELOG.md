@@ -2,7 +2,18 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.67]
+## [0.1.68]
+
+- Move the renderer to the official shadcn/ui Base UI Nova preset with canonical generated components, reviewed domain adapters and deterministic drift enforcement.
+- Block untrusted renderer navigation, unexpected windows and webviews; open only credential-free HTTPS links externally; validate every IPC sender by trusted URL, application window and allowed surface capability.
+- Enable Electron renderer sandboxing and a restrictive Content Security Policy, and render AI text, previews and release notes through HTTPS-only Markdown links with images disabled.
+- Keep Pi and the TUF updater on their reviewed dependency versions after clean installs, including the maintained `brace-expansion` 5.0.8 runtime.
+- Restore additive prompt-template selection, vertical arrow-key navigation, private-overlay tooltip suppression and scrolling inside transcript and AI preview tooltips.
+- Require real Apple Silicon hardware evidence to match the exact release commit before the tag-only workflow can run deterministic CI or publish packages.
+- Describe Debian and RPM accurately as verified standalone packages that users install manually, without implying that Caul publishes an apt or RPM repository.
+- Carries forward the complete Windows updater handoff repair and native updater evidence from the unpublished 0.1.44 through 0.1.67 candidates.
+
+## [0.1.67] (unpublished release candidate)
 
 - Keep the Windows installer exit guard referenced until Electron Updater completes its normal quit path or Caul forces the old process to exit after ten seconds.
 - Complete every application shutdown cleanup before handing the downloaded installer to Electron Updater, and cancel the exit guard if installation setup fails.

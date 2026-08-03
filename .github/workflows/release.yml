@@ -86,10 +86,32 @@ jobs:
 
   quality:
     name: Required checks
-    needs: prepare
+    needs: [prepare, macos-hardware-evidence]
     uses: ./.github/workflows/ci.yml
     with:
       ref: ${{ needs.prepare.outputs.tag }}
+
+  macos-hardware-evidence:
+    name: Verify exact-commit macOS hardware evidence
+    needs: prepare
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Require tested release commit
+        env:
+          HARDWARE_EVIDENCE_COMMIT: ${{ vars.CAUL_MACOS_HARDWARE_EVIDENCE_COMMIT }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$HARDWARE_EVIDENCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "CAUL_MACOS_HARDWARE_EVIDENCE_COMMIT must contain the exact tested commit SHA." >&2
+            exit 1
+          fi
+          if [[ "$HARDWARE_EVIDENCE_COMMIT" != "$RELEASE_COMMIT" ]]; then
+            echo "macOS hardware evidence covers $HARDWARE_EVIDENCE_COMMIT, not release commit $RELEASE_COMMIT." >&2
+            exit 1
+          fi
 
   build-macos:
     name: Build macOS ARM64
@@ -1132,6 +1154,7 @@ jobs:
       - test-windows-upgrade
       - test-linux-upgrade
       - test-linux-rpm-upgrade
+      - macos-hardware-evidence
     runs-on: ubuntu-24.04
     environment:
       name: ${{ needs.prepare.outputs.release_environment }}

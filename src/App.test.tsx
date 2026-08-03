@@ -120,24 +120,22 @@ describe('App', () => {
 
     await user.click(screen.getByRole('button', { name: 'Caul Settings' }));
     expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Caul Settings' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('dialog', { name: 'Settings' })).toHaveClass('caul-settings-dialog');
-    expect(screen.getByRole('dialog', { name: 'Settings' })).toHaveClass('caul-large-modal-shell', 'h-[85vh]', 'w-[85vw]', 'max-w-[85vw]');
+    expect(screen.getByRole('dialog', { name: 'Settings' })).toHaveClass('h-[85vh]', 'w-[85vw]', 'max-w-[85vw]');
     expect(screen.getByRole('dialog', { name: 'Settings' })).not.toHaveClass('w-[59.765625vw]', 'max-w-[59.765625vw]');
     expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: 'General' }))
-      .toHaveAttribute('data-active', 'true');
+      .toHaveAttribute('aria-pressed', 'true');
     expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: 'General' }))
-      .toHaveClass('h-8', 'data-[active=true]:bg-sidebar-accent', 'data-[active=true]:text-sidebar-accent-foreground');
+      .toHaveAttribute('data-slot', 'toggle-group-item');
     expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: 'Transcription' }))
-      .toHaveAttribute('data-active', 'false');
-    expect(screen.getByRole('heading', { name: 'Settings' })).toHaveClass('text-sm', 'text-center');
+      .toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('heading', { name: 'Settings' })).toHaveClass('text-base');
 
-    await user.click(screen.getByRole('button', { name: 'Caul Settings' }));
+    await user.click(screen.getByRole('button', { name: 'Close settings' }));
     expect(screen.queryByRole('dialog', { name: 'Settings' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Caul Settings' })).toHaveAttribute('aria-pressed', 'false');
 
     await user.click(screen.getByRole('button', { name: 'Caul Settings' }));
-    await user.click(await screen.findByRole('button', { name: 'Close settings' }));
+    await user.keyboard('{Escape}');
 
     expect(screen.queryByRole('dialog', { name: 'Settings' })).not.toBeInTheDocument();
   });
@@ -150,12 +148,13 @@ describe('App', () => {
     const settingsOpener = await screen.findByRole('button', { name: 'Caul Settings' });
     await user.click(settingsOpener);
     const settingsDialog = await screen.findByRole('dialog', { name: 'Settings' });
-    expect(screen.getByTestId('home-panels').closest('[inert]')).not.toBeNull();
-    expect(settingsOpener.closest('[inert]')).not.toBeNull();
+    expect(screen.getByTestId('home-panels').closest('[data-base-ui-inert]')).not.toBeNull();
+    expect(settingsOpener.closest('[data-base-ui-inert]')).not.toBeNull();
     const settingsClose = within(settingsDialog).getByRole('button', { name: 'Close settings' });
     await waitFor(() => expect(settingsClose).toHaveFocus());
-    await user.tab({ shift: true });
+    await user.tab();
     expect(settingsDialog).toContainElement(document.activeElement as HTMLElement);
+    expect(settingsOpener).not.toHaveFocus();
     settingsClose.focus();
     await user.keyboard('{Escape}');
     await waitFor(() => expect(settingsOpener).toHaveFocus());
@@ -221,8 +220,8 @@ describe('App', () => {
 
     await user.click(screen.getByRole('button', { name: 'Caul Settings' }));
     expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
-    const settingsBackdrop = document.querySelector<HTMLElement>('[data-dialog-backdrop="settings"]');
-    expect(settingsBackdrop).toHaveClass('cursor-default');
+    const settingsBackdrop = document.querySelector<HTMLElement>('[data-slot="dialog-overlay"]');
+    expect(settingsBackdrop).toBeInTheDocument();
 
     await user.click(settingsBackdrop!);
 
@@ -581,6 +580,55 @@ describe('App', () => {
     expect(screen.queryByText('Moonshine tiny')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Use' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+  });
+
+  it('supports roving focus and keyboard selection in transcription tabs', async () => {
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const user = userEvent.setup();
+    installTestBridge();
+
+    render(<App />);
+
+    await openOnboardingStep(user, 'Local transcription');
+    const accurate = await screen.findByRole('tab', { name: 'Best accuracy Recommended' });
+    const lightweight = screen.getByRole('tab', { name: 'Lower memory use' });
+    accurate.focus();
+
+    await user.keyboard('{ArrowRight}');
+    expect(lightweight).toHaveFocus();
+    expect(lightweight).toHaveAttribute('aria-selected', 'false');
+    await user.keyboard(' ');
+    expect(lightweight).toHaveAttribute('aria-selected', 'true');
+
+    await user.keyboard('{Home}');
+    expect(accurate).toHaveFocus();
+    await user.keyboard(' ');
+    expect(accurate).toHaveAttribute('aria-selected', 'true');
+
+    await user.keyboard('{End}');
+    expect(lightweight).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(lightweight).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('supports keyboard navigation and selection in onboarding toggle groups', async () => {
+    window.history.pushState({}, '', '/?caul-surface=onboarding');
+    const user = userEvent.setup();
+    installTestBridge();
+
+    render(<App />);
+
+    const permissions = await screen.findByRole('button', { name: 'Step 1: Permissions' });
+    const transcription = screen.getByRole('button', { name: 'Step 2: Local transcription' });
+    permissions.focus();
+
+    await user.keyboard('{ArrowRight}');
+    expect(transcription).toHaveFocus();
+    expect(transcription).toHaveAttribute('aria-pressed', 'false');
+
+    await user.keyboard(' ');
+    expect(transcription).toHaveAttribute('aria-pressed', 'true');
+    expect(await screen.findByRole('heading', { name: 'Local transcription' })).toBeInTheDocument();
   });
 
   it('does not download a local model automatically when cloud transcription is recommended', async () => {
@@ -1176,7 +1224,7 @@ describe('App', () => {
     await user.keyboard('{Escape}');
 
     await user.click(within(aiResponsesGroup).getByRole('button', { name: 'Remove' }));
-    expect(screen.getByRole('dialog', { name: 'Remove Anthropic API key?' })).toBeInTheDocument();
+    expect(screen.getByRole('alertdialog', { name: 'Remove Anthropic API key?' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Remove key' }));
     await waitFor(() => {
       expect(screen.getByRole('group', { name: 'Use an API key' })).toHaveTextContent('No API key saved.');
@@ -1270,7 +1318,7 @@ describe('App', () => {
     await openOnboardingStep(user, 'AI responses');
     const downloadButton = await screen.findByRole('button', { name: 'Download local AI' });
     await waitFor(() => expect(downloadButton).toBeEnabled());
-    expect(downloadButton).toHaveAttribute('data-size', 'default');
+    expect(downloadButton).toHaveAttribute('data-slot', 'button');
     await user.click(downloadButton);
 
     expect(bridge.localLlmDownloads).toBe(1);
@@ -1668,8 +1716,8 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: 'Manage prompt templates' }));
 
     const promptTemplatesClose = await screen.findByRole('button', { name: 'Close prompt templates' });
-    expect(screen.getByRole('dialog', { name: 'Prompt templates' })).toHaveClass('caul-settings-dialog', 'caul-large-modal-shell', 'h-[85vh]', 'w-[85vw]');
-    expect(screen.getByRole('heading', { name: 'Prompt templates' })).toHaveClass('text-sm', 'text-center');
+    expect(screen.getByRole('dialog', { name: 'Prompt templates' })).toHaveClass('h-[85vh]', 'w-[85vw]');
+    expect(screen.getByRole('heading', { name: 'Prompt templates' })).toHaveClass('text-base');
     expect(screen.getByText('Save reusable instructions that are prepended to transcript requests.')).toHaveClass('sr-only');
     expect(promptTemplatesClose).toHaveClass('right-3', 'top-2');
     expect(promptTemplatesClose).not.toHaveClass('-translate-y-1/2');
@@ -1958,7 +2006,6 @@ describe('App', () => {
     });
 
     expect(screen.getByRole('button', { name: 'Hide Caul app' })).toHaveClass('right-1');
-    expect(screen.getByRole('button', { name: 'Hide Caul app' })).toHaveClass('cursor-default');
     expect(screen.getByRole('button', { name: 'Hide Caul app' }).querySelector('svg')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Quit Caul' })).toHaveAttribute('data-platform', 'desktop');
     expect(screen.getByRole('button', { name: 'Quit Caul' })).toHaveClass('right-9');
@@ -2179,6 +2226,27 @@ describe('App', () => {
     await selectSetting(user, 'Size', 'Large');
 
     expect(bridge.privateOverlayState.handle.size).toBe('large');
+  });
+
+  it('supports keyboard navigation and Escape focus recovery in settings selects', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge();
+
+    render(<App />);
+
+    await openSettings(user);
+    const sizeTrigger = screen.getByLabelText('Size');
+    sizeTrigger.focus();
+    await user.keyboard(' ');
+    expect(await screen.findByRole('listbox')).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(sizeTrigger).toHaveFocus());
+    expect(sizeTrigger).toHaveAttribute('aria-expanded', 'false');
+
+    await user.keyboard('{ArrowDown}');
+    expect(await screen.findByRole('listbox')).toBeInTheDocument();
+    await user.keyboard('{End}{Enter}');
+    await waitFor(() => expect(bridge.privateOverlayState.handle.size).toBe('large'));
   });
 
   it('shows long scroll fixture sections when requested in development', () => {
@@ -2824,18 +2892,18 @@ describe('App', () => {
 
     const speaker = await screen.findByRole('button', { name: 'Speaker on' });
     expect(speaker).toHaveAttribute('aria-pressed', 'true');
-    expect(speaker).toHaveClass('!bg-primary');
+    expect(speaker).toHaveAttribute('data-slot', 'tooltip-trigger');
     expect(speaker).toHaveTextContent('Output');
     const microphoneOff = screen.getByRole('button', { name: 'Microphone off' });
     expect(microphoneOff).toHaveAttribute('aria-pressed', 'false');
-    expect(microphoneOff).toHaveClass('text-muted-foreground');
+    expect(microphoneOff).toHaveAttribute('data-slot', 'tooltip-trigger');
     expect(microphoneOff).toHaveTextContent('Input');
     expect(microphoneOff.querySelector('.lucide-mic-off')).toBeInTheDocument();
 
     await user.click(microphoneOff);
     const microphoneOn = screen.getByRole('button', { name: 'Microphone on' });
     expect(microphoneOn).toHaveAttribute('aria-pressed', 'true');
-    expect(microphoneOn).toHaveClass('!bg-primary');
+    expect(microphoneOn).toHaveAttribute('aria-pressed', 'true');
     expect(microphoneOn).toHaveTextContent('Input');
     expect(microphoneOn.querySelector('.lucide-mic')).toBeInTheDocument();
     expect(screen.getByLabelText('Start Listening hint')).toHaveTextContent(
@@ -2848,7 +2916,7 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Speaker on' }));
     const speakerOff = screen.getByRole('button', { name: 'Speaker off' });
     expect(speakerOff).toHaveAttribute('aria-pressed', 'false');
-    expect(speakerOff).toHaveClass('text-muted-foreground');
+    expect(speakerOff).toHaveAttribute('aria-pressed', 'false');
     expect(speakerOff).toHaveTextContent('Output');
     expect(speakerOff.querySelector('.lucide-volume-x')).toBeInTheDocument();
     expect(screen.getByLabelText('Start Listening hint')).toHaveTextContent(
@@ -2887,12 +2955,11 @@ describe('App', () => {
 
     const autoSend = screen.getByRole('button', { name: 'Auto Send' });
     expect(autoSend).toHaveAttribute('aria-pressed', 'true');
-    expect(autoSend).toHaveClass('!bg-primary');
     expect(autoSend.querySelector('.caul-auto-send-off-slash')).not.toBeInTheDocument();
 
     await user.click(autoSend);
     expect(autoSend).toHaveAttribute('aria-pressed', 'false');
-    expect(autoSend).toHaveClass('text-muted-foreground');
+    expect(autoSend).toHaveAttribute('data-slot', 'tooltip-trigger');
     expect(autoSend.querySelector('.caul-auto-send-off-slash')).toBeInTheDocument();
     expect((await screen.findAllByText('Sends the transcript to AI when listening stops.'))
       .find((element) => element.getAttribute('data-slot') === 'tooltip-content'))
@@ -3164,13 +3231,9 @@ describe('App', () => {
 
     await user.click(screen.getByRole('button', { name: 'Prompt template' }));
     expect(await screen.findByText('STAR')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'CV' }).querySelector('[data-slot="checkbox"]'))
-      .not.toHaveAttribute('data-checked');
-    expect(screen.getByRole('button', { name: 'STAR' }).querySelector('[data-slot="checkbox"]'))
-      .not.toHaveAttribute('data-checked');
-    expect(screen.getByRole('button', { name: 'No template' }).querySelector('[data-slot="checkbox"]'))
-      .not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'No template' })).toHaveAttribute('data-active', 'true');
+    expect(screen.getByRole('button', { name: 'CV' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'STAR' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'No template' })).toHaveAttribute('aria-pressed', 'true');
 
     await user.type(screen.getByLabelText('Search prompt templates'), 'PD');
     expect(screen.getByText('PD')).toBeInTheDocument();
@@ -3181,6 +3244,26 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Prompt template' })).toHaveTextContent('STAR');
     });
+  });
+
+  it('keeps multiple prompt templates selected when another template is added', async () => {
+    const user = userEvent.setup();
+    const bridge = installTestBridge();
+
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Prompt template' }));
+    await user.click(screen.getByRole('button', { name: 'CV' }));
+    await user.click(screen.getByRole('button', { name: 'PD' }));
+
+    await waitFor(() => {
+      expect(bridge.promptTemplateState.selectedTemplateIds).toEqual([
+        'starter-use-my-cv',
+        'starter-job-description'
+      ]);
+    });
+    expect(screen.getByRole('button', { name: 'CV' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'PD' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('migrates old built-in prompt template names on startup without dropping custom templates', async () => {
@@ -3272,16 +3355,16 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: 'Manage prompt templates' }));
     const promptTemplateDialog = within(screen.getByRole('dialog', { name: 'Prompt templates' }));
     expect(promptTemplateDialog.getByRole('button', { name: 'CV' }))
-      .toHaveAttribute('data-active', 'false');
+      .toHaveAttribute('aria-pressed', 'false');
     await user.click(promptTemplateDialog.getByRole('button', { name: 'CV' }));
     expect(promptTemplateDialog.getByRole('button', { name: 'CV' }))
-      .toHaveAttribute('data-active', 'true');
+      .toHaveAttribute('aria-pressed', 'true');
     expect(promptTemplateDialog.getByRole('button', { name: 'CV' }))
-      .toHaveClass('h-8', 'data-[active=true]:bg-sidebar-accent', 'data-[active=true]:text-sidebar-accent-foreground');
+      .toHaveAttribute('data-slot', 'toggle-group-item');
     expect(promptTemplateDialog.getByRole('button', { name: 'PD' }))
-      .toHaveAttribute('data-active', 'false');
+      .toHaveAttribute('aria-pressed', 'false');
     await user.click(screen.getByRole('button', { name: 'New template' }));
-    expect(promptTemplateDialog.getByRole('button', { name: 'Untitled' })).toHaveAttribute('data-active', 'true');
+    expect(promptTemplateDialog.getByRole('button', { name: 'Untitled' })).toHaveAttribute('aria-pressed', 'true');
     expect(promptTemplateDialog.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
     expect(promptTemplateDialog.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
     await user.type(screen.getByLabelText('Name'), 'Risk summary');
@@ -3326,10 +3409,10 @@ describe('App', () => {
     await waitFor(() => expect(bridge.promptTemplateState.templates).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: 'CV 2', prompt: 'Use the CV context carefully.' })
     ])));
-    expect(screen.getByRole('button', { name: 'CV 2' })).toHaveAttribute('data-active', 'true');
+    expect(screen.getByRole('button', { name: 'CV 2' })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('opens prompt templates without a blocking backdrop', async () => {
+  it('opens prompt templates with the official modal backdrop', async () => {
     const user = userEvent.setup();
     installTestBridge();
 
@@ -3338,7 +3421,7 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: 'Manage prompt templates' }));
 
     expect(screen.getByRole('dialog', { name: 'Prompt templates' })).toBeVisible();
-    expect(document.querySelector('[data-slot="dialog-overlay"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-slot="dialog-overlay"]')).toBeInTheDocument();
   });
 
   it('edits general instructions from the AI toolbar', async () => {
@@ -3352,7 +3435,7 @@ describe('App', () => {
     const instructionsDialog = screen.getByRole('dialog', { name: 'Instructions' });
     const instructionsInput = within(instructionsDialog).getByRole('textbox', { name: 'Instructions' });
     expect(instructionsDialog).toBeVisible();
-    expect(instructionsDialog).toHaveClass('caul-large-modal-shell', 'h-[85vh]', 'w-[85vw]');
+    expect(instructionsDialog).toHaveClass('h-[85vh]', 'w-[85vw]');
     expect(instructionsInput).toHaveValue('');
     expect(instructionsInput).toHaveAttribute('placeholder', 'e.g. Always answer in British English.');
     expect(screen.queryByRole('button', { name: 'Restore default' })).not.toBeInTheDocument();
@@ -3433,8 +3516,13 @@ describe('App', () => {
     expect(savedTemplate?.attachments).toEqual([attachment]);
 
     await user.click(screen.getByRole('button', { name: 'Close prompt templates' }));
-    await user.click(await screen.findByRole('button', { name: 'Prompt template' }));
-    await user.click(await screen.findByText('Image context'));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Prompt templates' })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Manage prompt templates' })).toHaveFocus());
+    const templateTrigger = await screen.findByRole('button', { name: 'Prompt template' });
+    await user.click(templateTrigger);
+    await waitFor(() => expect(templateTrigger).toHaveAttribute('aria-expanded', 'true'));
+    const templatePicker = await screen.findByLabelText('Prompt templates');
+    await user.click(within(templatePicker).getByText('Image context'));
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Prompt template' })).toHaveTextContent('Image context');
     });
@@ -3572,7 +3660,7 @@ describe('App', () => {
 
     expect(await screen.findAllByText('AI input')).not.toHaveLength(0);
     expect(screen.getAllByText((content) => content.includes('Summarise the last decision.'))).not.toHaveLength(0);
-    expect(document.querySelector('.caul-preview-tooltip')).toHaveClass('pointer-events-auto');
+    expect(document.querySelector('[data-slot="tooltip-content"]')).toHaveClass('pointer-events-auto');
   });
 
   it('caps the manual AI prompt height to half the AI panel height', async () => {
@@ -4031,7 +4119,7 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Reset Settings' }));
 
     expect(bridge.settingsResets).toBe(0);
-    expect(screen.getByRole('dialog', { name: 'Reset settings?' })).toBeInTheDocument();
+    expect(screen.getByRole('alertdialog', { name: 'Reset settings?' })).toBeInTheDocument();
     expect(screen.getByText('This will restore:')).toBeInTheDocument();
     expect(screen.getByText('Window size and location')).toBeInTheDocument();
     expect(screen.getByText('Floating button position')).toBeInTheDocument();
@@ -4121,7 +4209,7 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Reset Settings' }));
     await user.click(screen.getByRole('button', { name: 'Reset Settings' }));
 
-    expect(screen.getByRole('dialog', { name: 'Reset settings?' })).toBeInTheDocument();
+    expect(screen.getByRole('alertdialog', { name: 'Reset settings?' })).toBeInTheDocument();
     expect(bridge.promptTemplateState.selectedTemplateIds).toEqual(['custom-template']);
     expect(bridge.promptTemplateState.templates).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'custom-template', name: 'Custom template' })

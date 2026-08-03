@@ -1,11 +1,23 @@
-import { cloneElement, isValidElement, useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type MouseEvent, type PointerEvent, type ReactNode, type RefObject, type WheelEvent } from 'react';
+import { cloneElement, isValidElement, useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type MouseEvent, type PointerEvent, type ReactNode, type RefObject } from 'react';
 import {
   Alert,
   AlertDescription,
   AlertTitle
 } from '@/components/ui/alert';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ButtonGroup } from '@/components/ui/button-group';
 import {
   Card,
   CardContent,
@@ -14,7 +26,7 @@ import {
   CardHeader,
   CardTitle
 } from '@/components/ui/card';
-import { Checkbox, CheckboxDisplay } from '@/components/ui/checkbox';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogClose,
@@ -36,6 +48,12 @@ import {
   FieldTitle
 } from '@/components/ui/field';
 import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle
+} from '@/components/ui/empty';
+import {
   Select,
   SelectContent,
   SelectGroup,
@@ -44,7 +62,13 @@ import {
   SelectValue
 } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
+import { Progress, ProgressLabel, ProgressValue } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput
+} from '@/components/ui/input-group';
 import { Separator } from '@/components/ui/separator';
 import {
   Popover,
@@ -53,7 +77,6 @@ import {
 } from '@/components/ui/popover';
 import {
   Tooltip,
-  TooltipContent,
   TooltipProvider,
   TooltipTrigger
 } from '@/components/ui/tooltip';
@@ -64,12 +87,12 @@ import {
   TabsTrigger
 } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { Toggle } from '@/components/ui/toggle';
 import {
   ToggleGroup,
   ToggleGroupItem
 } from '@/components/ui/toggle-group';
 import { ArrowUpIcon, BellIcon, CheckCircle2Icon, ChevronDownIcon, ChevronRightIcon, CircleAlertIcon, CopyIcon, DownloadIcon, FastForwardIcon, FileIcon, FileInputIcon, FileTextIcon, FolderOpenIcon, HistoryIcon, ImageIcon, InfoIcon, ListChecksIcon, LogOutIcon, MicIcon, MicOffIcon, PaperclipIcon, PencilIcon, PlayIcon, PowerIcon, RotateCcwIcon, SearchIcon, SendIcon, SettingsIcon, ShieldCheckIcon, SquareIcon, StarIcon, Trash2Icon, Volume2Icon, VolumeXIcon, XCircleIcon, XIcon } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
 import caulAppIconUrl from '../assets/icons/icon-rounded.png?url';
 import caulBetaAppIconUrl from '../assets/icons/beta/icon-rounded.png?url';
 import caulIconUrl from '../assets/caul-icon.svg?url';
@@ -107,57 +130,46 @@ import {
 import { useLiveTranscription, type AiResponseSession, type TranscriptSession } from './hooks/useLiveTranscription';
 import { useRuntimeContext } from './hooks/useRuntimeContext';
 import { useSystemColourScheme } from './hooks/useSystemColourScheme';
+import { MacosWindowButton } from '@/components/domain-ui/macos-window-button';
+import { OverlayHandleButton } from '@/components/domain-ui/overlay-handle-button';
+import { OverlayResizeHandles } from '@/components/domain-ui/overlay-resize-handles';
+import { AppTooltipContent as TooltipContent } from '@/components/domain-ui/app-tooltip-content';
+import { VerticalToggleGroup } from '@/components/domain-ui/vertical-toggle-group';
+import { SafeMarkdown } from '@/components/safe-markdown';
 import cloudLlmConfig from '../electron/llmConfig.json';
 
 const layout = {
   overlayWindowOuter: 'relative h-screen w-screen bg-transparent p-2 text-foreground',
   main: 'relative grid h-full grid-rows-[32px_minmax(0,1fr)] overflow-hidden rounded-lg border border-border/70 bg-background',
   appBody: 'relative min-h-0 overflow-hidden',
-  overlayResizeHandle: 'absolute z-[80] bg-transparent',
-  overlayResizeHandleN: 'inset-x-2 top-0 h-[11px] cursor-ns-resize',
-  overlayResizeHandleE: 'right-0 top-2 bottom-2 w-[11px] cursor-ew-resize',
-  overlayResizeHandleS: 'inset-x-2 bottom-0 h-[11px] cursor-ns-resize',
-  overlayResizeHandleW: 'left-0 top-2 bottom-2 w-[11px] cursor-ew-resize',
-  overlayResizeHandleNE: 'right-0 top-0 size-[11px] cursor-nesw-resize',
-  overlayResizeHandleSE: 'right-0 bottom-0 size-[11px] cursor-nwse-resize',
-  overlayResizeHandleSW: 'left-0 bottom-0 size-[11px] cursor-nesw-resize',
-  overlayResizeHandleNW: 'left-0 top-0 size-[11px] cursor-nwse-resize',
   windowTitleBar: 'relative z-[60] flex h-8 select-none items-center justify-center border-b border-border/70 bg-background/95 text-muted-foreground',
   windowTitleBarDragArea: 'absolute inset-0 flex min-w-0 cursor-default items-center justify-center px-12 active:cursor-default',
   windowTitleBarTitle: 'truncate text-sm font-medium text-foreground',
-  windowTitleBarButton: 'absolute right-1 top-1/2 z-10 size-7 -translate-y-1/2 cursor-default text-muted-foreground hover:text-foreground',
-  windowTitleBarQuitButton: 'absolute right-9 top-1/2 z-10 size-7 -translate-y-1/2 cursor-default text-muted-foreground hover:text-foreground',
-  windowTitleBarSettingsButton: 'absolute top-1/2 z-[70] flex size-7 -translate-y-1/2 items-center justify-center rounded-md bg-transparent p-0 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+  windowTitleBarButton: 'absolute right-1 top-1/2 z-10 size-7 -translate-y-1/2',
+  windowTitleBarQuitButton: 'absolute right-9 top-1/2 z-10 size-7 -translate-y-1/2',
+  windowTitleBarSettingsButton: 'absolute top-1/2 z-[70] size-7 -translate-y-1/2 p-0',
   windowTitleBarSettingsButtonMac: 'right-1.5',
   windowTitleBarSettingsButtonDesktop: 'left-1.5',
   windowTitleBarHistoryButtonMac: 'right-9',
   windowTitleBarHistoryButtonDesktop: 'left-9',
   windowTitleBarNotificationButtonMac: 'right-[4.125rem]',
   windowTitleBarNotificationButtonDesktop: 'left-[4.125rem]',
-  windowTitleBarMacCloseButton: 'caul-mac-close-button absolute left-3 top-1/2 z-10 size-[14px] -translate-y-1/2 cursor-default rounded-full border-[0.5px] border-[#FB1626] bg-[#FF5C60] p-0 shadow-none hover:bg-[#FF5C60] active:bg-[#D94D4F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF5C60]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-  windowTitleBarMacQuitButton: 'caul-mac-quit-button absolute left-8 top-1/2 z-10 flex size-[14px] -translate-y-1/2 cursor-default items-center justify-center rounded-full border-[0.5px] border-[#9B48D6] bg-[#BF5AF2] p-0 text-[#4F167D] shadow-none hover:bg-[#BF5AF2] active:bg-[#9B48D6] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#BF5AF2]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background [&_svg]:size-2.5 [&_svg]:stroke-[3]',
   page: 'h-full min-h-0 overflow-hidden',
   form: 'h-full w-full',
   contentTopToolbar: 'grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto]',
-  contentRightToolbar: 'grid h-full min-h-0 grid-cols-[minmax(0,1fr)_auto]',
   contentBottomToolbar: 'grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto]',
-  contentLeftToolbar: 'grid h-full min-h-0 grid-cols-[auto_minmax(0,1fr)]',
   panelGrid: 'grid h-full min-h-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] divide-x divide-border',
-  panelGridStacked: 'grid h-full min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] divide-y divide-border',
   panelTitleBars: 'z-20 grid h-8 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] divide-x divide-border border-b border-border/70 bg-background/95 text-muted-foreground',
   panelTitleBar: 'flex min-w-0 select-none items-center justify-center px-3',
   panelTitleBarTitle: 'truncate text-sm font-medium text-foreground',
-  panel: 'panel-background grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden',
   panelPlain: 'panel-background h-full min-h-0 overflow-hidden',
   panelWithBottomActions: 'panel-background grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] overflow-hidden',
   aiPanelWithManualPrompt: 'panel-background grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto_auto] overflow-hidden',
   aiManualPromptBar: 'z-10 flex min-h-12 items-end gap-2 border-t border-border bg-background px-3 py-1.5',
-  aiManualPromptInput: 'max-h-[50%] min-h-9 flex-1 resize-none overflow-hidden rounded-md py-2 text-sm leading-5',
+  aiManualPromptInput: 'max-h-[50%] min-h-9 flex-1 overflow-hidden py-2',
   homeToolbar: 'z-10 overflow-hidden bg-background',
   homeToolbarTop: 'grid h-12 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center divide-x divide-border border-b border-border',
-  homeToolbarRight: 'grid h-full w-12 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] items-stretch divide-y divide-border border-l border-border p-0',
   homeToolbarBottom: 'grid h-12 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center divide-x divide-border border-t border-border',
-  homeToolbarLeft: 'grid h-full w-12 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] items-stretch divide-y divide-border border-r border-border p-0',
   homeToolbarHorizontalSection: 'caul-home-toolbar-section flex min-w-0 items-center gap-2 px-3 py-1.5',
   homeToolbarHorizontalSectionAi: 'justify-center',
   homeToolbarBottomActions: 'z-10 grid h-12 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center divide-x divide-border border-t border-border bg-background',
@@ -169,49 +181,34 @@ const layout = {
   homeToolbarVerticalSectionTop: '',
   homeToolbarVerticalSectionBottom: '',
   panelScroller: 'panel-background relative -mt-px box-border h-full min-h-0 overflow-y-auto [overflow-anchor:none]',
-  settingsBackdrop: 'absolute inset-0 z-40 cursor-default bg-black/10 supports-backdrop-filter:backdrop-blur-xs',
-  modalBlurBackdrop: 'fixed inset-0 z-40 pointer-events-none bg-black/10 supports-backdrop-filter:backdrop-blur-xs',
-  settingsDialog: 'caul-settings-dialog caul-large-modal-shell absolute z-50 grid h-[85vh] w-[85vw] max-w-[85vw] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-xl bg-popover text-sm text-popover-foreground ring-1 ring-foreground/10',
-  modalHeaderTitle: 'font-heading text-sm leading-none font-medium text-center',
-  settingsHeader: 'flex h-12 items-center justify-center border-b border-border px-12',
-  settingsHeaderMac: '',
   settingsContent: 'grid min-h-0 grid-cols-[9rem_minmax(0,1fr)] overflow-hidden',
   settingsSidebar: 'flex min-h-0 flex-col border-r border-border p-4',
   settingsPanel: 'min-h-0 overflow-y-auto p-4',
   modalCloseButton: 'absolute z-20',
-  modalCloseButtonDesktop: 'right-3 top-2 size-8 rounded-md',
-  modalCloseButtonMac: 'caul-mac-close-button left-3 top-[17px] size-[14px] cursor-default rounded-full border-[0.5px] border-[#FB1626] bg-[#FF5C60] p-0 text-[#802F31] shadow-none hover:bg-[#FF5C60] active:bg-[#D94D4F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF5C60]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-popover',
+  modalCloseButtonDesktop: 'right-3 top-2 size-8',
   settingsInlineGroup: 'flex-row flex-wrap items-start gap-3',
   settingsPageStack: 'gap-6',
   settingsSection: 'gap-2',
   settingsSectionBody: 'gap-3',
   settingsDescription: 'w-full max-w-xl text-sm leading-5 text-muted-foreground',
-  settingsPermissionActions: 'flex flex-wrap items-center gap-2',
   transcriptPrimaryActions: 'flex min-w-0 flex-1 items-center justify-between gap-2',
   transcriptSourceActions: 'flex min-w-0 flex-1 items-center justify-center gap-2',
   transcriptPrimaryActionsVertical: 'flex min-h-0 min-w-0 flex-1 flex-col items-center justify-between gap-2',
   listeningSourceIndicators: 'flex shrink-0 items-center justify-center gap-2',
   listeningSourceIndicatorsVertical: 'flex shrink-0 flex-col items-center gap-1',
-  listeningSourceIndicatorActive: '!bg-primary !text-primary-foreground hover:!bg-primary/90 hover:!text-primary-foreground focus-visible:border-primary focus-visible:ring-primary/30 dark:!bg-primary dark:!text-primary-foreground dark:hover:!bg-primary/90 dark:hover:!text-primary-foreground',
   aiToolbarActions: 'flex w-full min-w-0 flex-1 items-center justify-start',
   aiResponseActions: 'ml-auto flex items-center gap-2',
-  aiResponseActionsVertical: 'flex flex-col items-center gap-2',
   aiToolbarActionsVertical: 'flex min-h-0 min-w-0 flex-1 flex-col items-center justify-between gap-2',
   transcriptActions: 'ml-auto flex items-center gap-2',
-  transcriptActionsVertical: 'flex flex-col items-center gap-2',
-  sectionCollapseButton: 'size-8 shrink-0 rounded-md text-muted-foreground',
-  sectionPreviewTooltip: 'caul-preview-tooltip pointer-events-auto max-h-[min(28rem,70vh)] w-[clamp(18rem,25vw,36rem)] max-w-[calc(100vw-2rem)] overflow-y-auto overflow-x-hidden break-words p-4 pr-3 text-left text-sm leading-6 [overflow-wrap:anywhere]',
+  sectionCollapseButton: 'size-8 shrink-0',
+  sectionPreviewTooltip: 'pointer-events-auto max-h-[min(28rem,70vh)] w-[clamp(18rem,25vw,36rem)] max-w-[calc(100vw-2rem)] overflow-y-auto overflow-x-hidden p-4 pr-3',
   listeningButton: 'w-[140px]',
-  listeningButtonVertical: 'w-full',
   sideToolbarRow: 'flex w-full items-center justify-center',
-  sideToolbarButton: 'size-9 min-h-9 min-w-9 rounded-md px-0',
-  sideToolbarIconButton: 'size-9 min-h-9 min-w-9 rounded-md',
+  sideToolbarButton: 'size-9 min-h-9 min-w-9 px-0',
+  sideToolbarIconButton: 'size-9 min-h-9 min-w-9',
   sideToolbarButtonLabel: 'sr-only',
   compactToolbarButton: 'compact-toolbar-button',
   compactToolbarButtonLabel: 'compact-toolbar-button-label',
-  permissionButton: 'h-auto min-h-9 max-w-full whitespace-normal break-words px-2.5 py-1.5 text-center text-xs leading-snug border-destructive/50 bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/60 focus-visible:ring-destructive/20 dark:border-destructive/40 dark:bg-destructive/20 dark:hover:bg-destructive/30',
-  grantPermissionsButton: 'w-[140px] border-destructive/50 bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/60 focus-visible:ring-destructive/20 dark:border-destructive/40 dark:bg-destructive/20 dark:hover:bg-destructive/30',
-  startButton: '!bg-primary !text-primary-foreground hover:!bg-primary/90 focus-visible:border-primary focus-visible:ring-primary/30 dark:!bg-primary dark:!text-primary-foreground dark:hover:!bg-primary/90',
   output: 'box-border h-full min-h-0 overflow-y-auto px-6 py-6 whitespace-pre-wrap text-sm leading-6',
   transcriptSessionOutput: 'transcript-session-output box-border h-full min-h-0 overflow-y-auto',
   historyVirtualSpacer: 'pointer-events-none h-[var(--caul-history-virtual-height,100%)]',
@@ -232,23 +229,13 @@ const layout = {
   promptTemplateSelectorRootVertical: 'flex min-h-0 min-w-0 flex-col items-center gap-2',
   promptTemplateSelectorPickerVertical: 'flex flex-col items-center gap-2',
   promptTemplateSelectorEditVertical: '',
-  promptTemplateTriggerVertical: 'size-9 min-h-9 min-w-9 justify-center rounded-md px-0',
+  promptTemplateTriggerVertical: 'size-9 min-h-9 min-w-9 justify-center px-0',
   promptTemplateCompactIcon: 'prompt-template-trigger-icon',
-  promptTemplateSearch: 'relative',
-  promptTemplateSearchIcon: 'pointer-events-none absolute left-2 top-1/2 size-4 -translate-y-1/2 text-muted-foreground',
-  promptTemplateSearchInput: 'pl-8',
   pickerList: 'flex flex-col',
   pickerListScrollable: 'max-h-64 overflow-y-auto',
   pickerItemLabel: 'min-w-0 flex-1 truncate',
-  pickerCheckboxItem: 'justify-start',
   pickerRow: 'group/picker-row relative min-w-0',
-  pickerRowButton: 'pr-8',
-  pickerRowDelete: 'absolute right-1 top-1/2 size-6 -translate-y-1/2 rounded-md text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/picker-row:opacity-100',
-  generalInstructionsDialog: 'caul-settings-dialog caul-large-modal-shell absolute z-50 grid h-[85vh] w-[85vw] max-w-[85vw] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-xl bg-popover text-sm text-popover-foreground ring-1 ring-foreground/10',
   generalInstructionsEditor: 'grid min-h-0 p-4',
-  promptTemplateDialog: 'caul-settings-dialog caul-large-modal-shell absolute z-50 grid h-[85vh] w-[85vw] max-w-[85vw] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-xl bg-popover text-sm text-popover-foreground ring-1 ring-foreground/10',
-  promptTemplateHeader: 'flex h-12 items-center justify-center border-b border-border px-12',
-  promptTemplateHeaderMac: '',
   promptTemplateEditor: 'grid min-h-0 flex-1 gap-0 md:grid-cols-[220px_minmax(0,1fr)]',
   promptTemplateSidebar: 'flex flex-col gap-3 border-b border-border p-4 md:border-b-0 md:border-r',
   promptTemplateEditorForm: 'grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3 p-4',
@@ -258,10 +245,7 @@ const layout = {
   promptTemplateAttachmentItem: 'flex min-h-12 items-center gap-2 border-b border-border px-3 py-2 last:border-b-0',
   promptTemplateAttachmentName: 'min-w-0 flex-1',
   promptTemplateAttachmentMeta: 'truncate text-xs text-muted-foreground',
-  promptTemplateFooter: 'mx-0 mb-0',
   handleRoot: 'grid h-screen w-screen overflow-hidden place-items-center bg-transparent text-foreground',
-  handleButton: 'caul-handle-button',
-  handleButtonOpen: '',
   placeholder: 'box-border flex h-full min-h-0 items-center justify-center overflow-y-auto whitespace-pre-wrap px-6 py-6 text-center text-sm text-muted-foreground',
   startHereHint: 'caul-start-here-nudge caul-primary-glow-nudge pointer-events-none absolute left-2 top-4 z-20 flex w-[74%] max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-md border border-primary/35 bg-background/95 px-3 py-2 text-left shadow-lg ring-1 ring-primary/10 backdrop-blur',
   startHereArrow: 'size-5 shrink-0 text-[#34424A] dark:text-[#8EA6AD]',
@@ -727,6 +711,7 @@ export function App() {
   const llmOutputRef = useRef<HTMLDivElement>(null);
   const hasInitialisedTranscriptionModelRef = useRef(false);
   const autoSelectingReadyModelRef = useRef<LocalTranscriptionModelId | null>(null);
+  const promptTemplateSaveRevisionRef = useRef(0);
 
   const isListening = transcription.isListening;
   const isBusy = transcription.isStarting;
@@ -1194,7 +1179,18 @@ export function App() {
       return;
     }
 
-    applyPromptTemplateState(await bridge.save(template));
+    const saveRevision = promptTemplateSaveRevisionRef.current + 1;
+    promptTemplateSaveRevisionRef.current = saveRevision;
+    setPromptTemplates((currentTemplates) => resolvePromptTemplateNameCollisions(
+      currentTemplates.some((item) => item.id === template.id)
+        ? currentTemplates.map((item) => (item.id === template.id ? template : item))
+        : [...currentTemplates, template]
+    ));
+
+    const state = await bridge.save(template);
+    if (saveRevision === promptTemplateSaveRevisionRef.current) {
+      applyPromptTemplateState(state);
+    }
   }
 
   async function deletePromptTemplate(id: string) {
@@ -1564,7 +1560,7 @@ export function App() {
         </TooltipProvider>
       </main>
       <TooltipProvider>
-        <PrivateOverlayResizeHandles />
+        <OverlayResizeHandles />
       </TooltipProvider>
     </div>
   );
@@ -2071,7 +2067,7 @@ function OnboardingFooter({
             </Button>
           </TooltipTrigger>
           {disabled && !isCompleting ? (
-            <TooltipContent className="max-w-64 text-left" side="top">
+            <TooltipContent className="max-w-64" side="top">
               <p className="font-medium">Still needed</p>
               <ul className="mt-1 list-disc pl-4">
                 {missingItems.map((item) => <li key={item}>{item}</li>)}
@@ -2280,13 +2276,12 @@ function AiProviderSetup({
   return (
     <Tabs className="grid gap-3" value={selectedProvider}>
       <div className="flex min-w-0 items-center gap-2">
-        <TabsList aria-label="AI provider" className="h-auto w-full rounded-md border border-border bg-muted/30 p-0.5">
+        <TabsList aria-label="AI provider" className="h-auto w-full p-0.5">
           {(['local', 'cloud'] as AiProvider[]).map((provider) => (
             <TabsTrigger
               key={provider}
-              activeVariant="primary"
               aria-label={provider === 'local' ? 'Local' : 'Cloud'}
-              className="h-9 rounded-[6px] px-3"
+              className="h-9 px-3"
               onClick={() => onSelectProvider(provider)}
               value={provider}
             >
@@ -2305,7 +2300,7 @@ function AiProviderSetup({
         ) : null}
       </div>
 
-      <TabsContent className="grid gap-3 text-left" value="local">
+      <TabsContent className="grid gap-3" value="local">
         {selectedProvider === 'local' ? (
           <>
           <p className="text-sm leading-5 text-muted-foreground">
@@ -2325,7 +2320,7 @@ function AiProviderSetup({
           </>
         ) : null}
       </TabsContent>
-      <TabsContent className="grid gap-3 text-left" value="cloud">
+      <TabsContent className="grid gap-3" value="cloud">
         {selectedProvider === 'cloud' ? (
           showCloudProviderCards ? (
             <CloudProviderOnboarding
@@ -2834,7 +2829,7 @@ function CloudProviderOnboarding({
         </DialogContent>
       </Dialog>
 
-      <Dialog
+      <AlertDialog
         open={Boolean(apiKeyProviderToRemove)}
         onOpenChange={(open) => {
           if (!open && !isRemovingApiKey) {
@@ -2842,31 +2837,28 @@ function CloudProviderOnboarding({
           }
         }}
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
               {apiKeyProviderToRemove ? `Remove ${apiKeyProviderToRemove.name} API key?` : 'Remove API key?'}
-            </DialogTitle>
-            <DialogDescription>
+            </AlertDialogTitle>
+            <AlertDialogDescription>
               Caul will permanently delete the encrypted key from this computer. This does not revoke or delete the key in your provider account.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose render={<Button disabled={isRemovingApiKey} type="button" variant="outline" />}>
-              Cancel
-            </DialogClose>
-            <Button
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isRemovingApiKey}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
               disabled={isRemovingApiKey || !apiKeyProviderIdToRemove}
               onClick={() => apiKeyProviderIdToRemove && void removeSavedApiKey(apiKeyProviderIdToRemove)}
-              type="button"
               variant="destructive"
             >
               {isRemovingApiKey ? <Spinner aria-hidden="true" data-icon="inline-start" /> : null}
               {isRemovingApiKey ? 'Removing' : 'Remove key'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
@@ -2948,13 +2940,14 @@ function LocalAiDownloadControl({
           </Button>
           {info}
         </div>
-        <p
-          aria-live="polite"
-          className={statusPlacement === 'inline' ? inlineProgressClassName : progressClassName}
-          title={displayProgress.accessibleLabel}
+        <Progress
+          aria-label={displayProgress.accessibleLabel}
+          className="w-full max-w-sm"
+          value={status?.progress?.percent ?? null}
         >
-          {displayProgress.label}
-        </p>
+          <ProgressLabel className="sr-only">Download local AI</ProgressLabel>
+          <ProgressValue>{() => displayProgress.label}</ProgressValue>
+        </Progress>
       </div>
     );
   }
@@ -3091,15 +3084,14 @@ function IssueActionInfoIcon({
       <TooltipTrigger
         render={<Button
           aria-label={label}
-          className="inline-flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
-          size="icon-sm"
+          size="icon-xs"
           type="button"
           variant="ghost"
         />}
       >
-        <InfoIcon className="size-3" />
+        <InfoIcon />
       </TooltipTrigger>
-      <TooltipContent className="w-72 px-3 py-2 text-left text-sm leading-5" side="top">
+      <TooltipContent className="w-72" side="top">
         {message}
       </TooltipContent>
     </Tooltip>
@@ -3225,15 +3217,14 @@ function SettingInfoButton({
       <TooltipTrigger
         render={<Button
           aria-label={label}
-          className="inline-flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-          size="icon-sm"
+          size="icon-xs"
           type="button"
           variant="ghost"
         />}
       >
-        <InfoIcon className="size-3.5" />
+        <InfoIcon />
       </TooltipTrigger>
-      <TooltipContent className="w-64 px-3 py-2 text-left font-normal leading-5" side="bottom">
+      <TooltipContent className="w-64" side="bottom">
         {message}
       </TooltipContent>
     </Tooltip>
@@ -3254,15 +3245,14 @@ function EmbeddedInfoTooltip({
       <TooltipTrigger
         render={<Button
           aria-label={label}
-          className="inline-flex size-5 shrink-0 items-center justify-center rounded-full text-current opacity-85 hover:bg-current/10 hover:opacity-100"
-          size="icon-sm"
+          size="icon-xs"
           type="button"
           variant="ghost"
         />}
       >
-        <InfoIcon className="size-3.5" />
+        <InfoIcon />
       </TooltipTrigger>
-      <TooltipContent className="w-72 p-3" side={side}>
+      <TooltipContent className="w-72" side={side}>
         {children}
       </TooltipContent>
     </Tooltip>
@@ -3414,7 +3404,7 @@ function LocalAiRecommendationInfoButton({
   return (
     <Tooltip>
       <TooltipTrigger render={trigger!} />
-      <TooltipContent align="end" className="w-72 p-3" side="top">
+      <TooltipContent align="end" className="w-72" side="top">
         {content}
       </TooltipContent>
     </Tooltip>
@@ -3577,7 +3567,7 @@ function OnboardingTranscriptionStatus({ status }: { status: OnboardingStatus | 
     <StatusRow
       action={canAutoDownload
         ? <Spinner />
-        : <Badge className="h-8 px-2.5 text-sm" variant="destructive">Not ready</Badge>}
+        : <Badge className="h-8 px-2.5" variant="destructive">Not ready</Badge>}
       label={canAutoDownload ? 'Preparing local transcription' : 'Transcription setup needs attention'}
       ready={false}
     />
@@ -3649,8 +3639,8 @@ function TranscriptionModelRow({
     ? `grid ${controlWidthClassName} items-center gap-2`
     : `grid min-h-10 ${controlWidthClassName} items-center gap-2`;
   const optionButtonClassName = variant === 'settings'
-    ? 'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[6px] px-3 text-sm font-medium whitespace-nowrap transition-colors'
-    : 'inline-flex h-9 min-w-0 flex-1 items-center justify-center gap-1.5 overflow-hidden rounded-[6px] px-3 text-sm font-medium whitespace-nowrap transition-colors';
+    ? 'h-8 shrink-0 gap-1.5 px-3 whitespace-nowrap'
+    : 'h-9 min-w-0 flex-1 gap-1.5 overflow-hidden px-3 whitespace-nowrap';
   const optionLabelClassName = variant === 'settings'
     ? 'block shrink-0 whitespace-nowrap'
     : 'block min-w-0 truncate';
@@ -3669,7 +3659,7 @@ function TranscriptionModelRow({
     <Tabs className={`grid ${rootGapClassName}`} value={selectedModelId}>
       <div className={controlWrapperClassName}>
         <div className="flex min-w-0 items-center gap-2">
-          <TabsList className={`h-auto ${controlWidthClassName} min-w-0 rounded-md border border-border bg-muted/30 p-0.5`} aria-label="Transcription model">
+          <TabsList className={`h-auto ${controlWidthClassName} min-w-0 p-0.5`} aria-label="Transcription model">
             {localTranscriptionModelOptions.map((option) => {
               const isSelected = selectedModelId === option.value;
               const isRecommended = recommendedModelId === option.value;
@@ -3677,7 +3667,6 @@ function TranscriptionModelRow({
               return (
                 <TabsTrigger
                   key={option.value}
-                  activeVariant="primary"
                   aria-label={`${option.label}${isRecommended ? ` ${recommendedPillLabel}` : ''}`}
                   className={optionButtonClassName}
                   onClick={() => onSelectModel(option.value)}
@@ -3701,7 +3690,7 @@ function TranscriptionModelRow({
         <input name="transcription-model" readOnly type="hidden" value={selectedModelId} />
       </div>
       {localTranscriptionModelOptions.map((option) => (
-        <TabsContent key={option.value} className={`grid ${widthClassName} ${rootGapClassName} text-left`} value={option.value}>
+        <TabsContent key={option.value} className={`grid ${widthClassName} ${rootGapClassName}`} value={option.value}>
           {selectedModelId === option.value ? (
             <>
               <p className={layout.settingsDescription}>{selectedModel.detail}</p>
@@ -3767,7 +3756,7 @@ function ReadySetupPill({
 }) {
   return (
     <div className="inline-flex shrink-0 items-center gap-1.5">
-      <Badge className={cn(size === 'action' && 'h-8 px-2.5 text-sm')} variant="default">
+      <Badge className={cn(size === 'action' && 'h-8 px-2.5')} variant="default">
         <span className="inline-flex items-center gap-1">
           <CheckCircle2Icon data-icon="inline-start" />
           {label}
@@ -3902,7 +3891,6 @@ function PermissionSetupRow({
             <TooltipTrigger
               render={<Button
                 aria-label={`${permission.label} permission info`}
-                className="inline-flex size-6 shrink-0 cursor-default items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
                 size="icon-sm"
                 type="button"
                 variant="ghost"
@@ -3918,7 +3906,7 @@ function PermissionSetupRow({
           </Tooltip>
         </div>
         <div className="flex items-center gap-1.5">
-          <Badge className={cn(issuePanel && 'h-7 px-2.5 text-sm')} variant={ready ? 'secondary' : 'destructive'}>
+          <Badge className={cn(issuePanel && 'h-7 px-2.5')} variant={ready ? 'secondary' : 'destructive'}>
             {statusLabel}
           </Badge>
           {!ready ? (
@@ -4083,108 +4071,6 @@ function isVerticalToolbarEdge(edge: OverlayEdge) {
   return false;
 }
 
-type OverlayResizeDirection = 'n' | 'e' | 's' | 'w' | 'ne' | 'se' | 'sw' | 'nw';
-
-function PrivateOverlayResizeHandles() {
-  const resizeStateRef = useRef<{
-    direction: OverlayResizeDirection;
-    pointerId: number;
-  } | null>(null);
-  const handles: Array<{
-    className: string;
-    direction: OverlayResizeDirection;
-  }> = [
-    { className: layout.overlayResizeHandleN, direction: 'n' },
-    { className: layout.overlayResizeHandleE, direction: 'e' },
-    { className: layout.overlayResizeHandleS, direction: 's' },
-    { className: layout.overlayResizeHandleW, direction: 'w' },
-    { className: layout.overlayResizeHandleNE, direction: 'ne' },
-    { className: layout.overlayResizeHandleSE, direction: 'se' },
-    { className: layout.overlayResizeHandleSW, direction: 'sw' },
-    { className: layout.overlayResizeHandleNW, direction: 'nw' }
-  ];
-
-  function getResizePoint(event: PointerEvent<HTMLDivElement>, direction: OverlayResizeDirection) {
-    return {
-      direction,
-      screenX: event.screenX,
-      screenY: event.screenY
-    };
-  }
-
-  function handlePointerDown(event: PointerEvent<HTMLDivElement>, direction: OverlayResizeDirection) {
-    if (event.button !== 0) {
-      return;
-    }
-
-    const bridge = getPrivateOverlayBridge();
-
-    if (!bridge) {
-      return;
-    }
-
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    resizeStateRef.current = {
-      direction,
-      pointerId: event.pointerId
-    };
-
-    void bridge.resizeWindowStart(getResizePoint(event, direction));
-  }
-
-  function handlePointerMove(event: PointerEvent<HTMLDivElement>) {
-    const resizeState = resizeStateRef.current;
-
-    if (!resizeState || resizeState.pointerId !== event.pointerId) {
-      return;
-    }
-
-    event.preventDefault();
-    void getPrivateOverlayBridge()?.resizeWindowMove(getResizePoint(event, resizeState.direction));
-  }
-
-  function handlePointerEnd(event: PointerEvent<HTMLDivElement>) {
-    const resizeState = resizeStateRef.current;
-
-    if (!resizeState || resizeState.pointerId !== event.pointerId) {
-      return;
-    }
-
-    resizeStateRef.current = null;
-
-    if (
-      typeof event.currentTarget.hasPointerCapture === 'function'
-      && typeof event.currentTarget.releasePointerCapture === 'function'
-      && event.currentTarget.hasPointerCapture(event.pointerId)
-    ) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-
-    event.preventDefault();
-    void getPrivateOverlayBridge()?.resizeWindowEnd(getResizePoint(event, resizeState.direction));
-  }
-
-  return (
-    <>
-      {handles.map((handle) => (
-        <div
-          key={handle.direction}
-          aria-hidden="true"
-          className={`${layout.overlayResizeHandle} ${handle.className}`}
-          data-dialog-interaction-preserved
-          data-resize-direction={handle.direction}
-          onPointerCancel={handlePointerEnd}
-          onPointerDown={(event) => handlePointerDown(event, handle.direction)}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerEnd}
-          role="presentation"
-        />
-      ))}
-    </>
-  );
-}
-
 function PrivateOverlayWindowTitleBar({
   appTitle,
   isMac,
@@ -4302,31 +4188,6 @@ function PrivateOverlayWindowTitleBar({
     void getSettingsBridge()?.quit?.();
   }
 
-  const quitConfirmationContent = (
-    <PopoverContent
-      align={isMac ? 'start' : 'end'}
-      aria-label="Quit Caul confirmation"
-      className="w-56 gap-3"
-      side="bottom"
-      sideOffset={8}
-    >
-      <div className="space-y-1">
-        <h2 className="text-sm font-medium text-foreground">Quit Caul?</h2>
-        <p className="text-xs text-muted-foreground">
-          This will stop Caul and close the app completely.
-        </p>
-      </div>
-      <div className="flex justify-end gap-2">
-        <Button onClick={() => setIsQuitConfirmationOpen(false)} size="sm" type="button" variant="outline">
-          Cancel
-        </Button>
-        <Button onClick={confirmQuit} size="sm" type="button" variant="destructive">
-          Quit Caul
-        </Button>
-      </div>
-    </PopoverContent>
-  );
-
   return (
     <>
       <header className={layout.windowTitleBar}>
@@ -4342,28 +4203,26 @@ function PrivateOverlayWindowTitleBar({
         </div>
         {isMac ? (
           <>
-            <button
+            <MacosWindowButton
+              action="close"
               aria-label="Hide Caul app"
-              className={layout.windowTitleBarMacCloseButton}
-              data-platform="macos"
               onClick={() => void getPrivateOverlayBridge()?.hide()}
+              placement="titlebar"
               title="Hide Caul app"
-              type="button"
             />
-            <Popover open={isQuitConfirmationOpen} onOpenChange={setIsQuitConfirmationOpen}>
-              <PopoverTrigger
-                render={<button
+            <AlertDialog open={isQuitConfirmationOpen} onOpenChange={setIsQuitConfirmationOpen}>
+              <AlertDialogTrigger
+                render={<MacosWindowButton
+                  action="quit"
                   aria-label="Quit Caul"
-                  className={layout.windowTitleBarMacQuitButton}
-                  data-platform="macos"
+                  placement="titlebar"
                   title="Quit Caul completely"
-                  type="button"
                 />}
               >
                 <PowerIcon />
-              </PopoverTrigger>
-              {quitConfirmationContent}
-            </Popover>
+              </AlertDialogTrigger>
+              <QuitCaulAlertDialog onConfirm={confirmQuit} />
+            </AlertDialog>
           </>
         ) : (
           <>
@@ -4379,8 +4238,8 @@ function PrivateOverlayWindowTitleBar({
             >
               <XIcon />
             </Button>
-            <Popover open={isQuitConfirmationOpen} onOpenChange={setIsQuitConfirmationOpen}>
-              <PopoverTrigger
+            <AlertDialog open={isQuitConfirmationOpen} onOpenChange={setIsQuitConfirmationOpen}>
+              <AlertDialogTrigger
                 render={<Button
                   aria-label="Quit Caul"
                   className={layout.windowTitleBarQuitButton}
@@ -4392,21 +4251,23 @@ function PrivateOverlayWindowTitleBar({
                 />}
               >
                 <PowerIcon />
-              </PopoverTrigger>
-              {quitConfirmationContent}
-            </Popover>
+              </AlertDialogTrigger>
+              <QuitCaulAlertDialog onConfirm={confirmQuit} />
+            </AlertDialog>
           </>
         )}
         <Tooltip>
           <TooltipTrigger
-            render={<button
+            render={<Button
               aria-label="Open history folder"
               className={`${layout.windowTitleBarSettingsButton} ${isMac ? layout.windowTitleBarHistoryButtonMac : layout.windowTitleBarHistoryButtonDesktop}`}
               onClick={onOpenHistoryFolder}
+              size="icon"
               type="button"
+              variant="ghost"
             />}
           >
-            <HistoryIcon className="mx-auto size-4" />
+            <HistoryIcon />
           </TooltipTrigger>
           <TooltipContent side="bottom">Open history folder</TooltipContent>
         </Tooltip>
@@ -4419,20 +4280,35 @@ function PrivateOverlayWindowTitleBar({
         ) : null}
         <Tooltip>
           <TooltipTrigger
-            render={<button
+            render={<Toggle
               aria-label="Caul Settings"
-              aria-pressed={isSettingsOpen}
-              className={`${layout.windowTitleBarSettingsButton} ${isMac ? layout.windowTitleBarSettingsButtonMac : layout.windowTitleBarSettingsButtonDesktop} ${isSettingsOpen ? 'bg-muted text-foreground' : ''}`}
-              onClick={onToggleSettings}
-              type="button"
+              className={`${layout.windowTitleBarSettingsButton} ${isMac ? layout.windowTitleBarSettingsButtonMac : layout.windowTitleBarSettingsButtonDesktop}`}
+              onPressedChange={onToggleSettings}
+              pressed={isSettingsOpen}
+              size="default"
             />}
           >
-            <SettingsIcon className="mx-auto size-4" />
+            <SettingsIcon />
           </TooltipTrigger>
           <TooltipContent side="bottom">Open Caul settings</TooltipContent>
         </Tooltip>
       </header>
     </>
+  );
+}
+
+function QuitCaulAlertDialog({ onConfirm }: { onConfirm: () => void }) {
+  return (
+    <AlertDialogContent>
+      <AlertDialogHeader>
+        <AlertDialogTitle>Quit Caul?</AlertDialogTitle>
+        <AlertDialogDescription>This will stop Caul and close the app completely.</AlertDialogDescription>
+      </AlertDialogHeader>
+      <AlertDialogFooter>
+        <AlertDialogCancel>Cancel</AlertDialogCancel>
+        <AlertDialogAction onClick={onConfirm} variant="destructive">Quit Caul</AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
   );
 }
 
@@ -4460,7 +4336,7 @@ function MainNotificationButton({
           variant="ghost"
         />}
       >
-        <BellIcon className="mx-auto size-4" />
+        <BellIcon />
         <span className={`absolute right-1 top-1 size-1.5 rounded-full ${hasError ? 'bg-destructive' : 'bg-primary'}`} />
       </PopoverTrigger>
       <PopoverContent aria-label="Caul notifications" align="end" className="w-64 gap-2" side="bottom" sideOffset={8}>
@@ -4469,7 +4345,7 @@ function MainNotificationButton({
           {notifications.map((notification) => (
             <Button
               key={notification.id}
-              className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              className="w-full justify-between gap-2"
               onClick={() => {
                 setOpen(false);
                 onOpenSettingsTarget(notification.target);
@@ -4478,7 +4354,7 @@ function MainNotificationButton({
               variant="ghost"
             >
               <span>{notification.label}</span>
-              <ChevronRightIcon className="size-4 text-muted-foreground" />
+              <ChevronRightIcon data-icon="inline-end" />
             </Button>
           ))}
         </div>
@@ -4635,11 +4511,9 @@ function PrivateOverlayHandleSurface() {
 
   return (
     <main className={layout.handleRoot} aria-label="Caul overlay handle">
-      <button
+      <OverlayHandleButton
         aria-label="Toggle Caul app"
-        className={`${layout.handleButton} ${isOverlayOpen ? layout.handleButtonOpen : ''}`.trim()}
         data-motion={handleMotion}
-        data-open={isOverlayOpen ? 'true' : 'false'}
         onContextMenu={(event) => {
           event.preventDefault();
           void getPrivateOverlayBridge()?.showHandleMenu();
@@ -4648,11 +4522,11 @@ function PrivateOverlayHandleSurface() {
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerEnd}
+        open={isOverlayOpen}
         title="Toggle Caul app"
-        type="button"
       >
         <span aria-hidden="true" className="caul-handle-icon" style={handleIconStyle} />
-      </button>
+      </OverlayHandleButton>
     </main>
   );
 }
@@ -5434,45 +5308,27 @@ function GeneralInstructionsDialog({
   onSave: (instructions: string) => void;
   open: boolean;
 }) {
-  const dialogRef = useManagedDialogFocus(open, () => onOpenChange(false));
-
-  if (!open) {
-    return null;
-  }
-
   return (
-    <>
-      <div
-        aria-hidden="true"
-        aria-label="Close general instructions backdrop"
-        className={layout.settingsBackdrop}
-        data-dialog-backdrop="general-instructions"
-        onClick={() => onOpenChange(false)}
-      />
-      <section
-        ref={dialogRef}
-        aria-describedby="general-instructions-dialog-description"
-        aria-labelledby="general-instructions-dialog-title"
-        aria-modal="true"
-        className={layout.generalInstructionsDialog}
-        role="dialog"
-        tabIndex={-1}
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="h-[85vh] w-[85vw] max-w-[85vw] grid-rows-[auto_minmax(0,1fr)] overflow-hidden p-0 sm:max-w-[85vw]"
+        showCloseButton={false}
       >
         <PlatformDialogCloseButton isMac={isMac} label="Close general instructions" onClick={() => onOpenChange(false)} />
-        <div className={`${layout.promptTemplateHeader} ${isMac ? layout.promptTemplateHeaderMac : ''}`}>
-          <h2 id="general-instructions-dialog-title" className={layout.modalHeaderTitle}>Instructions</h2>
-          <p id="general-instructions-dialog-description" className="sr-only">
+        <DialogHeader className="h-12 items-center justify-center px-12">
+          <DialogTitle>Instructions</DialogTitle>
+          <DialogDescription className="sr-only">
             Add preferences you want every AI reply to follow, like spelling, tone, format or how concise to be.
-          </p>
-        </div>
+          </DialogDescription>
+        </DialogHeader>
         <div className={layout.generalInstructionsEditor}>
           <Field className="min-h-0">
-            <p className={layout.settingsDescription}>
+            <FieldLabel htmlFor="general-instructions">
               Add preferences you want every AI reply to follow, like spelling, tone, format or how concise to be.
-            </p>
+            </FieldLabel>
             <Textarea
               aria-label="Instructions"
-              className="min-h-0 flex-1 resize-none"
+              className="min-h-0 flex-1"
               id="general-instructions"
               onChange={(event) => onSave(event.target.value)}
               placeholder={generalInstructionsPlaceholder}
@@ -5480,8 +5336,8 @@ function GeneralInstructionsDialog({
             />
           </Field>
         </div>
-      </section>
-    </>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -5554,21 +5410,20 @@ function HomeActionToolbar({
       : 'Select a sound input or output source to listen to using the source buttons.';
   const autoSendControl = (
     <div className={isVertical ? layout.sideToolbarRow : undefined}>
-      <TooltipButton
+      <TooltipToggle
         aria-label={autoSendLabel}
-        aria-pressed={sendToAiWhenListeningStops}
-        className={`${isVertical ? layout.sideToolbarButton : layout.compactToolbarButton} ${sendToAiWhenListeningStops && canUseAi ? layout.listeningSourceIndicatorActive : 'text-muted-foreground'}`.trim()}
+        className={isVertical ? layout.sideToolbarButton : layout.compactToolbarButton}
         disabled={!canUseAi}
         flashTooltipOnClick
-        onClick={() => setSendToAiWhenListeningStops(!sendToAiWhenListeningStops)}
-        size={isVertical ? 'icon-lg' : 'lg'}
+        onPressedChange={setSendToAiWhenListeningStops}
+        pressed={sendToAiWhenListeningStops}
+        size="lg"
         tooltip={autoSendTooltip}
         tooltipSide={tooltipSide}
-        type="button"
         variant="outline"
       >
-        <span className="relative inline-flex size-4 items-center justify-center">
-          <FastForwardIcon className="size-4" />
+        <span className="relative inline-flex size-4 items-center justify-center" data-icon="inline-start">
+          <FastForwardIcon className="size-4" data-icon="inline-start" />
           {!sendToAiWhenListeningStops && (
             <span
               aria-hidden="true"
@@ -5577,7 +5432,7 @@ function HomeActionToolbar({
           )}
         </span>
         <span className={isVertical ? 'sr-only' : layout.expandedToolbarButtonLabel}>{autoSendLabel}</span>
-      </TooltipButton>
+      </TooltipToggle>
     </div>
   );
   const primaryControls = (
@@ -5585,7 +5440,7 @@ function HomeActionToolbar({
       <div className={isVertical ? layout.sideToolbarRow : undefined}>
         <TooltipButton
           aria-label={startButtonLabel}
-          className={`${isVertical ? layout.sideToolbarButton : `${layout.listeningButton} ${layout.compactToolbarButton}`} ${isListening ? '' : layout.startButton} ${!canStartListening && !isListening ? 'cursor-not-allowed opacity-50' : ''}`.trim()}
+          className={isVertical ? layout.sideToolbarButton : `${layout.listeningButton} ${layout.compactToolbarButton}`}
           disabled={startButtonDisabled}
           onClick={toggleListening}
           size="lg"
@@ -5596,12 +5451,12 @@ function HomeActionToolbar({
         >
           {isListening ? (
             <>
-              <SquareIcon />
+              <SquareIcon data-icon="inline-start" />
               <span className={isVertical ? layout.sideToolbarButtonLabel : layout.compactToolbarButtonLabel}>{startButtonLabel}</span>
             </>
           ) : (
             <>
-              <PlayIcon />
+              <PlayIcon data-icon="inline-start" />
               <span className={isVertical ? layout.sideToolbarButtonLabel : layout.compactToolbarButtonLabel}>{startButtonLabel}</span>
             </>
           )}
@@ -5645,7 +5500,7 @@ function HomeActionToolbar({
           type="button"
           variant="outline"
         >
-          <FileTextIcon />
+          <FileTextIcon data-icon="inline-start" />
           <span className={isVertical ? 'sr-only' : layout.expandedToolbarButtonLabel}>Instructions</span>
         </TooltipButton>
       </div>
@@ -5758,7 +5613,7 @@ function TranscriptBottomActionControls({
 }) {
   return (
     <>
-      <div className={layout.homeToolbarBottomActionGroup}>
+      <ButtonGroup className={layout.homeToolbarBottomActionGroup}>
         <TooltipButton
           aria-label="Copy full transcript"
           className={showLabels ? layout.compactToolbarButton : undefined}
@@ -5770,7 +5625,7 @@ function TranscriptBottomActionControls({
           type="button"
           variant="outline"
         >
-          <CopyIcon />
+          <CopyIcon data-icon="inline-start" />
           <span className={showLabels ? layout.expandedToolbarButtonLabel : 'sr-only'}>Copy</span>
         </TooltipButton>
         <DownloadTranscriptPopover
@@ -5797,7 +5652,7 @@ function TranscriptBottomActionControls({
           tooltip="Clear transcript feed"
           tooltipSide={tooltipSide}
         />
-      </div>
+      </ButtonGroup>
       <TooltipButton
         aria-label="Send full transcript to AI"
         disabled={!canUseAi || !hasTranscript || transcriptionIsAsking}
@@ -5809,7 +5664,7 @@ function TranscriptBottomActionControls({
         type="button"
         variant="outline"
       >
-        <SendIcon />
+        <SendIcon data-icon="inline-start" />
         <span className={showLabels ? layout.expandedToolbarButtonLabel : 'sr-only'}>Send</span>
       </TooltipButton>
     </>
@@ -5832,7 +5687,7 @@ function AiResponseBottomActionControls({
   tooltipSide: TooltipSide;
 }) {
   return (
-    <div className={layout.homeToolbarBottomActionGroup}>
+    <ButtonGroup className={layout.homeToolbarBottomActionGroup}>
       <TooltipButton
       aria-label="Copy all AI responses"
       className={showLabels ? layout.compactToolbarButton : undefined}
@@ -5844,7 +5699,7 @@ function AiResponseBottomActionControls({
         type="button"
         variant="outline"
     >
-      <CopyIcon />
+      <CopyIcon data-icon="inline-start" />
       <span className={showLabels ? layout.expandedToolbarButtonLabel : 'sr-only'}>Copy</span>
     </TooltipButton>
     <DownloadTranscriptPopover
@@ -5873,7 +5728,7 @@ function AiResponseBottomActionControls({
       tooltip="Clear AI response feed"
       tooltipSide={tooltipSide}
     />
-    </div>
+    </ButtonGroup>
   );
 }
 
@@ -5910,8 +5765,8 @@ function ConfirmClearButton({
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
+    <AlertDialog open={open} onOpenChange={setOpen}>
+      <AlertDialogTrigger
         render={<TooltipButton
           aria-label={ariaLabel}
           className={className}
@@ -5923,24 +5778,20 @@ function ConfirmClearButton({
           variant="outline"
         />}
       >
-        <Trash2Icon />
+        <Trash2Icon data-icon="inline-start" />
         <span className={showLabels ? layout.expandedToolbarButtonLabel : 'sr-only'}>Clear</span>
-      </PopoverTrigger>
-      <PopoverContent aria-label={title} align="end" className="w-64 gap-3" side={tooltipSide}>
-        <div>
-          <div className="text-sm font-medium">{title}</div>
-          <p className="text-sm text-muted-foreground">{description}</p>
-        </div>
-        <div className="flex justify-end gap-2">
-          <Button onClick={() => setOpen(false)} type="button" variant="outline">
-            Cancel
-          </Button>
-          <Button onClick={confirm} type="button" variant="destructive">
-            {actionLabel}
-          </Button>
-        </div>
-      </PopoverContent>
-    </Popover>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+          <AlertDialogDescription>{description}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={confirm} variant="destructive">{actionLabel}</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 
@@ -6065,24 +5916,23 @@ function ListeningSourceIndicator({
   visibleLabel: string;
 }) {
   return (
-    <TooltipButton
+    <TooltipToggle
       aria-label={`${label} ${active ? 'on' : 'off'}`}
-      aria-pressed={active}
-      className={`${showLabel ? layout.compactToolbarButton : ''} ${active ? layout.listeningSourceIndicatorActive : 'text-muted-foreground'}`.trim()}
+      className={showLabel ? layout.compactToolbarButton : undefined}
       flashTooltipOnClick
-      onClick={onToggle}
-      size={showLabel ? 'lg' : 'icon-lg'}
+      onPressedChange={onToggle}
+      pressed={active}
+      size="lg"
       title={title}
       tooltip={tooltip}
       tooltipSide={tooltipSide}
-      type="button"
       variant="outline"
     >
       {icon}
       <span className={showLabel ? layout.expandedToolbarButtonLabel : 'sr-only'}>
         {showLabel ? visibleLabel : `${label} ${active ? 'on' : 'off'}`}
       </span>
-    </TooltipButton>
+    </TooltipToggle>
   );
 }
 
@@ -6177,8 +6027,8 @@ function AiResponseSection({
             tooltip={getAiInputTooltip(request)}
             tooltipClassName={layout.sectionPreviewTooltip}
             tooltipInteractive
+            tooltipScrollable
             tooltipSide="bottom"
-            onWheel={scrollOpenPreviewTooltip}
             type="button"
             variant="outline"
           >
@@ -6192,8 +6042,8 @@ function AiResponseSection({
             tooltip={getActionTooltipWithPreview('Copy this AI response to clipboard', collapsedPreview)}
             tooltipClassName={collapsedPreview ? layout.sectionPreviewTooltip : undefined}
             tooltipInteractive={collapsedPreview !== null}
+            tooltipScrollable={collapsedPreview !== null}
             tooltipSide="bottom"
-            onWheel={collapsedPreview ? scrollOpenPreviewTooltip : undefined}
             type="button"
             variant="outline"
           >
@@ -6216,7 +6066,7 @@ function AiResponseSection({
         {isWaiting && !hasResponse ? (
           <Spinner aria-label="Waiting for response" />
         ) : (
-          <ReactMarkdown>{response}</ReactMarkdown>
+          <SafeMarkdown>{response}</SafeMarkdown>
         )}
       </div>
       ) : null}
@@ -6611,8 +6461,8 @@ function TranscriptSessionSection({
                 tooltip={getActionTooltipWithPreview('Copy this transcript to clipboard', collapsedPreview)}
                 tooltipClassName={collapsedPreview ? layout.sectionPreviewTooltip : undefined}
                 tooltipInteractive={collapsedPreview !== null}
+                tooltipScrollable={collapsedPreview !== null}
                 tooltipSide="bottom"
-                onWheel={collapsedPreview ? scrollOpenPreviewTooltip : undefined}
                 type="button"
                 variant="outline"
               >
@@ -6634,8 +6484,8 @@ function TranscriptSessionSection({
                 tooltip={getActionTooltipWithPreview('Send this transcript to AI now', collapsedPreview)}
                 tooltipClassName={collapsedPreview ? layout.sectionPreviewTooltip : undefined}
                 tooltipInteractive={collapsedPreview !== null}
+                tooltipScrollable={collapsedPreview !== null}
                 tooltipSide="bottom"
-                onWheel={collapsedPreview ? scrollOpenPreviewTooltip : undefined}
                 type="button"
                 variant="outline"
               >
@@ -6701,10 +6551,10 @@ function SectionCollapseButton({
 }) {
   const button = (
     <Button
+      aria-expanded={!isCollapsed}
       aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${label}`}
       className={layout.sectionCollapseButton}
       onClick={onToggle}
-      onWheel={preview ? scrollOpenPreviewTooltip : undefined}
       size="icon"
       type="button"
       variant="ghost"
@@ -6720,9 +6570,9 @@ function SectionCollapseButton({
   return (
     <Tooltip disableHoverablePopup={false}>
       <TooltipTrigger render={button} />
-      <TooltipContent className={layout.sectionPreviewTooltip} collisionPadding={12} side="bottom">
+      <TooltipContent className={layout.sectionPreviewTooltip} previewScrollable side="bottom">
         <div className="markdown-output">
-          <ReactMarkdown>{formatPreviewMarkdown(preview)}</ReactMarkdown>
+          <SafeMarkdown>{formatPreviewMarkdown(preview)}</SafeMarkdown>
         </div>
       </TooltipContent>
     </Tooltip>
@@ -6742,7 +6592,7 @@ function getActionTooltipWithPreview(label: string, preview: string | null) {
     <div>
       <div className="mb-3 font-medium">{label}</div>
       <div className="markdown-output border-t border-primary-foreground/20 pt-3">
-        <ReactMarkdown>{formatPreviewMarkdown(preview)}</ReactMarkdown>
+        <SafeMarkdown>{formatPreviewMarkdown(preview)}</SafeMarkdown>
       </div>
     </div>
   );
@@ -6753,31 +6603,10 @@ function getAiInputTooltip(request: string) {
     <div>
       <div className="mb-3 font-medium">AI input</div>
       <div className="markdown-output border-t border-primary-foreground/20 pt-3">
-        <ReactMarkdown>{formatPreviewMarkdown(request)}</ReactMarkdown>
+        <SafeMarkdown>{formatPreviewMarkdown(request)}</SafeMarkdown>
       </div>
     </div>
   );
-}
-
-function scrollOpenPreviewTooltip(event: WheelEvent<HTMLElement>) {
-  const tooltip = document.querySelector<HTMLElement>('[data-slot="tooltip-content"].caul-preview-tooltip');
-
-  if (!tooltip) {
-    return;
-  }
-
-  const canScrollVertically = tooltip.scrollHeight > tooltip.clientHeight;
-  const canScrollHorizontally = tooltip.scrollWidth > tooltip.clientWidth;
-
-  if (!canScrollVertically && !canScrollHorizontally) {
-    return;
-  }
-
-  event.preventDefault();
-  tooltip.scrollBy({
-    left: canScrollHorizontally ? event.deltaX : 0,
-    top: canScrollVertically ? event.deltaY : 0
-  });
 }
 
 function getTranscriptSectionBody(transcript: string) {
@@ -6808,7 +6637,6 @@ function PromptTemplateSelector({
   tooltipSide?: TooltipSide;
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [isEditTooltipActive, setIsEditTooltipActive] = useState(false);
   const [search, setSearch] = useState('');
   const selectedTemplates = selectedTemplateIds
     .map((id) => templates.find((template) => template.id === id))
@@ -6825,17 +6653,6 @@ function PromptTemplateSelector({
     template.name.toLocaleLowerCase().includes(search.toLocaleLowerCase())
   ));
 
-  function clearTemplates() {
-    onSelect([]);
-    setSearch('');
-  }
-
-  function toggleTemplate(id: string) {
-    onSelect(selectedTemplateIds.includes(id)
-      ? selectedTemplateIds.filter((selectedId) => selectedId !== id)
-      : [...selectedTemplateIds, id]);
-  }
-
   return (
     <div className={isCompact ? layout.promptTemplateSelectorRootVertical : layout.promptTemplateSelectorRoot}>
       <div className={isCompact ? layout.promptTemplateSelectorPickerVertical : layout.promptTemplateSelectorPicker}>
@@ -6845,10 +6662,7 @@ function PromptTemplateSelector({
           setIsOpen(open);
         }}
       >
-        <Tooltip
-          key={isOpen || isEditTooltipActive ? 'closed' : 'automatic'}
-          open={isOpen || isEditTooltipActive ? false : undefined}
-        >
+        <Tooltip>
           <TooltipTrigger
             render={<PopoverTrigger
               render={<Button
@@ -6866,55 +6680,63 @@ function PromptTemplateSelector({
               <ChevronDownIcon className="prompt-template-trigger-chevron" />
             </PopoverTrigger>}
           />
-          <TooltipContent className="max-w-64 whitespace-pre-line break-words leading-4" collisionPadding={8} side={tooltipSide}>
+          <TooltipContent className="max-w-64 whitespace-pre-line" side={tooltipSide}>
             {selectedTemplateTooltip}
           </TooltipContent>
         </Tooltip>
         <PopoverContent aria-label="Prompt templates" align="start" className="w-80">
-          <div className={layout.promptTemplateSearch}>
-            <SearchIcon className={layout.promptTemplateSearchIcon} />
-            <Input
+          <InputGroup>
+            <InputGroupAddon>
+              <SearchIcon />
+            </InputGroupAddon>
+            <InputGroupInput
               aria-label="Search prompt templates"
-              className={layout.promptTemplateSearchInput}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search prompt templates"
               value={search}
             />
-          </div>
+          </InputGroup>
           <div className={`${layout.pickerList} ${layout.pickerListScrollable}`}>
-            <Button
-              aria-current={selectedTemplateIds.length === 0 ? 'true' : undefined}
-              data-active={selectedTemplateIds.length === 0}
-              onClick={clearTemplates}
-              type="button"
-              size="picker"
-              variant="picker"
+            <VerticalToggleGroup
+              aria-label="Selected prompt templates"
+              className="w-full"
+              multiple
+              onValueChange={(value) => {
+                if (value.includes('__none__') && selectedTemplateIds.length > 0) {
+                  onSelect([]);
+                  setSearch('');
+                  return;
+                }
+                onSelect(value.filter((id) => id !== '__none__'));
+              }}
+              value={selectedTemplateIds.length === 0 ? ['__none__'] : selectedTemplateIds}
             >
+            <ToggleGroupItem className="w-full justify-start" value="__none__">
               <span className={layout.pickerItemLabel}>No template</span>
-            </Button>
+            </ToggleGroupItem>
             {filteredTemplates.map((template) => {
               const isSelected = selectedTemplateIds.includes(template.id);
 
               return (
-                <Button
+                <ToggleGroupItem
                   key={template.id}
-                  aria-current={isSelected ? 'true' : undefined}
-                  aria-pressed={isSelected}
-                  className={layout.pickerCheckboxItem}
-                  data-active={isSelected}
-                  onClick={() => toggleTemplate(template.id)}
-                  type="button"
-                  size="picker"
-                  variant="picker"
+                  className="w-full justify-start"
+                  value={template.id}
                 >
-                  <CheckboxDisplay aria-hidden="true" checked={isSelected} />
+                  {isSelected ? <CheckCircle2Icon aria-hidden="true" data-icon="inline-start" /> : null}
                   <span className={layout.pickerItemLabel}>{template.name}</span>
-                </Button>
+                </ToggleGroupItem>
               );
             })}
             {filteredTemplates.length === 0 ? (
-              <p className="px-2 py-4 text-sm text-muted-foreground">No templates found.</p>
+              <Empty className="py-4">
+                <EmptyHeader>
+                  <EmptyTitle>No templates found</EmptyTitle>
+                  <EmptyDescription>Try a different search.</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
             ) : null}
+            </VerticalToggleGroup>
           </div>
         </PopoverContent>
       </Popover>
@@ -6922,14 +6744,10 @@ function PromptTemplateSelector({
       <div
         ref={editAnchorRef}
         className={isCompact ? layout.promptTemplateSelectorEditVertical : layout.promptTemplateSelectorEdit}
-        onFocus={() => setIsEditTooltipActive(true)}
-        onMouseEnter={() => setIsEditTooltipActive(true)}
-        onMouseLeave={() => setIsEditTooltipActive(false)}
       >
         <TooltipButton
           aria-label="Manage prompt templates"
           className={isCompact ? layout.sideToolbarIconButton : undefined}
-          onBlur={() => setIsEditTooltipActive(false)}
           onClick={onOpenSettings}
           size="icon-lg"
           tooltip="Manage prompt templates"
@@ -6971,7 +6789,6 @@ function PromptTemplateDialog({
   const [deleteConfirmationId, setDeleteConfirmationId] = useState<string | null>(null);
   const draftAttachments = draft.attachments ?? [];
   const modelAttachmentSupport = getLlmModelAttachmentSupport(currentModel);
-  const dialogRef = useManagedDialogFocus(open, () => onOpenChange(false));
 
   useEffect(() => {
     if (open) {
@@ -7050,94 +6867,74 @@ function PromptTemplateDialog({
     setDeleteConfirmationId(null);
   }
 
-  if (!open) {
-    return null;
-  }
-
   return (
-    <>
-      <div
-        aria-hidden="true"
-        aria-label="Close prompt templates backdrop"
-        className={layout.settingsBackdrop}
-        data-dialog-backdrop="prompt-templates"
-        onClick={() => onOpenChange(false)}
-      />
-      <section
-        ref={dialogRef}
-        aria-describedby="prompt-templates-dialog-description"
-        aria-labelledby="prompt-templates-dialog-title"
-        aria-modal="true"
-        className={layout.promptTemplateDialog}
-        role="dialog"
-        tabIndex={-1}
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="h-[85vh] w-[85vw] max-w-[85vw] grid-rows-[auto_minmax(0,1fr)] overflow-hidden p-0 sm:max-w-[85vw]"
+        showCloseButton={false}
       >
         <PlatformDialogCloseButton isMac={isMac} label="Close prompt templates" onClick={() => onOpenChange(false)} />
-        <div className={`${layout.promptTemplateHeader} ${isMac ? layout.promptTemplateHeaderMac : ''}`}>
-          <h2 id="prompt-templates-dialog-title" className={layout.modalHeaderTitle}>Prompt templates</h2>
-          <p id="prompt-templates-dialog-description" className="sr-only">
+        <DialogHeader className="h-12 items-center justify-center px-12">
+          <DialogTitle>Prompt templates</DialogTitle>
+          <DialogDescription className="sr-only">
             Save reusable instructions that are prepended to transcript requests.
-          </p>
-        </div>
+          </DialogDescription>
+        </DialogHeader>
         <div className={layout.promptTemplateEditor}>
           <div className={layout.promptTemplateSidebar}>
             <Button onClick={createNewTemplate} type="button" variant="outline">
               New template
             </Button>
-            <div className={`${layout.pickerList} ${layout.pickerListScrollable}`}>
+            <VerticalToggleGroup
+              aria-label="Prompt template"
+              className={`${layout.pickerList} ${layout.pickerListScrollable} w-full`}
+              onValueChange={(value) => {
+                const nextId = value.at(-1);
+                const nextTemplate = visibleTemplates.find((template) => template.id === nextId);
+                if (nextTemplate) selectTemplate(nextTemplate);
+              }}
+              value={activeId ? [activeId] : []}
+            >
               {visibleTemplates.map((template) => (
                 <div key={template.id} className={layout.pickerRow}>
-                  <Button
+                  <ToggleGroupItem
                     aria-current={activeId === template.id ? 'true' : undefined}
-                    className={layout.pickerRowButton}
-                    data-active={activeId === template.id}
-                    onClick={() => selectTemplate(template)}
-                    type="button"
-                    size="picker"
-                    variant="picker"
+                    className="w-full justify-start pr-8"
+                    value={template.id}
                   >
                     <span className={layout.pickerItemLabel}>{getPromptTemplateDisplayName(template)}</span>
-                  </Button>
-                  <Popover
+                  </ToggleGroupItem>
+                  <AlertDialog
                     open={deleteConfirmationId === template.id}
                     onOpenChange={(nextOpen) => setDeleteConfirmationId(nextOpen ? template.id : null)}
                   >
-                    <PopoverTrigger
+                    <AlertDialogTrigger
                       render={<Button
                         aria-label={`Delete ${getPromptTemplateDisplayName(template)}`}
-                        className={layout.pickerRowDelete}
+                        className="absolute right-1 top-1/2 -translate-y-1/2"
                         size="icon-sm"
                         type="button"
                         variant="ghost"
                       />}
                     >
                       <XIcon />
-                    </PopoverTrigger>
-                    <PopoverContent
-                      aria-label={`Delete ${getPromptTemplateDisplayName(template)}`}
-                      align="end"
-                      className="w-64 gap-3"
-                      side="right"
-                    >
-                      <div>
-                        <div className="text-sm font-medium">Delete this template?</div>
-                        <p className="text-sm text-muted-foreground">
-                          This removes it from your saved prompt templates.
-                        </p>
-                      </div>
-                      <div className="flex justify-end gap-2">
-                        <Button onClick={() => setDeleteConfirmationId(null)} type="button" variant="outline">
-                          Cancel
-                        </Button>
-                        <Button onClick={() => deleteTemplate(template.id)} type="button" variant="destructive">
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Delete this template?</AlertDialogTitle>
+                        <AlertDialogDescription>This removes it from your saved prompt templates.</AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => deleteTemplate(template.id)} variant="destructive">
                           Confirm delete
-                        </Button>
-                      </div>
-                    </PopoverContent>
-                  </Popover>
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </div>
               ))}
-            </div>
+            </VerticalToggleGroup>
           </div>
           <div className={layout.promptTemplateEditorForm}>
             <Field>
@@ -7153,7 +6950,7 @@ function PromptTemplateDialog({
               <Field className="min-h-0">
                 <FieldLabel htmlFor="prompt-template-prompt">Prompt</FieldLabel>
                 <Textarea
-                  className="min-h-0 flex-1 resize-none"
+                  className="min-h-0 flex-1"
                   id="prompt-template-prompt"
                   onChange={(event) => updateDraft({ prompt: event.target.value })}
                   placeholder="Summarise this transcript..."
@@ -7169,13 +6966,18 @@ function PromptTemplateDialog({
                     </p>
                   </div>
                   <Button onClick={() => void addAttachments()} type="button" variant="outline">
-                    <PaperclipIcon />
+                    <PaperclipIcon data-icon="inline-start" />
                     Add files
                   </Button>
                 </div>
                 <div className={layout.promptTemplateAttachmentList} aria-label="Prompt template attachments">
                   {draftAttachments.length === 0 ? (
-                    <p className="px-3 py-4 text-sm text-muted-foreground">No attachments.</p>
+                    <Empty className="py-4">
+                      <EmptyHeader>
+                        <EmptyTitle>No attachments</EmptyTitle>
+                        <EmptyDescription>Add a supported file to include it with this template.</EmptyDescription>
+                      </EmptyHeader>
+                    </Empty>
                   ) : (
                     draftAttachments.map((attachment) => (
                       <div key={attachment.id} className={layout.promptTemplateAttachmentItem}>
@@ -7209,8 +7011,8 @@ function PromptTemplateDialog({
             </div>
           </div>
         </div>
-      </section>
-    </>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -7478,15 +7280,13 @@ function PlatformDialogCloseButton({
   onClick?: () => void;
 }) {
   const closeButton = isMac ? (
-    <button
+    <MacosWindowButton
+      action="close"
       aria-label={label}
-      className={`${layout.modalCloseButton} ${layout.modalCloseButtonMac}`}
       onClick={onClick}
+      placement="dialog"
       title={label}
-      type="button"
-    >
-      <span className="sr-only">{label}</span>
-    </button>
+    />
   ) : (
     <Button
       aria-label={label}
@@ -7584,17 +7384,20 @@ function DownloadTranscriptPopover({
               aria-label={label}
               className={triggerClassName}
               disabled={disabled}
-              onWheel={preview ? scrollOpenPreviewTooltip : undefined}
               size={triggerSize}
               type="button"
               variant="outline"
             />}
           >
-            <DownloadIcon />
+            <DownloadIcon data-icon="inline-start" />
             <span className={showTriggerLabel ? layout.expandedToolbarButtonLabel : 'sr-only'}>{triggerLabel}</span>
           </PopoverTrigger>}
         />
-        <TooltipContent className={preview ? layout.sectionPreviewTooltip : undefined} side={tooltipSide}>
+        <TooltipContent
+          className={preview ? layout.sectionPreviewTooltip : undefined}
+          previewScrollable={Boolean(preview)}
+          side={tooltipSide}
+        >
           {getActionTooltipWithPreview(label, preview)}
         </TooltipContent>
       </Tooltip>
@@ -7607,7 +7410,7 @@ function DownloadTranscriptPopover({
           type="button"
           variant="ghost"
         >
-          <FileTextIcon />
+          <FileTextIcon data-icon="inline-start" />
           Text file
         </TooltipButton>
         <TooltipButton
@@ -7618,7 +7421,7 @@ function DownloadTranscriptPopover({
           type="button"
           variant="ghost"
         >
-          <FileTextIcon />
+          <FileTextIcon data-icon="inline-start" />
           Word document
         </TooltipButton>
       </PopoverContent>
@@ -7632,6 +7435,7 @@ function TooltipButton({
   tooltip,
   tooltipClassName,
   tooltipInteractive = false,
+  tooltipScrollable = false,
   tooltipSide,
   ...props
 }: React.ComponentProps<typeof Button> & {
@@ -7639,6 +7443,7 @@ function TooltipButton({
   tooltip: React.ReactNode;
   tooltipClassName?: string;
   tooltipInteractive?: boolean;
+  tooltipScrollable?: boolean;
   tooltipSide?: TooltipSide;
 }) {
   const [isTooltipFlashed, setIsTooltipFlashed] = useState(false);
@@ -7693,9 +7498,52 @@ function TooltipButton({
   return (
     <Tooltip disableHoverablePopup={tooltipInteractive ? false : undefined} {...tooltipProps}>
       <TooltipTrigger render={button} />
-      <TooltipContent className={tooltipClassName} side={tooltipSide}>
+      <TooltipContent className={tooltipClassName} previewScrollable={tooltipScrollable} side={tooltipSide}>
         {tooltip}
       </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function TooltipToggle({
+  flashTooltipOnClick = false,
+  onPressedChange,
+  tooltip,
+  tooltipSide,
+  ...props
+}: React.ComponentProps<typeof Toggle> & {
+  flashTooltipOnClick?: boolean;
+  tooltip: React.ReactNode;
+  tooltipSide?: TooltipSide;
+}) {
+  const [isTooltipFlashed, setIsTooltipFlashed] = useState(false);
+  const flashTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (flashTimeoutRef.current !== null) window.clearTimeout(flashTimeoutRef.current);
+  }, []);
+
+  function handlePressedChange(
+    pressed: boolean,
+    eventDetails: Parameters<NonNullable<React.ComponentProps<typeof Toggle>['onPressedChange']>>[1]
+  ) {
+    onPressedChange?.(pressed, eventDetails);
+    if (!flashTooltipOnClick) return;
+
+    if (flashTimeoutRef.current !== null) window.clearTimeout(flashTimeoutRef.current);
+    setIsTooltipFlashed(true);
+    flashTimeoutRef.current = window.setTimeout(() => {
+      setIsTooltipFlashed(false);
+      flashTimeoutRef.current = null;
+    }, 1400);
+  }
+
+  const toggle = <Toggle {...props} onPressedChange={handlePressedChange} />;
+  if (props.disabled) return toggle;
+  return (
+    <Tooltip open={isTooltipFlashed} onOpenChange={setIsTooltipFlashed}>
+      <TooltipTrigger render={toggle} />
+      <TooltipContent side={tooltipSide}>{tooltip}</TooltipContent>
     </Tooltip>
   );
 }
@@ -8106,7 +7954,6 @@ function SettingsPage({
   setLlmReasoning: (reasoning: LlmReasoning) => void;
   setLocalLlmReasoning: (reasoning: LlmReasoning) => void;
 }) {
-  const dialogRef = useManagedDialogFocus(true, onClose);
   const [isResetDialogOpen, setIsResetDialogOpen] = useState(false);
   const [isQuitConfirmationOpen, setIsQuitConfirmationOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection);
@@ -8479,44 +8326,38 @@ function SettingsPage({
 
   return (
     <>
-      <div
-        aria-hidden="true"
-        aria-label="Close settings backdrop"
-        className={layout.settingsBackdrop}
-        data-dialog-backdrop="settings"
-        onClick={onClose}
-      />
-      <section
-        ref={dialogRef}
-        aria-describedby="settings-dialog-description"
-        aria-labelledby="settings-dialog-title"
-        aria-modal="true"
-        className={layout.settingsDialog}
-        role="dialog"
-        tabIndex={-1}
-      >
+      <Dialog open onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
+        <DialogContent
+          className="h-[85vh] w-[85vw] max-w-[85vw] grid-rows-[auto_minmax(0,1fr)] overflow-hidden p-0 sm:max-w-[85vw]"
+          showCloseButton={false}
+        >
         <PlatformDialogCloseButton isMac={isMac} label="Close settings" onClick={onClose} />
-        <div className={`${layout.settingsHeader} ${isMac ? layout.settingsHeaderMac : ''}`}>
-          <h2 id="settings-dialog-title" className={layout.modalHeaderTitle}>Settings</h2>
-          <p id="settings-dialog-description" className="sr-only">
-            Configure Caul listening, model and reset settings.
-          </p>
-        </div>
+        <DialogHeader className="h-12 items-center justify-center px-12">
+          <DialogTitle>Settings</DialogTitle>
+          <DialogDescription className="sr-only">Configure Caul listening, model and reset settings.</DialogDescription>
+        </DialogHeader>
         <div className={layout.settingsContent}>
           <nav aria-label="Settings sections" className={layout.settingsSidebar}>
-            {settingsSections.map((section) => (
-              <Button
-                key={section.id}
-                aria-current={activeSection === section.id ? 'page' : undefined}
-                data-active={activeSection === section.id}
-                onClick={() => setActiveSection(section.id)}
-                type="button"
-                size="picker"
-                variant="picker"
-              >
-                <span className={layout.pickerItemLabel}>{section.label}</span>
-              </Button>
-            ))}
+            <VerticalToggleGroup
+              aria-label="Settings section"
+              className="w-full"
+              onValueChange={(value) => {
+                const nextSection = value.at(-1);
+                if (nextSection) setActiveSection(nextSection as SettingsSection);
+              }}
+              value={[activeSection]}
+            >
+              {settingsSections.map((section) => (
+                <ToggleGroupItem
+                  key={section.id}
+                  aria-current={activeSection === section.id ? 'page' : undefined}
+                  className="w-full justify-start"
+                  value={section.id}
+                >
+                  <span className={layout.pickerItemLabel}>{section.label}</span>
+                </ToggleGroupItem>
+              ))}
+            </VerticalToggleGroup>
           </nav>
           <div className={layout.settingsPanel}>
             {activeSection === 'general' ? (
@@ -8575,7 +8416,7 @@ function SettingsPage({
                           type="button"
                           variant="outline"
                         >
-                          <FolderOpenIcon />
+                          <FolderOpenIcon data-icon="inline-start" />
                           Open Caul Folder
                         </TooltipButton>
                         <TooltipButton
@@ -8698,9 +8539,9 @@ function SettingsPage({
                             </CardDescription>
                           </CardHeader>
                           <CardContent className="markdown-output max-h-48 overflow-y-auto">
-                            <ReactMarkdown components={{ img: () => null }}>
+                            <SafeMarkdown>
                               {updateStatus.availableUpdate.releaseNotes}
-                            </ReactMarkdown>
+                            </SafeMarkdown>
                           </CardContent>
                         </Card>
                       ) : null}
@@ -8783,28 +8624,13 @@ function SettingsPage({
                   <FieldGroup className="gap-4">
                     <div className="flex w-fit max-w-full flex-col items-start gap-2">
                       <div className="flex">
-                        <Popover open={isQuitConfirmationOpen} onOpenChange={setIsQuitConfirmationOpen}>
-                          <PopoverTrigger render={<Button size="default" type="button" variant="destructive" />}>
-                            <LogOutIcon />
+                        <AlertDialog open={isQuitConfirmationOpen} onOpenChange={setIsQuitConfirmationOpen}>
+                          <AlertDialogTrigger render={<Button size="default" type="button" variant="destructive" />}>
+                            <LogOutIcon data-icon="inline-start" />
                             Quit Caul
-                          </PopoverTrigger>
-                          <PopoverContent aria-label="Quit Caul confirmation" align="start" className="w-56 gap-3" side="right" sideOffset={8}>
-                            <div className="space-y-1">
-                              <h2 className="text-sm font-medium text-foreground">Quit Caul?</h2>
-                              <p className="text-xs text-muted-foreground">
-                                This will stop Caul and close the app completely.
-                              </p>
-                            </div>
-                            <div className="flex justify-end gap-2">
-                              <Button onClick={() => setIsQuitConfirmationOpen(false)} size="sm" type="button" variant="outline">
-                                Cancel
-                              </Button>
-                              <Button onClick={confirmQuit} size="sm" type="button" variant="destructive">
-                                Quit Caul
-                              </Button>
-                            </div>
-                          </PopoverContent>
-                        </Popover>
+                          </AlertDialogTrigger>
+                          <QuitCaulAlertDialog onConfirm={confirmQuit} />
+                        </AlertDialog>
                       </div>
                       <div className="flex">
                         <TooltipButton
@@ -8815,7 +8641,7 @@ function SettingsPage({
                           type="button"
                           variant="outline"
                         >
-                          <RotateCcwIcon />
+                          <RotateCcwIcon data-icon="inline-start" />
                           Reset Settings
                         </TooltipButton>
                       </div>
@@ -8878,13 +8704,12 @@ function SettingsPage({
                     </p>
                     <Tabs className="gap-3" value={selectedAiProvider}>
                       <div className="flex min-w-0 max-w-sm items-center gap-2">
-                        <TabsList aria-label="AI provider" className="h-auto w-full rounded-md border border-border bg-muted/30 p-0.5">
+                        <TabsList aria-label="AI provider" className="h-auto w-full p-0.5">
                           {(['local', 'cloud'] as AiProvider[]).map((provider) => (
                             <TabsTrigger
                               key={provider}
-                              activeVariant="primary"
                               aria-label={`${provider === 'local' ? 'Local' : 'Cloud'}${onboardingStatus?.ai?.recommended === provider ? ` ${recommendedPillLabel}` : ''}`}
-                              className="h-8 rounded-[6px] px-3"
+                              className="h-8 px-3"
                               disabled={isListening || isBusy}
                               onClick={() => void selectAiProvider(provider)}
                               value={provider}
@@ -8904,7 +8729,7 @@ function SettingsPage({
                         ) : null}
                       </div>
 
-                      <TabsContent className="max-w-2xl text-sm" value="local">
+                      <TabsContent className="max-w-2xl" value="local">
                         {selectedAiProvider === 'local' ? (
                           <FieldGroup>
                           <p className={layout.settingsDescription}>Data stays local and private. Slower and less intelligent than Cloud.</p>
@@ -8950,7 +8775,7 @@ function SettingsPage({
                           </FieldGroup>
                         ) : null}
                       </TabsContent>
-                      <TabsContent className="max-w-2xl text-sm" value="cloud">
+                      <TabsContent className="max-w-2xl" value="cloud">
                         {selectedAiProvider === 'cloud' ? (
                           <FieldGroup>
                           <CloudProviderOnboarding
@@ -9054,12 +8879,14 @@ function SettingsPage({
             ) : null}
 
           </div>
-      </div>
-      <Dialog open={isResetDialogOpen} onOpenChange={setIsResetDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Reset settings?</DialogTitle>
-            <DialogDescription render={<div />}>
+        </div>
+        </DialogContent>
+      </Dialog>
+      <AlertDialog open={isResetDialogOpen} onOpenChange={setIsResetDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reset settings?</AlertDialogTitle>
+            <AlertDialogDescription render={<div />}>
                 <p>This will restore:</p>
                 <ul className="mt-2 list-disc space-y-1 pl-5">
                   <li>Window size and location</li>
@@ -9070,19 +8897,16 @@ function SettingsPage({
                 <p className="mt-3">
                   Your user prompt templates will be backed up to {promptTemplateBackupFolder}, then removed from active prompts.
                 </p>
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose render={<Button type="button" variant="outline" />}>
-              Cancel
-            </DialogClose>
-            <Button onClick={confirmResetSettings} type="button" variant="destructive">
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmResetSettings} variant="destructive">
               Reset Settings
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      </section>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

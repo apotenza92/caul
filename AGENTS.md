@@ -30,7 +30,7 @@ Caul is a calm, private desktop assistant for live calls and screen work. Priori
 - Keep capture, transcription, providers and UI separated. Capture code must not own AI provider logic, UI code must not parse raw audio, and provider code must not know platform permission details.
 - Use ScreenCaptureKit for the normal macOS system-audio route. Keep Core Audio Process Tap as an explicit diagnostic backend only.
 - Do not use Electron `desktopCapturer` or browser `getDisplayMedia` as a system-audio fallback.
-- Build visible UI from the repository's official shadcn/ui components using Base UI primitives, the Rhea style and the shared CSS variables. Extend local shadcn components before introducing one-off controls, styling systems or parallel component libraries.
+- Build visible UI from the repository's official shadcn/ui components using Base UI primitives, the Nova style and the shared CSS variables. Keep generated files canonical and place application composition outside `src/components/ui`.
 
 ## Verification
 
