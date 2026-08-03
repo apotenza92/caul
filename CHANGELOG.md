@@ -2,6 +2,11 @@
 
 All notable Caul changes are recorded here.
 
+## [0.1.73]
+
+- Authenticate Homebrew's online cask audit with the release workflow's read-only GitHub token, preventing shared hosted-runner API limits from blocking stable or beta cask publication.
+- Carries forward the bounded Linux release verification and complete desktop-playbook repair set from 0.1.72.
+
 ## [0.1.72]
 
 - Bound every Fedora RPM N-1 and public Linux package application launch with the shared packaged-launch verifier, and cap the complete Fedora gate at 15 minutes, preventing a successful release matrix from hanging indefinitely after the app has emitted valid smoke evidence.
