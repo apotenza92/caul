@@ -2,6 +2,12 @@
 
 All notable Caul changes are recorded here.
 
+## [0.1.75]
+
+- Update the bundled Pi runtime to 0.83.0 and pin compatible patched transitive networking and parsing dependencies after new production advisories appeared following the 0.1.74 release.
+- Update `brace-expansion` to 5.0.9, closing the newly disclosed denial-of-service advisory without changing Caul's provider or updater contracts.
+- Carries forward the fully verified updater baseline repair and Homebrew publication recovery from 0.1.74.
+
 ## [0.1.74]
 
 - Select the macOS updater test surface from the installed version, retaining first-window compatibility only for the legacy 0.1.43 package while requiring the main surface for current packages and every adversarial case.
