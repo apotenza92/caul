@@ -56,8 +56,8 @@ if (prohibitedFiles.length > 0) {
 const piPackage = JSON.parse(
   extractFile(asarPath, 'node_modules/@earendil-works/pi-coding-agent/package.json').toString('utf8')
 );
-if (piPackage.version !== '0.82.1') {
-  throw new Error(`Expected bundled Pi 0.82.1; received ${piPackage.version ?? 'none'}.`);
+if (piPackage.version !== '0.83.0') {
+  throw new Error(`Expected bundled Pi 0.83.0; received ${piPackage.version ?? 'none'}.`);
 }
 
 const nestedBraceExpansionPrefix = '/node_modules/@earendil-works/pi-coding-agent/node_modules/brace-expansion/';
@@ -65,13 +65,25 @@ if (packagedFiles.some((file) => file.startsWith(nestedBraceExpansionPrefix))) {
   throw new Error('Packaged Pi contains its superseded nested brace-expansion runtime.');
 }
 
+const nestedUndiciPrefix = '/node_modules/@earendil-works/pi-coding-agent/node_modules/undici/';
+if (packagedFiles.some((file) => file.startsWith(nestedUndiciPrefix))) {
+  throw new Error('Packaged Pi contains its superseded nested Undici runtime.');
+}
+
 const braceExpansionPackage = JSON.parse(
   extractFile(asarPath, 'node_modules/brace-expansion/package.json').toString('utf8')
 );
-if (braceExpansionPackage.version !== '5.0.8') {
+if (braceExpansionPackage.version !== '5.0.9') {
   throw new Error(
-    `Expected bundled brace-expansion 5.0.8; received ${braceExpansionPackage.version ?? 'none'}.`
+    `Expected bundled brace-expansion 5.0.9; received ${braceExpansionPackage.version ?? 'none'}.`
   );
+}
+
+const undiciPackage = JSON.parse(
+  extractFile(asarPath, 'node_modules/undici/package.json').toString('utf8')
+);
+if (undiciPackage.version !== '8.10.0') {
+  throw new Error(`Expected bundled undici 8.10.0; received ${undiciPackage.version ?? 'none'}.`);
 }
 
 console.log(`caul-macos-dev-package ${JSON.stringify({
@@ -79,7 +91,8 @@ console.log(`caul-macos-dev-package ${JSON.stringify({
   braceExpansionVersion: braceExpansionPackage.version,
   bundleId,
   piVersion: piPackage.version,
-  signed: true
+  signed: true,
+  undiciVersion: undiciPackage.version
 })}`);
 
 function listFiles(root, prefix = '') {

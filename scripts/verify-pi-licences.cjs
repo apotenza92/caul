@@ -22,6 +22,10 @@ const braceExpansionPackageJson = require.resolve('brace-expansion/package.json'
 const braceExpansionPackage = JSON.parse(
   fs.readFileSync(braceExpansionPackageJson, 'utf8')
 );
+const undiciPackageJson = require.resolve('undici/package.json', {
+  paths: [path.dirname(piPackageJson)]
+});
+const undiciPackage = JSON.parse(fs.readFileSync(undiciPackageJson, 'utf8'));
 
 function resolvePackageJson(name, searchPaths) {
   try {
@@ -84,17 +88,31 @@ if (pinnedVersion !== piPackage.version) {
   process.exit(1);
 }
 
+if (piPackage.dependencies?.undici !== '8.10.0') {
+  console.error(`Prepared Pi must require undici 8.10.0. Found ${piPackage.dependencies?.undici || 'missing'}.`);
+  process.exit(1);
+}
+
 if (licence !== 'MIT') {
   console.error(`Pi package licence must be MIT before bundling. Found: ${licence || 'unknown'}`);
   process.exit(1);
 }
 
 if (
-  appPackage.dependencies?.['brace-expansion'] !== '5.0.8'
-  || braceExpansionPackage.version !== '5.0.8'
+  appPackage.dependencies?.['brace-expansion'] !== '5.0.9'
+  || braceExpansionPackage.version !== '5.0.9'
   || braceExpansionPackage.license !== 'MIT'
 ) {
-  console.error('Pi must resolve the maintained brace-expansion 5.0.8 MIT runtime.');
+  console.error('Pi must resolve the maintained brace-expansion 5.0.9 MIT runtime.');
+  process.exit(1);
+}
+
+if (
+  appPackage.dependencies?.undici !== '8.10.0'
+  || undiciPackage.version !== '8.10.0'
+  || undiciPackage.license !== 'MIT'
+) {
+  console.error('Pi must resolve the maintained undici 8.10.0 MIT runtime.');
   process.exit(1);
 }
 
@@ -129,6 +147,7 @@ for (const reviewed of tufRuntimePackages) {
 console.log(
   `Bundled dependency licences verified: ${piPackage.name}@${piPackage.version} (${licence}), `
   + `brace-expansion@${braceExpansionPackage.version} (${braceExpansionPackage.license}), `
+  + `undici@${undiciPackage.version} (${undiciPackage.license}), `
   + `${tufRuntimePackages.map((entry) => (
     `${entry.name}@${entry.version} (${entry.expectedLicence})`
   )).join(', ')}`
