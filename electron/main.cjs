@@ -8536,7 +8536,8 @@ function shouldOpenFullAppOverlayOnLaunch({ onboardingRequired = false } = {}) {
     || localParakeetSmokeMs > 0
     || rendererTranscriptionSmokeMs > 0
     || rendererLlmSmoke
-    || rendererRealLlmSmoke;
+    || rendererRealLlmSmoke
+    || process.env.CAUL_UPDATE_TEST_MODE === '1';
 
   if (smokeRequiresFullAppOverlay) {
     return true;
