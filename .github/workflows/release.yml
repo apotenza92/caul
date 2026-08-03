@@ -1661,6 +1661,8 @@ jobs:
             --require-checksum
 
       - name: Generate and validate Homebrew casks
+        env:
+          HOMEBREW_GITHUB_API_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
@@ -1786,6 +1788,8 @@ jobs:
           echo "BETA_SHA256=${BETA_SHA256}" >> "$GITHUB_OUTPUT"
 
       - name: Generate and validate Homebrew beta cask
+        env:
+          HOMEBREW_GITHUB_API_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 

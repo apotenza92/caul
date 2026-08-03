@@ -455,6 +455,14 @@ describe('macOS release contract', () => {
     expect(stableHomebrewSteps.some((step) => step.name === 'Setup Node.js')).toBe(true);
     expect(stableHomebrewSteps.some((step) => step.name === 'Install verification dependencies'
       && step.run === 'npm ci')).toBe(true);
+    const stableHomebrewValidation = stableHomebrewSteps.find(
+      (step) => step.name === 'Generate and validate Homebrew casks'
+    );
+    const betaHomebrewValidation = release.jobs['prepare-homebrew-beta-publication'].steps.find(
+      (step) => step.name === 'Generate and validate Homebrew beta cask'
+    );
+    expect(stableHomebrewValidation.env.HOMEBREW_GITHUB_API_TOKEN).toBe('${{ github.token }}');
+    expect(betaHomebrewValidation.env.HOMEBREW_GITHUB_API_TOKEN).toBe('${{ github.token }}');
     expect(release.jobs['publish-release'].needs).toEqual(expect.arrayContaining([
       'test-macos-updater',
       'test-native-tuf-updater',
