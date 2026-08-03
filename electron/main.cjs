@@ -55,9 +55,22 @@ const {
   writeLiveModelCatalogue
 } = require('./modelRecommendation.cjs');
 const { refreshModelCatalogue } = require('./modelCatalogueRefresh.cjs');
+const {
+  createTrustedIpcRegistrar,
+  createTrustedRendererUrlChecker,
+  installRendererNavigationPolicy,
+  isTrustedIpcEvent
+} = require('./rendererSecurity.cjs');
 const cloudLlmConfig = require('./llmConfig.json');
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
+const rendererFilePath = path.join(__dirname, '..', 'dist', 'index.html');
+const rendererDevServerUrl = process.env.VITE_DEV_SERVER_URL || 'http://127.0.0.1:5173';
+const isTrustedRendererUrl = createTrustedRendererUrlChecker({
+  devServerUrl: rendererDevServerUrl,
+  isDev,
+  rendererFilePath
+});
 const smokeExitMs = Number(process.env.CAUL_SMOKE_EXIT_MS ?? 0);
 const systemAudioSmokeMs = Number(process.env.CAUL_SYSTEM_AUDIO_SMOKE_MS ?? 0);
 const localParakeetSmokeMs = Number(process.env.CAUL_LOCAL_PARAKEET_SMOKE_MS ?? 0);
@@ -178,6 +191,77 @@ let privateOverlayWindowResize = null;
 let privateOverlayDisplayChangeTimer = null;
 let onboardingWindow = null;
 let updaterService = null;
+
+function isKnownCaulWebContents(webContents) {
+  return [privateOverlayWindow, onboardingWindow, privateOverlayHandleWindow]
+    .some((window) => window && !window.isDestroyed() && window.webContents === webContents);
+}
+
+const onboardingIpcChannels = new Set([
+  'caul:ai-provider',
+  'caul:get-runtime-context',
+  'caul:local-llm-benchmark',
+  'caul:local-llm-cancel-download',
+  'caul:local-llm-download',
+  'caul:local-llm-set-model',
+  'caul:local-llm-status',
+  'caul:model-catalogue-refresh',
+  'caul:model-catalogue-refresh-set-frequency',
+  'caul:model-catalogue-refresh-status',
+  'caul:onboarding-complete',
+  'caul:onboarding-status',
+  'caul:parakeet-cancel-download',
+  'caul:parakeet-download',
+  'caul:parakeet-remove',
+  'caul:parakeet-set-model',
+  'caul:parakeet-status',
+  'caul:permissions-open',
+  'caul:permissions-request',
+  'caul:permissions-status',
+  'caul:pi-api-key-remove',
+  'caul:pi-api-key-save',
+  'caul:pi-chatgpt-login',
+  'caul:pi-disconnect',
+  'caul:pi-login',
+  'caul:pi-model',
+  'caul:pi-save-model',
+  'caul:pi-status'
+]);
+const handleIpcChannels = new Set([
+  'caul:get-runtime-context',
+  'caul:private-overlay-handle-drag-end',
+  'caul:private-overlay-handle-drag-move',
+  'caul:private-overlay-handle-drag-start',
+  'caul:private-overlay-handle-menu',
+  'caul:private-overlay-status',
+  'caul:private-overlay-toggle'
+]);
+
+function getCaulSurfaceForWebContents(webContents) {
+  if (privateOverlayWindow?.webContents === webContents) return 'app';
+  if (onboardingWindow?.webContents === webContents) return 'onboarding';
+  if (privateOverlayHandleWindow?.webContents === webContents) return 'handle';
+  return null;
+}
+
+function isIpcChannelAllowedForWebContents(channel, webContents) {
+  const surface = getCaulSurfaceForWebContents(webContents);
+  if (surface === 'app') return true;
+  if (surface === 'onboarding') return onboardingIpcChannels.has(channel);
+  if (surface === 'handle') return handleIpcChannels.has(channel);
+  return false;
+}
+
+const trustedIpc = createTrustedIpcRegistrar({
+  ipcMain,
+  isTrustedEvent: (event, channel) => (
+    isTrustedIpcEvent(event, {
+      isKnownWebContents: isKnownCaulWebContents,
+      isTrustedRendererUrl
+    })
+    && isIpcChannelAllowedForWebContents(channel, event.sender)
+  )
+});
 let parakeetDownload = null;
 let localModelDownload = null;
 let piChatGptLoginPromise = null;
@@ -556,7 +640,7 @@ function createCaptureProbeWindow(bounds, colour, protect) {
       contextIsolation: true,
       devTools: false,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: true
     }
   });
 
@@ -654,7 +738,7 @@ function getPrivateWindowProtectionDiagnosticSummary() {
         contextIsolation: true,
         devTools: false,
         nodeIntegration: false,
-        sandbox: false
+        sandbox: true
       }
     });
     window.setContentProtection(true);
@@ -6127,8 +6211,14 @@ function handleSystemAudioStdout(chunk) {
 }
 
 function loadRendererSurface(window, surface) {
+  installRendererNavigationPolicy({
+    webContents: window.webContents,
+    isTrustedRendererUrl,
+    openExternal: (url) => shell.openExternal(url)
+  });
+
   if (isDev) {
-    const url = new URL(process.env.VITE_DEV_SERVER_URL || 'http://127.0.0.1:5173');
+    const url = new URL(rendererDevServerUrl);
 
     if (surface) {
       url.searchParams.set('caul-surface', surface);
@@ -6139,7 +6229,7 @@ function loadRendererSurface(window, surface) {
     return;
   }
 
-  window.loadFile(path.join(__dirname, '..', 'dist', 'index.html'), {
+  window.loadFile(rendererFilePath, {
     ...(surface ? { query: { 'caul-surface': surface } } : {})
   });
 }
@@ -6346,7 +6436,7 @@ function createPrivateOverlayWindow() {
       devTools: isDev,
       nodeIntegration: false,
       spellcheck: false,
-      sandbox: false
+      sandbox: true
     }
   });
 
@@ -6419,7 +6509,7 @@ function createOnboardingWindow() {
       devTools: isDev,
       nodeIntegration: false,
       spellcheck: false,
-      sandbox: false
+      sandbox: true
     }
   });
 
@@ -7370,7 +7460,7 @@ function createPrivateOverlayHandleWindow() {
       devTools: isDev,
       nodeIntegration: false,
       spellcheck: false,
-      sandbox: false
+      sandbox: true
     }
   });
 
@@ -9306,7 +9396,7 @@ app.on('window-all-closed', () => {
   }
 });
 
-ipcMain.handle('caul:get-runtime-context', () => ({
+trustedIpc.handle('caul:get-runtime-context', () => ({
   platform: process.platform,
   arch: process.arch,
   isMac: process.platform === 'darwin',
@@ -9314,67 +9404,67 @@ ipcMain.handle('caul:get-runtime-context', () => ({
   appName: getAppDisplayName()
 }));
 
-ipcMain.handle('caul:private-overlay-status', () => getPrivateOverlayStatus());
+trustedIpc.handle('caul:private-overlay-status', () => getPrivateOverlayStatus());
 
-ipcMain.handle('caul:private-overlay-toggle', () => {
+trustedIpc.handle('caul:private-overlay-toggle', () => {
   togglePrivateOverlayWindow();
   return getPrivateOverlayStatus();
 });
 
-ipcMain.handle('caul:private-overlay-hide', () => {
+trustedIpc.handle('caul:private-overlay-hide', () => {
   hidePrivateOverlayWindow();
   return getPrivateOverlayStatus();
 });
 
-ipcMain.handle('caul:private-overlay-handle-menu', (event) => showPrivateOverlayHandleMenu(event.sender));
+trustedIpc.handle('caul:private-overlay-handle-menu', (event) => showPrivateOverlayHandleMenu(event.sender));
 
-ipcMain.handle('caul:private-overlay-handle-drag-start', (_event, request) => startPrivateOverlayHandleDrag(request));
+trustedIpc.handle('caul:private-overlay-handle-drag-start', (_event, request) => startPrivateOverlayHandleDrag(request));
 
-ipcMain.handle('caul:private-overlay-handle-drag-move', (_event, request) => movePrivateOverlayHandleDrag(request));
+trustedIpc.handle('caul:private-overlay-handle-drag-move', (_event, request) => movePrivateOverlayHandleDrag(request));
 
-ipcMain.handle('caul:private-overlay-handle-drag-end', (_event, request) => endPrivateOverlayHandleDrag(request));
+trustedIpc.handle('caul:private-overlay-handle-drag-end', (_event, request) => endPrivateOverlayHandleDrag(request));
 
-ipcMain.handle('caul:private-overlay-window-drag-start', (_event, request) => startPrivateOverlayWindowDrag(request));
+trustedIpc.handle('caul:private-overlay-window-drag-start', (_event, request) => startPrivateOverlayWindowDrag(request));
 
-ipcMain.handle('caul:private-overlay-window-drag-move', (_event, request) => movePrivateOverlayWindowDrag(request));
+trustedIpc.handle('caul:private-overlay-window-drag-move', (_event, request) => movePrivateOverlayWindowDrag(request));
 
-ipcMain.handle('caul:private-overlay-window-drag-end', (_event, request) => endPrivateOverlayWindowDrag(request));
+trustedIpc.handle('caul:private-overlay-window-drag-end', (_event, request) => endPrivateOverlayWindowDrag(request));
 
-ipcMain.handle('caul:private-overlay-window-resize-start', (_event, request) => startPrivateOverlayWindowResize(request));
+trustedIpc.handle('caul:private-overlay-window-resize-start', (_event, request) => startPrivateOverlayWindowResize(request));
 
-ipcMain.handle('caul:private-overlay-window-resize-move', (_event, request) => movePrivateOverlayWindowResize(request));
+trustedIpc.handle('caul:private-overlay-window-resize-move', (_event, request) => movePrivateOverlayWindowResize(request));
 
-ipcMain.on('caul:private-overlay-window-resize-move-live', (_event, request) => {
+trustedIpc.on('caul:private-overlay-window-resize-move-live', (_event, request) => {
   movePrivateOverlayWindowResize(request);
 });
 
-ipcMain.handle('caul:private-overlay-window-resize-end', (_event, request) => endPrivateOverlayWindowResize(request));
+trustedIpc.handle('caul:private-overlay-window-resize-end', (_event, request) => endPrivateOverlayWindowResize(request));
 
-ipcMain.handle('caul:private-overlay-show-main', () => {
+trustedIpc.handle('caul:private-overlay-show-main', () => {
   showMainWindow();
   return getPrivateOverlayStatus();
 });
 
-ipcMain.handle('caul:private-overlay-panic-hide', () => {
+trustedIpc.handle('caul:private-overlay-panic-hide', () => {
   panicHidePrivateOverlay();
   return getPrivateOverlayStatus();
 });
 
-ipcMain.handle('caul:private-overlay-set-click-through', (_event, request) => (
+trustedIpc.handle('caul:private-overlay-set-click-through', (_event, request) => (
   setPrivateOverlayClickThrough(Boolean(request?.enabled))
 ));
 
-ipcMain.handle('caul:private-overlay-set-handle-size', (_event, request) => (
+trustedIpc.handle('caul:private-overlay-set-handle-size', (_event, request) => (
   setPrivateOverlayHandleSize(request?.size)
 ));
 
-ipcMain.handle('caul:private-overlay-reset-handle', () => resetPrivateOverlayHandlePosition());
+trustedIpc.handle('caul:private-overlay-reset-handle', () => resetPrivateOverlayHandlePosition());
 
-ipcMain.handle('caul:capture-status', () => captureStatus);
+trustedIpc.handle('caul:capture-status', () => captureStatus);
 
-ipcMain.handle('caul:permissions-status', () => getPermissionsStatus());
+trustedIpc.handle('caul:permissions-status', () => getPermissionsStatus());
 
-ipcMain.handle('caul:permissions-open', (_event, request) => {
+trustedIpc.handle('caul:permissions-open', (_event, request) => {
   const permission = typeof request === 'object' && request !== null
     ? request.permission
     : undefined;
@@ -9382,7 +9472,7 @@ ipcMain.handle('caul:permissions-open', (_event, request) => {
   return openPermissionsSettings(permission);
 });
 
-ipcMain.handle('caul:permissions-request', (_event, request) => {
+trustedIpc.handle('caul:permissions-request', (_event, request) => {
   const permission = typeof request === 'object' && request !== null
     ? request.permission
     : undefined;
@@ -9390,7 +9480,7 @@ ipcMain.handle('caul:permissions-request', (_event, request) => {
   return requestPermission(permission);
 });
 
-ipcMain.handle('caul:settings-reset', (event) => {
+trustedIpc.handle('caul:settings-reset', (event) => {
   resetWindowState(BrowserWindow.fromWebContents(event.sender));
   resetPrivateOverlayHandlePosition();
   resetPrivateOverlayWindowPosition();
@@ -9399,103 +9489,103 @@ ipcMain.handle('caul:settings-reset', (event) => {
   return { ok: true };
 });
 
-ipcMain.handle('caul:settings-quit', () => {
+trustedIpc.handle('caul:settings-quit', () => {
   app.quit();
   return { ok: true };
 });
 
-ipcMain.handle('caul:settings-relaunch', () => {
+trustedIpc.handle('caul:settings-relaunch', () => {
   app.relaunch();
   app.quit();
   return { ok: true };
 });
 
-ipcMain.handle('caul:preferences-load', (_event, request) => loadPortablePreferences(request));
+trustedIpc.handle('caul:preferences-load', (_event, request) => loadPortablePreferences(request));
 
-ipcMain.handle('caul:preferences-save', (_event, request) => savePortablePreferences(request));
+trustedIpc.handle('caul:preferences-save', (_event, request) => savePortablePreferences(request));
 
-ipcMain.handle('caul:model-catalogue-refresh', () => refreshLiveModelCatalogue());
+trustedIpc.handle('caul:model-catalogue-refresh', () => refreshLiveModelCatalogue());
 
-ipcMain.handle('caul:model-catalogue-refresh-status', () => getModelCatalogueRefreshStatus());
+trustedIpc.handle('caul:model-catalogue-refresh-status', () => getModelCatalogueRefreshStatus());
 
-ipcMain.handle('caul:model-catalogue-refresh-set-frequency', (_event, request) => (
+trustedIpc.handle('caul:model-catalogue-refresh-set-frequency', (_event, request) => (
   setModelCatalogueRefreshFrequency(request?.frequency)
 ));
 
-ipcMain.handle('caul:updates-status', () => getUpdaterService().status());
+trustedIpc.handle('caul:updates-status', () => getUpdaterService().status());
 
-ipcMain.handle('caul:updates-set-frequency', (_event, request) => (
+trustedIpc.handle('caul:updates-set-frequency', (_event, request) => (
   getUpdaterService().setFrequency(request?.frequency)
 ));
 
-ipcMain.handle('caul:updates-check-now', () => getUpdaterService().checkNow());
+trustedIpc.handle('caul:updates-check-now', () => getUpdaterService().checkNow());
 
-ipcMain.handle('caul:updates-download-and-install', () => getUpdaterService().downloadAndInstall());
+trustedIpc.handle('caul:updates-download-and-install', () => getUpdaterService().downloadAndInstall());
 
-ipcMain.handle('caul:updates-install-downloaded', () => getUpdaterService().installDownloadedUpdate());
+trustedIpc.handle('caul:updates-install-downloaded', () => getUpdaterService().installDownloadedUpdate());
 
-ipcMain.handle('caul:updates-open-download-page', () => getUpdaterService().openDownloadPage());
+trustedIpc.handle('caul:updates-open-download-page', () => getUpdaterService().openDownloadPage());
 
-ipcMain.handle('caul:history-status', () => getHistoryService().getStatus());
+trustedIpc.handle('caul:history-status', () => getHistoryService().getStatus());
 
-ipcMain.handle('caul:history-set-enabled', (_event, request) => (
+trustedIpc.handle('caul:history-set-enabled', (_event, request) => (
   getHistoryService().setEnabled(request?.enabled)
 ));
 
-ipcMain.handle('caul:history-open-folder', () => getHistoryService().openFolder());
+trustedIpc.handle('caul:history-open-folder', () => getHistoryService().openFolder());
 
-ipcMain.handle('caul:history-choose-folder', (event) => (
+trustedIpc.handle('caul:history-choose-folder', (event) => (
   getHistoryService().chooseFolder(BrowserWindow.fromWebContents(event.sender))
 ));
 
-ipcMain.handle('caul:history-save-session', (_event, request) => (
+trustedIpc.handle('caul:history-save-session', (_event, request) => (
   getHistoryService().saveSession(request)
 ));
 
-ipcMain.handle('caul:onboarding-status', (_event, options) => getOnboardingStatus({
+trustedIpc.handle('caul:onboarding-status', (_event, options) => getOnboardingStatus({
   refreshCatalogue: options?.refreshCatalogue !== false
 }));
 
-ipcMain.handle('caul:onboarding-complete', () => completeOnboarding());
+trustedIpc.handle('caul:onboarding-complete', () => completeOnboarding());
 
-ipcMain.handle('caul:onboarding-open', () => reopenOnboarding());
+trustedIpc.handle('caul:onboarding-open', () => reopenOnboarding());
 
-ipcMain.handle('caul:parakeet-status', () => getParakeetStatus());
+trustedIpc.handle('caul:parakeet-status', () => getParakeetStatus());
 
-ipcMain.handle('caul:parakeet-download', (_event, request) => downloadLocalTranscriptionModel(request?.modelId));
+trustedIpc.handle('caul:parakeet-download', (_event, request) => downloadLocalTranscriptionModel(request?.modelId));
 
-ipcMain.handle('caul:parakeet-remove', (_event, request) => removeLocalTranscriptionModel(request?.modelId));
+trustedIpc.handle('caul:parakeet-remove', (_event, request) => removeLocalTranscriptionModel(request?.modelId));
 
-ipcMain.handle('caul:parakeet-set-model', (_event, request) => setPreferredLocalTranscriptionModel(request?.modelId));
+trustedIpc.handle('caul:parakeet-set-model', (_event, request) => setPreferredLocalTranscriptionModel(request?.modelId));
 
-ipcMain.handle('caul:parakeet-cancel-download', () => cancelParakeetDownload());
+trustedIpc.handle('caul:parakeet-cancel-download', () => cancelParakeetDownload());
 
-ipcMain.handle('caul:pi-status', () => getPiStatus());
+trustedIpc.handle('caul:pi-status', () => getPiStatus());
 
-ipcMain.handle('caul:pi-chatgpt-login', () => openPiSetup('chatgpt-login'));
+trustedIpc.handle('caul:pi-chatgpt-login', () => openPiSetup('chatgpt-login'));
 
-ipcMain.handle('caul:pi-api-key-save', (_event, request) => (
+trustedIpc.handle('caul:pi-api-key-save', (_event, request) => (
   savePiApiKey(request?.providerId, request?.apiKey)
 ));
 
-ipcMain.handle('caul:pi-api-key-remove', (_event, request) => (
+trustedIpc.handle('caul:pi-api-key-remove', (_event, request) => (
   removePiApiKey(request?.providerId)
 ));
 
-ipcMain.handle('caul:pi-login', () => openPiSetup('login'));
+trustedIpc.handle('caul:pi-login', () => openPiSetup('login'));
 
-ipcMain.handle('caul:pi-model', () => openPiSetup('model'));
+trustedIpc.handle('caul:pi-model', () => openPiSetup('model'));
 
-ipcMain.handle('caul:pi-save-model', (_event, request) => {
+trustedIpc.handle('caul:pi-save-model', (_event, request) => {
   const model = typeof request === 'object' && request !== null ? request.model : '';
   return savePiModel(model);
 });
 
-ipcMain.handle('caul:ai-provider', (_event, request) => setSelectedAiProvider(request?.provider));
+trustedIpc.handle('caul:ai-provider', (_event, request) => setSelectedAiProvider(request?.provider));
 
-ipcMain.handle('caul:local-llm-status', () => getLocalLlmService().status(getSelectedLocalAiModelId()));
+trustedIpc.handle('caul:local-llm-status', () => getLocalLlmService().status(getSelectedLocalAiModelId()));
 
-ipcMain.handle('caul:local-llm-download', (_event, request) => {
+trustedIpc.handle('caul:local-llm-download', (_event, request) => {
   if (onboardingLocalAiLagSmoke) {
     return new Promise(() => {});
   }
@@ -9503,23 +9593,23 @@ ipcMain.handle('caul:local-llm-download', (_event, request) => {
   return downloadLocalAiModel(request?.modelId);
 });
 
-ipcMain.handle('caul:local-llm-set-model', (_event, request) => setPreferredLocalAiModel(request?.modelId));
+trustedIpc.handle('caul:local-llm-set-model', (_event, request) => setPreferredLocalAiModel(request?.modelId));
 
-ipcMain.handle('caul:local-llm-benchmark', (_event, request) => benchmarkLocalAiModel(request?.modelId));
+trustedIpc.handle('caul:local-llm-benchmark', (_event, request) => benchmarkLocalAiModel(request?.modelId));
 
-ipcMain.handle('caul:local-llm-cancel-download', () => getLocalLlmService().cancelDownload());
+trustedIpc.handle('caul:local-llm-cancel-download', () => getLocalLlmService().cancelDownload());
 
-ipcMain.handle('caul:pi-disconnect', () => disconnectPi());
+trustedIpc.handle('caul:pi-disconnect', () => disconnectPi());
 
-ipcMain.handle('caul:prompt-templates-list', () => readPromptTemplateState());
+trustedIpc.handle('caul:prompt-templates-list', () => readPromptTemplateState());
 
-ipcMain.handle('caul:prompt-templates-choose-attachments', (event) => (
+trustedIpc.handle('caul:prompt-templates-choose-attachments', (event) => (
   choosePromptTemplateAttachments(BrowserWindow.fromWebContents(event.sender))
 ));
 
-ipcMain.handle('caul:prompt-templates-reset', () => resetPromptTemplates());
+trustedIpc.handle('caul:prompt-templates-reset', () => resetPromptTemplates());
 
-ipcMain.handle('caul:prompt-templates-save', (_event, request) => {
+trustedIpc.handle('caul:prompt-templates-save', (_event, request) => {
   const template = typeof request === 'object' && request !== null
     ? request.template
     : null;
@@ -9527,7 +9617,7 @@ ipcMain.handle('caul:prompt-templates-save', (_event, request) => {
   return savePromptTemplate(template);
 });
 
-ipcMain.handle('caul:prompt-templates-delete', (_event, request) => {
+trustedIpc.handle('caul:prompt-templates-delete', (_event, request) => {
   const id = typeof request === 'object' && request !== null && typeof request.id === 'string'
     ? request.id
     : '';
@@ -9535,7 +9625,7 @@ ipcMain.handle('caul:prompt-templates-delete', (_event, request) => {
   return deletePromptTemplate(id);
 });
 
-ipcMain.handle('caul:prompt-templates-set-selected', (_event, request) => {
+trustedIpc.handle('caul:prompt-templates-set-selected', (_event, request) => {
   const ids = typeof request === 'object' && request !== null && Array.isArray(request.ids)
     ? request.ids
     : [];
@@ -9543,25 +9633,25 @@ ipcMain.handle('caul:prompt-templates-set-selected', (_event, request) => {
   return setSelectedPromptTemplates(ids);
 });
 
-ipcMain.handle('caul:capture-start', () => {
+trustedIpc.handle('caul:capture-start', () => {
   captureStatus.state = 'testing';
 
   return captureStatus;
 });
 
-ipcMain.handle('caul:capture-pause', () => {
+trustedIpc.handle('caul:capture-pause', () => {
   captureStatus.state = 'paused';
 
   return captureStatus;
 });
 
-ipcMain.handle('caul:capture-stop', () => {
+trustedIpc.handle('caul:capture-stop', () => {
   captureStatus.state = 'idle';
 
   return captureStatus;
 });
 
-ipcMain.handle('caul:transcription-start', (_event, request) => new Promise((resolve, reject) => {
+trustedIpc.handle('caul:transcription-start', (_event, request) => new Promise((resolve, reject) => {
   if (rendererLlmSmoke || rendererRealLlmSmoke || rendererTranscriptionSmokeFakeBackend) {
     localTranscriptionActive = true;
     resolve({ ok: true });
@@ -9582,7 +9672,7 @@ ipcMain.handle('caul:transcription-start', (_event, request) => new Promise((res
   }
 }));
 
-ipcMain.handle('caul:transcription-prepare', (_event, request) => {
+trustedIpc.handle('caul:transcription-prepare', (_event, request) => {
   if (rendererLlmSmoke || rendererRealLlmSmoke || rendererTranscriptionSmokeFakeBackend) {
     return { ok: true };
   }
@@ -9594,7 +9684,7 @@ ipcMain.handle('caul:transcription-prepare', (_event, request) => {
   return prepareLocalTranscriptionCapture(normalisedRequest);
 });
 
-ipcMain.handle('caul:transcription-stop', async () => {
+trustedIpc.handle('caul:transcription-stop', async () => {
   if (rendererLlmSmoke || rendererRealLlmSmoke || rendererTranscriptionSmokeFakeBackend) {
     localTranscriptionActive = false;
     return { ok: true };
@@ -9607,7 +9697,7 @@ ipcMain.handle('caul:transcription-stop', async () => {
   return { ok: true };
 });
 
-ipcMain.handle('caul:llm-request', async (_event, request) => {
+trustedIpc.handle('caul:llm-request', async (_event, request) => {
   const transcript = typeof request === 'object' && request !== null
     ? request.transcript
     : '';
@@ -9642,13 +9732,13 @@ ipcMain.handle('caul:llm-request', async (_event, request) => {
   return requestLlmResponse(transcript, options);
 });
 
-ipcMain.handle('caul:llm-status', () => ({
+trustedIpc.handle('caul:llm-status', () => ({
   ok: true,
   ready: llmWarmStatus === 'ready',
   status: llmWarmStatus
 }));
 
-ipcMain.handle('caul:smoke-emit-transcription-event', (_event, event) => {
+trustedIpc.handle('caul:smoke-emit-transcription-event', (_event, event) => {
   if (!rendererLlmSmoke && !rendererRealLlmSmoke && rendererTranscriptionSmokeMs <= 0) {
     throw new Error('Smoke event injection is disabled.');
   }
@@ -9658,11 +9748,11 @@ ipcMain.handle('caul:smoke-emit-transcription-event', (_event, event) => {
   return { ok: true };
 });
 
-ipcMain.handle('caul:system-audio-start', () => {
+trustedIpc.handle('caul:system-audio-start', () => {
   return startSystemAudioCapture();
 });
 
-ipcMain.handle('caul:system-audio-stop', () => {
+trustedIpc.handle('caul:system-audio-stop', () => {
   stopSystemAudioCapture();
 
   return { ok: true };

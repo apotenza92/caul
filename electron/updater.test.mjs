@@ -12,6 +12,7 @@ const {
   configureUpdaterFeed,
   createUpdateInstallHandoffController,
   findTargetRelease,
+  getExternalInstallMessage,
   isUpdateSmokeDisabled,
   isLocalDevChannel,
   normaliseUpdaterReleaseNotes,
@@ -95,6 +96,13 @@ describe('updater helpers', () => {
       platform: 'linux'
     })).toBe(true);
     expect(testUpdater.disableDifferentialDownload).toBe(true);
+  });
+
+  it('describes standalone Linux packages as manual downloads', () => {
+    expect(getExternalInstallMessage('linux')).toBe(
+      'Opened the Caul package download. Download the package if needed, then install it manually with your system package manager.'
+    );
+    expect(getExternalInstallMessage('darwin')).toBe('Opened the Caul release page.');
   });
 
   it('selects the stable or beta metadata file explicitly for generic updater feeds', () => {

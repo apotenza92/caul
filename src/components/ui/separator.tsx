@@ -5,19 +5,12 @@ import { cn } from "@/lib/utils"
 function Separator({
   className,
   orientation = "horizontal",
-  decorative = true,
-  role,
-  "aria-orientation": ariaOrientation,
   ...props
-}: SeparatorPrimitive.Props & { decorative?: boolean }) {
+}: SeparatorPrimitive.Props) {
   return (
     <SeparatorPrimitive
       data-slot="separator"
       orientation={orientation}
-      role={decorative ? "none" : role ?? "separator"}
-      aria-orientation={
-        decorative ? undefined : ariaOrientation ?? orientation
-      }
       className={cn(
         "shrink-0 bg-border data-horizontal:h-px data-horizontal:w-full data-vertical:w-px data-vertical:self-stretch",
         className

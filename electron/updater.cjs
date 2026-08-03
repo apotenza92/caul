@@ -413,9 +413,7 @@ function createUpdaterService({
     lastResult = {
       ok: true,
       status: 'external',
-      message: platform === 'linux'
-        ? 'Opened the Caul release page. Upgrade this package with your system package manager.'
-        : 'Opened the Caul release page.'
+      message: getExternalInstallMessage(platform)
     };
     emitStatus();
     return status();
@@ -820,6 +818,12 @@ function configureUpdaterDownloadMode(
   return false;
 }
 
+function getExternalInstallMessage(platform) {
+  return platform === 'linux'
+    ? 'Opened the Caul package download. Download the package if needed, then install it manually with your system package manager.'
+    : 'Opened the Caul release page.';
+}
+
 function isVersionNewer(candidate, current) {
   return compareVersions(candidate, current) > 0;
 }
@@ -867,6 +871,7 @@ module.exports = {
   createUpdateInstallHandoffController,
   createUpdaterService,
   findTargetRelease,
+  getExternalInstallMessage,
   isUpdateSmokeDisabled,
   isLocalDevChannel,
   normaliseUpdaterReleaseNotes,

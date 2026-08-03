@@ -415,6 +415,20 @@ describe('macOS release contract', () => {
       version: '${{ steps.release.outputs.version }}'
     });
     expect(release.jobs.quality.with.ref).toBe('${{ needs.prepare.outputs.tag }}');
+    expect(release.jobs.quality.needs).toEqual(['prepare', 'macos-hardware-evidence']);
+    expect(release.jobs['macos-hardware-evidence']).toMatchObject({
+      needs: 'prepare',
+      'runs-on': 'ubuntu-24.04',
+      permissions: { contents: 'read' }
+    });
+    const hardwareEvidence = release.jobs['macos-hardware-evidence'].steps.find(
+      (step) => step.name === 'Require tested release commit'
+    );
+    expect(hardwareEvidence.env).toEqual({
+      HARDWARE_EVIDENCE_COMMIT: '${{ vars.CAUL_MACOS_HARDWARE_EVIDENCE_COMMIT }}',
+      RELEASE_COMMIT: '${{ github.sha }}'
+    });
+    expect(hardwareEvidence.run).toContain('HARDWARE_EVIDENCE_COMMIT" != "$RELEASE_COMMIT');
     const prepareCheckout = release.jobs.prepare.steps.find((step) => step.name === 'Checkout code');
     expect(prepareCheckout.with['fetch-depth']).toBe(0);
     const provenance = release.jobs.prepare.steps.find((step) => step.name === 'Verify tag commit is on main');
@@ -446,7 +460,8 @@ describe('macOS release contract', () => {
       'test-native-tuf-updater',
       'test-windows-upgrade',
       'test-linux-upgrade',
-      'test-linux-rpm-upgrade'
+      'test-linux-rpm-upgrade',
+      'macos-hardware-evidence'
     ]));
     expect(release.jobs['test-native-tuf-updater']).toMatchObject({
       needs: ['prepare', 'build-windows', 'build-linux'],

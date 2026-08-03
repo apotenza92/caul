@@ -43,11 +43,14 @@ function resolvePackageJson(name, searchPaths) {
 
 const tufPackageJson = require.resolve('tuf-js/package.json', { paths: [rootDir] });
 const tufPackage = JSON.parse(fs.readFileSync(tufPackageJson, 'utf8'));
+const tufModelsPackageJson = require.resolve('@tufjs/models/package.json', {
+  paths: [path.dirname(tufPackageJson)]
+});
 const tufRuntimePackages = [
   ['tuf-js', tufPackageJson, '5.0.1', 'MIT'],
   [
     '@tufjs/models',
-    require.resolve('@tufjs/models/package.json', { paths: [path.dirname(tufPackageJson)] }),
+    tufModelsPackageJson,
     '4.1.1',
     'MIT'
   ],
@@ -65,7 +68,7 @@ const tufRuntimePackages = [
   ],
   [
     'minimatch',
-    require.resolve('minimatch/package.json', { paths: [path.dirname(tufPackageJson)] }),
+    require.resolve('minimatch/package.json', { paths: [path.dirname(tufModelsPackageJson)] }),
     '10.2.5',
     'BlueOak-1.0.0'
   ]
