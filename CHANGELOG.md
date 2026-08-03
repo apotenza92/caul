@@ -2,7 +2,12 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.71]
+## [0.1.72]
+
+- Bound every Fedora RPM N-1 and public Linux package application launch with the shared packaged-launch verifier, and cap the complete Fedora gate at 15 minutes, preventing a successful release matrix from hanging indefinitely after the app has emitted valid smoke evidence.
+- Carries forward the complete desktop-playbook, shadcn/ui, security and native updater repairs from the unpublished 0.1.68 through 0.1.71 candidates.
+
+## [0.1.71] (unpublished release candidate)
 
 - Preserve compatibility with the public v0.1.43 updater surface while selecting the strict main application surface for current-package and post-update verification.
 - Carries forward the updater surface selection repair and all changes from the unpublished 0.1.68 through 0.1.70 candidates.

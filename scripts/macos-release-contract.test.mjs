@@ -511,6 +511,8 @@ describe('macOS release contract', () => {
     expect(source).toContain('Windows N-1 upgrade');
     expect(source).toContain('Linux N-1 upgrade');
     expect(source).toContain('Fedora x64 RPM N-1 upgrade');
+    expect(release.jobs['test-linux-rpm-upgrade']['timeout-minutes']).toBe(15);
+    expect(source).toContain('dnf install -y curl git gzip jq nodejs tar which xorg-x11-server-Xvfb');
     expect(source).toContain('candidate_paths="$(rpm -qlp "$candidate_package")"');
     expect(source).toContain("grep -q '^/usr/lib/\\.build-id/' <<<\"$candidate_paths\"");
     expect(source).toContain('dnf install -y "$prior_stable"');
@@ -523,6 +525,12 @@ describe('macOS release contract', () => {
       .toBeLessThan(source.indexOf('dnf install -y "$prior_beta"'));
     expect(source.indexOf('dnf install -y "$prior_beta"'))
       .toBeLessThan(source.indexOf('dnf install -y "$candidate_beta"'));
+    const rpmUpgradeJob = source.slice(
+      source.indexOf('  test-linux-rpm-upgrade:'),
+      source.indexOf('\n  seal-tuf:')
+    );
+    expect(rpmUpgradeJob.match(/node scripts\/verify-linux-packaged-launch\.mjs/g)).toHaveLength(4);
+    expect(source).not.toMatch(/xvfb-run -a caul(?:-beta)?\b/);
     expect(source).toContain('installed_paths="$(rpm -ql "$package_name")"');
     expect(source).toContain(
       'grep -qx "/usr/share/applications/$package_name.desktop" <<<"$installed_paths"'

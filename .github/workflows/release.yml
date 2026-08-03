@@ -833,6 +833,7 @@ jobs:
     name: Fedora x64 RPM N-1 upgrade
     needs: [prepare, build-linux]
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     container:
       image: fedora:42@sha256:99e203b80b1c3d8f7e161ec10a68fd02b081ef83a3963553e513c82846b97814
     permissions:
@@ -842,7 +843,7 @@ jobs:
         shell: bash
     steps:
       - name: Install Fedora verification tools
-        run: dnf install -y curl git gzip jq tar which xorg-x11-server-Xvfb
+        run: dnf install -y curl git gzip jq nodejs tar which xorg-x11-server-Xvfb
 
       - name: Checkout release source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -894,9 +895,6 @@ jobs:
 
       - name: Upgrade RPM packages while preserving integration and user data
         env:
-          CAUL_DISABLE_MODEL_AUTO_DOWNLOAD: "1"
-          CAUL_DISABLE_UPDATE_CHECKS: "1"
-          CAUL_PACKAGED_LAUNCH_SMOKE_MS: "250"
           CAUL_RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
@@ -930,7 +928,9 @@ jobs:
 
           if [[ "$CAUL_RELEASE_CHANNEL" == stable ]]; then
             dnf install -y "$prior_stable"
-            CAUL_USER_DATA_DIR="$stable_data" xvfb-run -a caul --no-sandbox
+            node scripts/verify-linux-packaged-launch.mjs \
+              --executable "$(command -v caul)" \
+              --user-data "$stable_data"
             printf 'stable-%s\n' "$PRIOR_TAG" > "$stable_data/rpm-upgrade-marker.txt"
             dnf install -y "$candidate_stable"
           fi
@@ -939,7 +939,9 @@ jobs:
           # links and cannot coexist. Upgrade stable to the corrected candidate
           # first, then migrate beta and prove both corrected packages coexist.
           dnf install -y "$prior_beta"
-          CAUL_USER_DATA_DIR="$beta_data" xvfb-run -a caul-beta --no-sandbox
+          node scripts/verify-linux-packaged-launch.mjs \
+            --executable "$(command -v caul-beta)" \
+            --user-data "$beta_data"
           printf 'beta-%s\n' "$PRIOR_TAG" > "$beta_data/rpm-upgrade-marker.txt"
           dnf install -y "$candidate_beta"
           for package_name in "${packages[@]}"; do
@@ -956,10 +958,14 @@ jobs:
             command -v "$package_name"
           done
           if [[ "$CAUL_RELEASE_CHANNEL" == stable ]]; then
-            CAUL_USER_DATA_DIR="$stable_data" xvfb-run -a caul --no-sandbox
+            node scripts/verify-linux-packaged-launch.mjs \
+              --executable "$(command -v caul)" \
+              --user-data "$stable_data"
             test "$(cat "$stable_data/rpm-upgrade-marker.txt")" = "stable-$PRIOR_TAG"
           fi
-          CAUL_USER_DATA_DIR="$beta_data" xvfb-run -a caul-beta --no-sandbox
+          node scripts/verify-linux-packaged-launch.mjs \
+            --executable "$(command -v caul-beta)" \
+            --user-data "$beta_data"
           test "$(cat "$beta_data/rpm-upgrade-marker.txt")" = "beta-$PRIOR_TAG"
 
           trap - EXIT
@@ -1571,10 +1577,14 @@ jobs:
           beta_data="$RUNNER_TEMP/public-caul-beta-user-data"
           mkdir -p "$stable_data" "$beta_data"
           if [[ "$CAUL_RELEASE_CHANNEL" == stable ]]; then
-            CAUL_USER_DATA_DIR="$stable_data" xvfb-run -a caul --no-sandbox
+            node scripts/verify-linux-packaged-launch.mjs \
+              --executable "$(command -v caul)" \
+              --user-data "$stable_data"
             command -v caul
           fi
-          CAUL_USER_DATA_DIR="$beta_data" xvfb-run -a caul-beta --no-sandbox
+          node scripts/verify-linux-packaged-launch.mjs \
+            --executable "$(command -v caul-beta)" \
+            --user-data "$beta_data"
           command -v caul-beta
           trap - EXIT
           cleanup
