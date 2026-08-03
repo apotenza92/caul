@@ -2,7 +2,12 @@
 
 All notable Caul changes are recorded here.
 
-## [0.1.69]
+## [0.1.70]
+
+- Make native updater tests launch and select the main application surface explicitly, instead of accidentally invoking application-only IPC from the onboarding or handle window.
+- Carries forward the packaged-renderer path canonicalisation and all repairs from the unpublished 0.1.68 and 0.1.69 candidates.
+
+## [0.1.69] (unpublished release candidate)
 
 - Preserve the strict packaged-renderer IPC boundary across macOS `/var` aliases and Windows 8.3 installation paths, while continuing to reject every other renderer file.
 - Carries forward the complete shadcn/ui Nova migration, desktop security hardening, interaction repairs and release guardrails from the unpublished 0.1.68 candidate.
