@@ -1,5 +1,5 @@
 Caul updater-feed publication bundle
-Tag: v0.1.72
-Commit: f04faff3f201521aec89337ba9745019c2b700e1
+Tag: v0.1.74
+Commit: 5ee79fc522fe6318b325da4484df52bd2cfa1090
 Channels: stable beta
 Publication: tag workflow after explicit final-publication approval
