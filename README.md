@@ -7,6 +7,6 @@
 </a>
 <br><br>
 
-Caul recommends the best setup for your computer, including local models for transcription and AI when they fit, with cloud AI available when that makes more sense.
+Caul is a desktop assistant for live calls. It turns your microphone and computer audio into a live transcript, then uses that transcript to answer questions in a small on-screen overlay.
 
 Caul is still early-stage, early-development software. Expect issues for now, and please report bugs or rough edges through [GitHub Issues](https://github.com/apotenza92/caul/issues).

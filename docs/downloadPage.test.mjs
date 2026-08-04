@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 const root = resolve(import.meta.dirname, '..');
 const html = readFileSync(resolve(root, 'docs/index.html'), 'utf8');
 const readme = readFileSync(resolve(root, 'README.md'), 'utf8');
-const productDescription = 'Caul recommends the best setup for your computer, including local models for transcription and AI when they fit, with cloud AI available when that makes more sense.';
+const productDescription = 'Caul is a desktop assistant for live calls. It turns your microphone and computer audio into a live transcript, then uses that transcript to answer questions in a small on-screen overlay.';
 
 async function loadDownloadPage({
   architecture = '',
