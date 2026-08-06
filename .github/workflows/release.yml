@@ -1197,6 +1197,32 @@ jobs:
           CAUL_RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
         run: node scripts/assemble-release-assets.mjs --input downloaded-artifacts --output release-assets --channel "$CAUL_RELEASE_CHANNEL"
 
+      - name: Stage deterministic tap-owned Homebrew bundle in the draft asset contract
+        env:
+          CAUL_RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
+          CAUL_RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p publication/Casks
+          node scripts/generate-homebrew-casks.mjs \
+            --channel "$CAUL_RELEASE_CHANNEL" \
+            --version "$CAUL_RELEASE_VERSION" \
+            --sha256sums release-assets/SHA256SUMS \
+            --output publication/Casks
+          node scripts/build-homebrew-publication.mjs \
+            --channel "$CAUL_RELEASE_CHANNEL" \
+            --version "$CAUL_RELEASE_VERSION" \
+            --assets release-assets \
+            --casks publication/Casks \
+            --output publication
+          (
+            cd publication
+            find manifest.json Casks -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum --check --strict SHA256SUMS
+          )
+          python3 scripts/create-homebrew-archive.py publication release-assets/homebrew-publication.tar.gz
+          (cd release-assets && sha256sum homebrew-publication.tar.gz >> SHA256SUMS)
+
       - name: Attest release assets
         uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
         with:
@@ -1756,28 +1782,18 @@ jobs:
               LC_ALL=C sort -z |
               xargs -0 shasum -a 256 > SHA256SUMS
             shasum -a 256 -c SHA256SUMS
-            tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
-              -czf ../homebrew-publication.tar.gz manifest.json SHA256SUMS Casks
           )
+          python3 scripts/create-homebrew-archive.py publication homebrew-publication.tar.gz
 
-      - name: Attest standard Homebrew publication bundle
-        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
-        with:
-          subject-path: homebrew-publication.tar.gz
-
-      - name: Attach exact bundle to the public release
+      - name: Verify exact pre-published attested bundle
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          existing="$(gh release view '${{ needs.prepare.outputs.tag }}' --json assets --jq '.assets[] | select(.name == "homebrew-publication.tar.gz") | .name')"
-          if [[ -n "$existing" ]]; then
-            mkdir existing-bundle
-            gh release download '${{ needs.prepare.outputs.tag }}' --pattern homebrew-publication.tar.gz --dir existing-bundle
-            cmp homebrew-publication.tar.gz existing-bundle/homebrew-publication.tar.gz
-          else
-            gh release upload '${{ needs.prepare.outputs.tag }}' homebrew-publication.tar.gz
-          fi
+          mkdir existing-bundle
+          gh release download '${{ needs.prepare.outputs.tag }}' --pattern homebrew-publication.tar.gz --dir existing-bundle
+          cmp homebrew-publication.tar.gz existing-bundle/homebrew-publication.tar.gz
+          gh attestation verify existing-bundle/homebrew-publication.tar.gz --repo "$GITHUB_REPOSITORY"
 
       - name: Upload Homebrew publication bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1876,28 +1892,18 @@ jobs:
               LC_ALL=C sort -z |
               xargs -0 shasum -a 256 > SHA256SUMS
             shasum -a 256 -c SHA256SUMS
-            tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
-              -czf ../homebrew-publication.tar.gz manifest.json SHA256SUMS Casks
           )
+          python3 scripts/create-homebrew-archive.py publication homebrew-publication.tar.gz
 
-      - name: Attest standard Homebrew publication bundle
-        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
-        with:
-          subject-path: homebrew-publication.tar.gz
-
-      - name: Attach exact bundle to the public release
+      - name: Verify exact pre-published attested bundle
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          existing="$(gh release view '${{ needs.prepare.outputs.tag }}' --json assets --jq '.assets[] | select(.name == "homebrew-publication.tar.gz") | .name')"
-          if [[ -n "$existing" ]]; then
-            mkdir existing-bundle
-            gh release download '${{ needs.prepare.outputs.tag }}' --pattern homebrew-publication.tar.gz --dir existing-bundle
-            cmp homebrew-publication.tar.gz existing-bundle/homebrew-publication.tar.gz
-          else
-            gh release upload '${{ needs.prepare.outputs.tag }}' homebrew-publication.tar.gz
-          fi
+          mkdir existing-bundle
+          gh release download '${{ needs.prepare.outputs.tag }}' --pattern homebrew-publication.tar.gz --dir existing-bundle
+          cmp homebrew-publication.tar.gz existing-bundle/homebrew-publication.tar.gz
+          gh attestation verify existing-bundle/homebrew-publication.tar.gz --repo "$GITHUB_REPOSITORY"
 
       - name: Upload Homebrew beta publication bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
