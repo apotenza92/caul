@@ -362,39 +362,27 @@ describe('macOS release contract', () => {
     const workflow = loadWorkflow('release.yml');
     expect(release).toContain('prepare-homebrew-publication:');
     expect(release).toContain('prepare-homebrew-beta-publication:');
+    expect(release).toContain('homebrew-publication.tar.gz');
     expect(release).not.toContain('HOMEBREW_TAP_TOKEN');
+    expect(release).not.toContain('HOMEBREW_TAP_DEPLOY_KEY');
     expect(release).not.toContain('PAGES_DEPLOY_KEY');
-    for (const [jobName, preparationJob, channel] of [
-      ['publish-homebrew-stable', 'prepare-homebrew-publication', 'stable'],
-      ['publish-homebrew-beta', 'prepare-homebrew-beta-publication', 'beta']
-    ]) {
-      const job = workflow.jobs[jobName];
-      expect(job.needs).toEqual([
-        'prepare',
-        preparationJob,
-        'verify-public-windows',
-        'verify-public-linux'
-      ]);
-      expect(job.if).toBe(`needs.prepare.outputs.channel == '${channel}'`);
-      expect(job.permissions).toEqual({ contents: 'read' });
-      const checkout = job.steps.find((step) => step.name === 'Checkout Homebrew tap');
-      expect(checkout.with).toMatchObject({
-        repository: 'apotenza92/homebrew-tap',
-        ref: 'main',
-        path: 'homebrew-tap',
-        'ssh-key': '${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}'
-      });
-      const publication = job.steps.at(-1).run;
-      expect(publication).toContain('sha256sum --check SHA256SUMS');
-      expect(publication).toContain(
-        String.raw`sed -n 's/^[[:space:]]*version "\([^"]*\)".*/\1/p'`
-      );
-      expect(publication).not.toContain(String.raw`version \"\\(`);
-      expect(publication).toContain('git diff --cached --check');
-      expect(publication).toContain('git push origin HEAD:main');
-      expect(publication).not.toContain('--force');
-      expect(publication).not.toContain('git add -A');
-    }
+    const job = workflow.jobs['dispatch-homebrew-publication'];
+    expect(job.needs).toEqual([
+      'prepare',
+      'prepare-homebrew-publication',
+      'prepare-homebrew-beta-publication',
+      'verify-public-windows',
+      'verify-public-linux'
+    ]);
+    expect(job.environment).toBe('homebrew-dispatch');
+    expect(job.permissions).toEqual({ contents: 'read' });
+    const mint = job.steps.find((step) => step.name === 'Mint dispatch-only tap token');
+    expect(mint.uses).toContain('actions/create-github-app-token@');
+    expect(mint.with.repositories).toBe('homebrew-tap');
+    const dispatch = job.steps.at(-1).run;
+    expect(dispatch).toContain('publish-homebrew-v1');
+    expect(dispatch).toContain('gh run watch');
+    expect(dispatch).not.toContain('git push');
   });
 
   it('serialises releases by selected tag and validates that exact ref', () => {
