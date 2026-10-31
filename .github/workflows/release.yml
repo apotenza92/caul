@@ -545,6 +545,7 @@ jobs:
         run: |
           set -euo pipefail
           brew tap apotenza92/tap
+          brew trust --tap apotenza92/tap
           cask='apotenza92/tap/caul'
           app='/Applications/Caul.app'
           [[ "$RELEASE_VARIANT" == beta ]] && cask='apotenza92/tap/caul@beta' && app='/Applications/Caul Beta.app'
@@ -1702,6 +1703,7 @@ jobs:
           BETA_SHA256="${{ steps.hashes.outputs.BETA_SHA256 }}"
 
           brew tap apotenza92/tap
+          brew trust --tap apotenza92/tap
           TAP_PATH="$(brew --repository apotenza92/tap)"
           cd "$TAP_PATH"
           rm -f Casks/susura.rb 'Casks/susura@beta.rb'
@@ -1844,6 +1846,7 @@ jobs:
           BETA_SHA256="${{ steps.hashes.outputs.BETA_SHA256 }}"
 
           brew tap apotenza92/tap
+          brew trust --tap apotenza92/tap
           TAP_PATH="$(brew --repository apotenza92/tap)"
           cd "$TAP_PATH"
           rm -f 'Casks/susura@beta.rb'

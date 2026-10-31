@@ -500,6 +500,7 @@ describe('macOS release contract', () => {
     expect(source).not.toContain('--method DELETE');
     expect(source).toContain('generate-homebrew-casks.mjs');
     expect(source).toContain('brew tap apotenza92/tap');
+    expect(source).toContain('brew trust --tap apotenza92/tap');
     expect(source).toContain('brew --repository apotenza92/tap');
     expect(source).not.toContain('cat > Casks/caul.rb');
     expect(source).not.toContain("cat > 'Casks/caul@beta.rb'");
