@@ -284,7 +284,7 @@ describe('download page hero autodetect', () => {
       dom.window.setTimeout(resolveTick, 0);
     });
 
-    expect(document.getElementById('homebrew-code').textContent).toContain('brew trust apotenza92/tap && brew install --cask apotenza92/tap/caul');
+    expect(document.getElementById('homebrew-code').textContent).toContain('brew trust apotenza92/tap 2>/dev/null; brew install --cask apotenza92/tap/caul');
     expect(execCommandName).toBe('copy');
     expect(document.getElementById('homebrew-copy').textContent).toContain('Copied');
   });
